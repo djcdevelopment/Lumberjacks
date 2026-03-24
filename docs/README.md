@@ -1,4 +1,4 @@
-﻿# Community Survival Platform Docs
+# Community Survival Platform Docs
 
 This planning set turns the platform vision into a concrete starting package.
 
@@ -26,9 +26,9 @@ ADRs:
 
 - [ADR 0001: Thin Client Platform](./adrs/0001-thin-client-platform.md)
 - [ADR 0002: Edge Nodes Assist But Do Not Own Truth](./adrs/0002-edge-nodes-assist-but-do-not-own-truth.md)
-- [ADR 0003: WebSocket Transport](./adrs/0003-websocket-transport.md)
+- [ADR 0003: Multi-Lane Transport Strategy](./adrs/0003-websocket-transport.md)
 - [ADR 0004: PostgreSQL Event Log](./adrs/0004-postgresql-event-log.md)
-- [ADR 0005: TypeScript Node.js Backend](./adrs/0005-typescript-nodejs-backend.md)
+- [ADR 0005: .NET as Authoritative Backend Runtime](./adrs/0005-dotnet-authoritative-backend-runtime.md)
 
 Templates:
 

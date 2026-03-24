@@ -1,4 +1,4 @@
-# ADR 0003: WebSocket as Initial Transport
+# ADR 0003: Multi-Lane Transport Strategy
 
 ## Status
 
@@ -6,53 +6,106 @@ Accepted
 
 ## Context
 
-The platform needs a real-time bidirectional transport between game clients and the gateway service. ADR 0001 established that the client is a thin shell and the server owns truth, which means the transport must support:
+The platform needs a real-time transport strategy between game clients and the gateway service. ADR 0001 established that the client is a thin shell and the server owns truth, which means the transport must support:
 
-- low-latency bidirectional messaging for movement, placement, and world updates
-- a structured envelope format (defined in `packages/protocol`)
-- compatibility with multiple client engines (Unity, Godot, or future replacements)
-- browser support for the admin-web client and future web-based tools
+- low-latency bidirectional communication for movement, placement, and world updates
+- explicit separation between authoritative state and disposable transient state
+- compatibility with multiple client engines, including Godot and future replacements
+- graceful degradation on weak links as a minimum playable requirement
+- a migration path toward QUIC-based transport without forcing the first playable slice to depend on a single browser API
 
-The platform's interest management and activation tier systems will generate variable message rates per region, so the transport must handle bursty traffic without requiring full protocol redesigns later.
+The platform's interest management and activation tier systems will generate variable message rates per region, and hotspot zones will produce bursty traffic under stress. The transport decision must preserve fairness while allowing degraded quality when the network or region is overloaded.
 
 ## Decision
 
-Use WebSocket (RFC 6455) over TCP as the initial client-server transport.
+Adopt a dual-lane transport model from day one:
 
-The protocol layer (`packages/protocol`) wraps all messages in versioned envelopes with JSON serialization. The envelope format is transport-agnostic â€” switching serialization (to MessagePack, FlatBuffers, or Protobuf) or transport (to WebTransport, QUIC, or raw UDP) requires changes only at the serialization and connection layers, not at the message contract level.
+1. A reliable, ordered lane for authoritative and user-visible state.
+2. An unreliable, best-effort datagram lane for time-sensitive state that can be dropped or superseded.
+
+The protocol layer must remain transport-agnostic. Message classes are defined by delivery semantics, not by a single network API.
+
+For the first playable slice:
+
+- WebSocket over TCP is the default implementation for the reliable lane.
+- The envelope format in `packages/protocol` must not become coupled to WebSocket-specific assumptions.
+- UDP or QUIC-backed datagram transport may be introduced behind the same message classes when the client and server path is ready.
+
+WebTransport over HTTP/3 remains the intended long-term browser-facing transport because it supports both reliable streams and unreliable datagrams over a single secure connection. It is not required as the only transport for the first playable slice.
+
+## Transport Classes
+
+### Reliable lane
+
+Use for:
+
+- authentication and session bootstrap
+- chat and operator-visible actions
+- inventory changes
+- crafting results
+- progression updates
+- structure placement confirmation
+- authoritative corrections and rollback instructions
+
+Requirements:
+
+- ordered delivery
+- retry semantics
+- auditability
+- strong observability
+
+### Datagram lane
+
+Use for:
+
+- movement inputs
+- aim and facing updates
+- transient physics hints
+- proximity and relevance updates
+- rapidly superseded world-state deltas
+
+Requirements:
+
+- low latency
+- no assumption of arrival
+- no assumption of order
+- messages must be idempotent, supersedable, or safely discardable
 
 ## Consequences
 
 Positive:
-- works in every game engine (Unity, Godot, Unreal all have WebSocket support)
-- works in browsers (admin-web, debug tools, bot harnesses)
-- simple to implement and debug in early development
-- TLS support via standard wss:// for production
-- compatible with standard load balancers and reverse proxies
+- supports a dialup-style minimum viable network target
+- keeps protocol design honest about delivery guarantees
+- avoids a rewrite from everything being a reliable socket message later
+- creates a direct migration path to QUIC or WebTransport without forcing it before the stack is ready
+- lets the platform degrade quality before it degrades authority
 
 Negative:
-- TCP head-of-line blocking under packet loss (matters for movement updates at high density)
-- no native unreliable channel (every message is ordered and guaranteed)
-- higher overhead than raw UDP or custom binary protocols
+- requires message taxonomy discipline early
+- requires two delivery semantics in client and server code
+- increases test coverage needs for loss, reordering, and fallback behavior
+- adds more design pressure to classify messages correctly before implementation sprawls
 
 ## Upgrade Path
 
-When the platform reaches density thresholds where TCP head-of-line blocking measurably degrades the player experience (likely the 40+ player spawn island scenario), the transport can be upgraded:
+When density or packet-loss conditions measurably degrade player experience, the transport can evolve without changing the message contract:
 
-1. **WebTransport** â€” HTTP/3-based, supports unreliable datagrams, works in browsers
-2. **ENet or custom UDP** â€” traditional game networking for native clients only
-3. **Hybrid** â€” WebSocket for reliable channels (chat, inventory, progression), UDP for unreliable channels (movement, interpolation hints)
+1. **WebTransport** — HTTP/3-based, supports reliable streams plus unreliable datagrams for browser-facing clients.
+2. **UDP or QUIC-native transport** — for native clients and server-hosted datagram lanes.
+3. **Hybrid transport** — reliable control and commitment traffic on WebSocket or streams, transient traffic on datagrams.
 
-The envelope format in `packages/protocol` is designed to survive this transition. A new ADR should be written before any transport change.
+The protocol contract in `packages/protocol` is expected to survive this transition. A new ADR should be written before introducing a production transport beyond the initial WebSocket path.
 
 ## Alternatives Considered
 
-- **WebTransport**: Better theoretical fit for game traffic but ecosystem support is still maturing. Unity and Godot support is experimental. Revisit when v0 density testing reveals TCP as a bottleneck.
-- **Raw TCP with custom framing**: More control but loses browser compatibility and adds protocol maintenance burden with no clear upside at this scale.
-- **gRPC streaming**: Good for service-to-service but adds complexity and tooling weight for client connections with no benefit over WebSocket at this stage.
+- **WebSocket only**: Simple, but collapses authoritative and transient traffic into one ordered stream and bakes TCP head-of-line blocking into the design.
+- **WebTransport only**: Strong long-term fit, but ecosystem maturity and client support are not reliable enough to make it the sole requirement for the first playable slice.
+- **Raw UDP only**: Better for some game traffic, but loses easy browser compatibility and makes the reliable lane more expensive to rebuild.
+- **gRPC streaming**: Good for service-to-service traffic, but not a strong fit for client transport semantics at this stage.
 
 ## Follow-Up Work
 
-- Define message compression strategy for high-density regions
-- Benchmark WebSocket throughput under simulated 40-player spawn island load
-- Evaluate WebTransport readiness when client engine is selected
+- classify all protocol messages by reliable vs datagram delivery semantics
+- define sequencing, acknowledgement, and correction rules at the envelope layer
+- benchmark WebSocket reliability behavior under constrained-network and hotspot scenarios
+- evaluate HTTP/3 and QUIC readiness once the first client slice is running
