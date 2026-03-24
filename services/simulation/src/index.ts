@@ -1,5 +1,5 @@
 import express from 'express'
-import type { Region, Player, Vec3 } from '@game/schemas'
+import type { Region, Player } from '@game/schemas'
 
 const PORT = Number(process.env.SIMULATION_PORT) || 4001
 
@@ -42,10 +42,7 @@ app.get('/players', (_req, res) => {
 // Simulation tick loop
 const TICK_RATE = 20
 const TICK_MS = 1000 / TICK_RATE
-let tickCount = 0
-
 function tick() {
-  tickCount++
   // TODO: Process movement, resolve placements, emit events
   // This is where interest management, activation tiers, and
   // authoritative state resolution will live

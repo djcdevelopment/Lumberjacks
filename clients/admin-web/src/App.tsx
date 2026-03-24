@@ -107,7 +107,9 @@ function App() {
             {events.length === 0 ? (
               <p>No events recorded yet.</p>
             ) : (
-              <pre style={{ background: '#161b22', padding: 16, borderRadius: 6, overflow: 'auto' }}>
+              <pre
+                style={{ background: '#161b22', padding: 16, borderRadius: 6, overflow: 'auto' }}
+              >
                 {JSON.stringify(events, null, 2)}
               </pre>
             )}
@@ -120,7 +122,9 @@ function App() {
             {regions.length === 0 ? (
               <p>No regions loaded.</p>
             ) : (
-              <pre style={{ background: '#161b22', padding: 16, borderRadius: 6, overflow: 'auto' }}>
+              <pre
+                style={{ background: '#161b22', padding: 16, borderRadius: 6, overflow: 'auto' }}
+              >
                 {JSON.stringify(regions, null, 2)}
               </pre>
             )}
@@ -131,9 +135,7 @@ function App() {
           <p style={{ color: '#8b949e' }}>Player inspection coming soon.</p>
         )}
 
-        {activeTab === 'guilds' && (
-          <p style={{ color: '#8b949e' }}>Guild progress coming soon.</p>
-        )}
+        {activeTab === 'guilds' && <p style={{ color: '#8b949e' }}>Guild progress coming soon.</p>}
       </main>
     </div>
   )

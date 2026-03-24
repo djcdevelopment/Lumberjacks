@@ -3,8 +3,6 @@ import pg from 'pg'
 import { EventType } from '@game/schemas'
 
 const PORT = Number(process.env.PROGRESSION_PORT) || 4003
-const EVENT_LOG_URL = process.env.EVENT_LOG_URL || 'http://localhost:4002'
-
 const pool = new pg.Pool({
   host: process.env.PGHOST || 'localhost',
   port: Number(process.env.PGPORT) || 5432,
