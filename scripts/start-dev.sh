@@ -12,13 +12,13 @@ echo "  Operator API: http://localhost:4004"
 echo "  Admin Web:    http://localhost:5173"
 echo ""
 
-# Start all services
+# Start .NET services + admin-web
 npx concurrently \
   --names "gateway,sim,events,progress,op-api,admin" \
   --prefix-colors "blue,green,yellow,magenta,cyan,white" \
-  "npm run dev -w @game/gateway" \
-  "npm run dev -w @game/simulation" \
-  "npm run dev -w @game/event-log" \
-  "npm run dev -w @game/progression" \
-  "npm run dev -w @game/operator-api" \
+  "dotnet run --project src/Game.Gateway" \
+  "dotnet run --project src/Game.Simulation" \
+  "dotnet run --project src/Game.EventLog" \
+  "dotnet run --project src/Game.Progression" \
+  "dotnet run --project src/Game.OperatorApi" \
   "npm run dev -w @game/admin-web"

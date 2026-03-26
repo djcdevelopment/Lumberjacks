@@ -12,3 +12,9 @@ coverage/
 .claude/
 .env.example
 !.env.example
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
