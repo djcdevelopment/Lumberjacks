@@ -19,7 +19,7 @@ const WebSocket = require("ws");
 
 const PLAYER_COUNT = parseInt(process.argv[2]) || 5;
 const GATEWAY = process.argv[3] || "ws://localhost:4000";
-const SIM = GATEWAY.replace("ws://", "http://").replace("wss://", "https://").replace(":4000", ":4001");
+const SIM = GATEWAY.replace("ws://", "http://").replace("wss://", "https://");
 const PROGRESSION = GATEWAY.replace("ws://", "http://").replace("wss://", "https://").replace(":4000", ":4003");
 
 const guildId = "guild-mp-" + Math.random().toString(36).slice(2, 8);

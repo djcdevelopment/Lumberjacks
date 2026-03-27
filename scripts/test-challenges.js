@@ -1,7 +1,7 @@
 /**
  * End-to-end test: Inventory + Guild Challenge system
  *
- * Prerequisites: All 5 .NET services running on ports 4000-4004, Postgres on 5432
+ * Prerequisites: All 5 .NET services running on ports 4000-4004, Postgres on 5433
  *
  * Flow:
  * 1. Create a guild challenge: "Place 3 structures" → awards 50 guild points
@@ -13,7 +13,7 @@
 
 const WebSocket = require("ws");
 
-const SIM = "http://localhost:4001";
+const SIM = "http://localhost:4000";
 const PROGRESSION = "http://localhost:4003";
 const GATEWAY = "ws://localhost:4000";
 

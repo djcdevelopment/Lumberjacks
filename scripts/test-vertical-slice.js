@@ -43,7 +43,7 @@ ws.on('message', (data) => {
         setTimeout(async () => {
             try {
                 // Check structures in simulation
-                const structRes = await fetch('http://localhost:4001/structures?region_id=region-spawn');
+                const structRes = await fetch('http://localhost:4000/structures?region_id=region-spawn');
                 const structures = await structRes.json();
                 console.log(`\n[5] Structures in region: ${structures.length}`);
 

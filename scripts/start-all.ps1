@@ -1,8 +1,7 @@
 Write-Host "=== Community Survival Platform - Local Dev ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Starting .NET services and admin-web..." -ForegroundColor Green
-Write-Host "  Gateway:      http://localhost:4000  (+ WebSocket)"
-Write-Host "  Simulation:   http://localhost:4001"
+Write-Host "  Gateway:      http://localhost:4000  (+ WebSocket + in-process Simulation)"
 Write-Host "  Event Log:    http://localhost:4002"
 Write-Host "  Progression:  http://localhost:4003"
 Write-Host "  Operator API: http://localhost:4004"
@@ -11,7 +10,6 @@ Write-Host ""
 
 $services = @(
     @{ Name = "Gateway";    Project = "src/Game.Gateway" },
-    @{ Name = "Simulation"; Project = "src/Game.Simulation" },
     @{ Name = "EventLog";   Project = "src/Game.EventLog" },
     @{ Name = "Progression";Project = "src/Game.Progression" },
     @{ Name = "OperatorApi"; Project = "src/Game.OperatorApi" }

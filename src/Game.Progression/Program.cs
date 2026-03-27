@@ -8,7 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 builder.Services.AddDbContext<GameDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("GameDb")
-        ?? "Host=localhost;Database=game;Username=game;Password=game"));
+        ?? "Host=localhost;Port=5433;Database=game;Username=game;Password=game"));
 builder.Services.AddScoped<ChallengeEngine>();
 
 var app = builder.Build();

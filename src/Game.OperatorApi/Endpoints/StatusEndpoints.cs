@@ -11,7 +11,7 @@ public static class StatusEndpoints
             var services = new[]
             {
                 new ServiceHealth("gateway", config["ServiceUrls:Gateway"] ?? "http://localhost:4000"),
-                new ServiceHealth("simulation", config["ServiceUrls:Simulation"] ?? "http://localhost:4001"),
+                new ServiceHealth("simulation", config["ServiceUrls:Gateway"] ?? "http://localhost:4000"),
                 new ServiceHealth("event-log", config["ServiceUrls:EventLog"] ?? "http://localhost:4002"),
                 new ServiceHealth("progression", config["ServiceUrls:Progression"] ?? "http://localhost:4003"),
             };

@@ -7,9 +7,11 @@ public static class ProxyEndpoints
 {
     public static void Map(WebApplication app)
     {
+        // Simulation endpoints proxy to Gateway (which runs the simulation in-process)
+        // rather than the standalone Simulation service.
         app.MapGet("/api/regions", async (IHttpClientFactory httpFactory, IConfiguration config) =>
         {
-            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var url = config["ServiceUrls:Gateway"] ?? "http://localhost:4000";
             var client = httpFactory.CreateClient();
             var response = await client.GetAsync($"{url}/regions");
             var content = await response.Content.ReadAsStringAsync();
@@ -18,7 +20,7 @@ public static class ProxyEndpoints
 
         app.MapGet("/api/players", async (IHttpClientFactory httpFactory, IConfiguration config) =>
         {
-            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var url = config["ServiceUrls:Gateway"] ?? "http://localhost:4000";
             var client = httpFactory.CreateClient();
             var response = await client.GetAsync($"{url}/players");
             var content = await response.Content.ReadAsStringAsync();
@@ -37,7 +39,7 @@ public static class ProxyEndpoints
 
         app.MapGet("/api/structures", async (HttpContext context, IHttpClientFactory httpFactory, IConfiguration config) =>
         {
-            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var url = config["ServiceUrls:Gateway"] ?? "http://localhost:4000";
             var client = httpFactory.CreateClient();
             var queryString = context.Request.QueryString;
             var response = await client.GetAsync($"{url}/structures{queryString}");
@@ -54,20 +56,20 @@ public static class ProxyEndpoints
             return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
         });
 
-        // Tick diagnostics (proxied from Simulation)
+        // Tick diagnostics (proxied from Gateway's in-process simulation)
         app.MapGet("/api/tick", async (IHttpClientFactory httpFactory, IConfiguration config) =>
         {
-            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var url = config["ServiceUrls:Gateway"] ?? "http://localhost:4000";
             var client = httpFactory.CreateClient();
             var response = await client.GetAsync($"{url}/tick");
             var content = await response.Content.ReadAsStringAsync();
             return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
         });
 
-        // Create region (proxied to Simulation)
+        // Create region (proxied to Gateway's in-process simulation)
         app.MapPost("/api/regions", async (HttpContext context, IHttpClientFactory httpFactory, IConfiguration config) =>
         {
-            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var url = config["ServiceUrls:Gateway"] ?? "http://localhost:4000";
             var client = httpFactory.CreateClient();
             var body = await new StreamReader(context.Request.Body).ReadToEndAsync();
             var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
@@ -76,10 +78,10 @@ public static class ProxyEndpoints
             return Results.Content(result, "application/json", statusCode: (int)response.StatusCode);
         });
 
-        // Delete region (proxied to Simulation)
+        // Delete region (proxied to Gateway's in-process simulation)
         app.MapDelete("/api/regions/{id}", async (string id, IHttpClientFactory httpFactory, IConfiguration config) =>
         {
-            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var url = config["ServiceUrls:Gateway"] ?? "http://localhost:4000";
             var client = httpFactory.CreateClient();
             var response = await client.DeleteAsync($"{url}/regions/{id}");
             var result = await response.Content.ReadAsStringAsync();

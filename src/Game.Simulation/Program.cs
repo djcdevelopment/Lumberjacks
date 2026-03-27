@@ -19,7 +19,7 @@ builder.Services.AddScoped<Game.Simulation.Startup.StructureLoader>();
 builder.Services.AddScoped<Game.Simulation.Startup.RegionLoader>();
 builder.Services.AddDbContextFactory<GameDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("GameDb")
-        ?? "Host=localhost;Database=game;Username=game;Password=game"));
+        ?? "Host=localhost;Port=5433;Database=game;Username=game;Password=game"));
 
 var app = builder.Build();
 

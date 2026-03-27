@@ -118,7 +118,7 @@ async function main() {
 
     // Step 6: Check simulation state
     console.log('[7] Checking simulation state...');
-    const playersRes = await fetch('http://localhost:4001/players');
+    const playersRes = await fetch('http://localhost:4000/players');
     const players = await playersRes.json();
     console.log(`    Players in world: ${players.length}`);
     for (const p of players) {
@@ -126,7 +126,7 @@ async function main() {
     }
 
     // Step 7: Check region player count
-    const regionsRes = await fetch('http://localhost:4001/regions');
+    const regionsRes = await fetch('http://localhost:4000/regions');
     const regions = await regionsRes.json();
     console.log(`    ${regions[0].name} player count: ${regions[0].player_count}\n`);
 
@@ -140,10 +140,10 @@ async function main() {
     console.log(`    Player B saw A leave: ${bGotRemove ? 'YES' : 'NO'}`);
 
     // Check simulation cleaned up
-    const playersAfter = await (await fetch('http://localhost:4001/players')).json();
+    const playersAfter = await (await fetch('http://localhost:4000/players')).json();
     console.log(`    Players remaining: ${playersAfter.length}`);
 
-    const regionsAfter = await (await fetch('http://localhost:4001/regions')).json();
+    const regionsAfter = await (await fetch('http://localhost:4000/regions')).json();
     console.log(`    Region player count: ${regionsAfter[0].player_count}`);
 
     // Step 9: Check events

@@ -16,12 +16,21 @@ To build and run the platform locally, you must install:
 
 ## Local Development & Smoke Testing
 1. **Install dependencies:** `npm install`
-2. **Boot the infrastructure (PostgreSQL):** `npm run dev:infra` *(stop it via `npm run dev:stop-infra`)*
+2. **Boot the infrastructure (PostgreSQL on port 5433):** `npm run dev:infra` *(stop it via `npm run dev:stop-infra`)*
 3. **Build the .NET services:** `npm run build:dotnet`
 4. **Verify unit tests:** `npm run test:dotnet` *(Expected: 157+ passing tests, 0 failures).*
 5. **Run the full stack natively:** `npm run dev`
-   *This concurrently starts the Gateway (port 4000 for WS, 4005 for UDP), Simulation, EventLog, Progression, OperatorApi, and Admin UI.*
+   *This concurrently starts the Gateway (port 4000 — WS, UDP :4005, and in-process Simulation), EventLog, Progression, OperatorApi, and Admin UI.*
 6. **End-to-End Smoke Testing:** With the stack running, execute `node scripts/test-vertical-slice.js` or `node scripts/test-multiplayer.js` in a new terminal to simulate clients connecting, dropping inputs, and validating server constraints.
+
+> **Note:** PostgreSQL runs on port **5433** (not the default 5432) to avoid conflicts with other local Postgres instances. The `dev:infra` script starts only the Postgres container. To run the full stack in Docker instead, use `npm run dev:docker`.
+
+### Stopping Services
+```bash
+# From PowerShell — kill any stale .NET processes before restarting:
+taskkill /F /IM dotnet.exe /IM Game.Gateway.exe /IM Game.EventLog.exe /IM Game.Progression.exe /IM Game.OperatorApi.exe /IM Game.Simulation.exe
+npm run dev:stop-infra
+```
 
 ## Architecture Decision Records (ADRs)
 We document our core architecture decisions in `docs/adrs/`. Key ones include:
