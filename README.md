@@ -28,6 +28,7 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
   - Dual-Channel transport (WebSocket reliable lane + UDP datagram lane on port 4005)
 
 ## Retro Results (2026-03-26)
+*(See [docs/simulation-retrospective-2026-03-26.md](docs/simulation-retrospective-2026-03-26.md) for full details)*
 - The network infrastructure refactor was completed smoothly.
 - **Testing:** 157 tests across `Contracts` and `Simulation` are passing perfectly (0 failures, 0 errors).
 - **Performance:** Massive bandwidth savings achieved (`PlayerInput` reduced by 96%, `EntityUpdate` by 84%). 
