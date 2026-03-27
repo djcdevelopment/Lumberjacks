@@ -7,7 +7,14 @@ public record Player
     public string? GuildId { get; init; }
     public int Rank { get; init; }
     public required Vec3 Position { get; init; }
+    public Vec3 Velocity { get; init; }
+    /// <summary>Heading in degrees (0-360). Updated from input Direction.</summary>
+    public double Heading { get; init; }
+    /// <summary>Last processed input sequence number (echoed back to client for prediction).</summary>
+    public ushort LastInputSeq { get; init; }
     public required string RegionId { get; init; }
     public bool Connected { get; init; }
     public DateTimeOffset? ConnectedAt { get; init; }
+    public DateTimeOffset LastActivityAt { get; init; } = DateTimeOffset.UtcNow;
 }
+

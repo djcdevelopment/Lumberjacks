@@ -48,26 +48,24 @@ public static class ProgressEndpoints
                 {
                     if (!string.IsNullOrEmpty(request.ActorId))
                     {
-                        var player = await db.PlayerProgress.FindAsync(request.ActorId);
-                        if (player is null)
-                        {
-                            player = new PlayerProgressEntity { PlayerId = request.ActorId };
-                            db.PlayerProgress.Add(player);
-                        }
-                        player.Points += 1;
-                        player.UpdatedAt = DateTimeOffset.UtcNow;
+                        await db.Database.ExecuteSqlInterpolatedAsync($@"
+                            INSERT INTO player_progress (player_id, points, rank, updated_at)
+                            VALUES ({request.ActorId}, 1, 0, now())
+                            ON CONFLICT (player_id)
+                            DO UPDATE SET
+                                points = player_progress.points + 1,
+                                updated_at = now()");
                     }
 
                     if (!string.IsNullOrEmpty(request.GuildId))
                     {
-                        var guild = await db.GuildProgress.FindAsync(request.GuildId);
-                        if (guild is null)
-                        {
-                            guild = new GuildProgressEntity { GuildId = request.GuildId };
-                            db.GuildProgress.Add(guild);
-                        }
-                        guild.Points += 1;
-                        guild.UpdatedAt = DateTimeOffset.UtcNow;
+                        await db.Database.ExecuteSqlInterpolatedAsync($@"
+                            INSERT INTO guild_progress (guild_id, points, challenges_completed, updated_at)
+                            VALUES ({request.GuildId}, 1, 0, now())
+                            ON CONFLICT (guild_id)
+                            DO UPDATE SET
+                                points = guild_progress.points + 1,
+                                updated_at = now()");
                     }
                 }
                 else if (request.EventType == EventType.PlayerRankChanged)
@@ -77,18 +75,15 @@ public static class ProgressEndpoints
                         request.Payload.TryGetProperty("new_rank", out var rankEl) &&
                         rankEl.TryGetInt32(out var newRank))
                     {
-                        var player = await db.PlayerProgress.FindAsync(request.ActorId);
-                        if (player is null)
-                        {
-                            player = new PlayerProgressEntity { PlayerId = request.ActorId };
-                            db.PlayerProgress.Add(player);
-                        }
-                        player.Rank = newRank;
-                        player.UpdatedAt = DateTimeOffset.UtcNow;
+                        await db.Database.ExecuteSqlInterpolatedAsync($@"
+                            INSERT INTO player_progress (player_id, points, rank, updated_at)
+                            VALUES ({request.ActorId}, 0, {newRank}, now())
+                            ON CONFLICT (player_id)
+                            DO UPDATE SET
+                                rank = {newRank},
+                                updated_at = now()");
                     }
                 }
-
-                await db.SaveChangesAsync();
 
                 // Evaluate challenges for this event
                 var completions = await challengeEngine.EvaluateAsync(

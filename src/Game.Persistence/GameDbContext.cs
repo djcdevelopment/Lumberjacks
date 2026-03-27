@@ -17,6 +17,7 @@ public class GameDbContext : DbContext
     public DbSet<ContainerItemEntity> ContainerItems => Set<ContainerItemEntity>();
     public DbSet<ChallengeEntity> Challenges => Set<ChallengeEntity>();
     public DbSet<ChallengeProgressEntity> ChallengeProgress => Set<ChallengeProgressEntity>();
+    public DbSet<RegionEntity> Regions => Set<RegionEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -149,6 +150,23 @@ public class GameDbContext : DbContext
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.HasIndex(x => x.TriggerEvent);
             e.HasIndex(x => x.Active);
+        });
+
+        modelBuilder.Entity<RegionEntity>(e =>
+        {
+            e.ToTable("regions");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.Name).HasColumnName("name");
+            e.Property(x => x.BoundsMinX).HasColumnName("bounds_min_x");
+            e.Property(x => x.BoundsMinY).HasColumnName("bounds_min_y");
+            e.Property(x => x.BoundsMinZ).HasColumnName("bounds_min_z");
+            e.Property(x => x.BoundsMaxX).HasColumnName("bounds_max_x");
+            e.Property(x => x.BoundsMaxY).HasColumnName("bounds_max_y");
+            e.Property(x => x.BoundsMaxZ).HasColumnName("bounds_max_z");
+            e.Property(x => x.Active).HasColumnName("active");
+            e.Property(x => x.TickRate).HasColumnName("tick_rate");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
         });
 
         modelBuilder.Entity<ChallengeProgressEntity>(e =>

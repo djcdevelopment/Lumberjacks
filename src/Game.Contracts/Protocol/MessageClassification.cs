@@ -17,9 +17,12 @@ public static class MessageClassification
         [MessageType.EventEmitted] = DeliveryLane.Reliable,
         [MessageType.Error] = DeliveryLane.Reliable,
 
+        // Reliable: world_snapshot is full state transfer — must arrive
+        [MessageType.WorldSnapshot] = DeliveryLane.Reliable,
+
         // Datagram: transient, supersedable, safely discardable
         [MessageType.PlayerMove] = DeliveryLane.Datagram,
-        [MessageType.WorldSnapshot] = DeliveryLane.Datagram,
+        [MessageType.PlayerInput] = DeliveryLane.Datagram,
         [MessageType.EntityUpdate] = DeliveryLane.Datagram,
         [MessageType.EntityRemoved] = DeliveryLane.Datagram,
     };

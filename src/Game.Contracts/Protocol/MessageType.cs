@@ -6,6 +6,7 @@ public static class MessageType
     public const string JoinRegion = "join_region";
     public const string LeaveRegion = "leave_region";
     public const string PlayerMove = "player_move";
+    public const string PlayerInput = "player_input";
     public const string PlaceStructure = "place_structure";
     public const string Interact = "interact";
 

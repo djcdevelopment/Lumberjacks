@@ -10,6 +10,18 @@ public class WorldState
     public ConcurrentDictionary<string, Structure> Structures { get; } = new();
     public ConcurrentDictionary<string, WorldItem> WorldItems { get; } = new();
 
+    /// <summary>Monotonically increasing tick counter, incremented by TickLoop at 20Hz.</summary>
+    public long CurrentTick { get; set; }
+
+    /// <summary>When the tick loop started (for uptime reporting).</summary>
+    public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>CRC32 hash of world state at the last tick. Used for desync detection.</summary>
+    public uint LastStateHash { get; set; }
+
+    /// <summary>Spatial index for fast radius queries. Updated by SimulationStep and PlayerHandler.</summary>
+    public SpatialGrid SpatialGrid { get; } = new();
+
     public WorldState()
     {
         // Seed with default spawn region matching TS service

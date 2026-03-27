@@ -54,6 +54,38 @@ public static class ProxyEndpoints
             return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
         });
 
+        // Tick diagnostics (proxied from Simulation)
+        app.MapGet("/api/tick", async (IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var client = httpFactory.CreateClient();
+            var response = await client.GetAsync($"{url}/tick");
+            var content = await response.Content.ReadAsStringAsync();
+            return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
+        });
+
+        // Create region (proxied to Simulation)
+        app.MapPost("/api/regions", async (HttpContext context, IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var client = httpFactory.CreateClient();
+            var body = await new StreamReader(context.Request.Body).ReadToEndAsync();
+            var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+            var response = await client.PostAsync($"{url}/regions", content);
+            var result = await response.Content.ReadAsStringAsync();
+            return Results.Content(result, "application/json", statusCode: (int)response.StatusCode);
+        });
+
+        // Delete region (proxied to Simulation)
+        app.MapDelete("/api/regions/{id}", async (string id, IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
+            var client = httpFactory.CreateClient();
+            var response = await client.DeleteAsync($"{url}/regions/{id}");
+            var result = await response.Content.ReadAsStringAsync();
+            return Results.Content(result, "application/json", statusCode: (int)response.StatusCode);
+        });
+
         app.MapGet("/api/guilds", async (GameDbContext db) =>
         {
             var guilds = await db.GuildProgress

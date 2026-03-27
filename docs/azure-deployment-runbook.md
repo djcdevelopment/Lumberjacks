@@ -1,0 +1,506 @@
+# Azure Deployment Runbook
+
+Step-by-step instructions to deploy the game backend to Azure Container Apps, smoke test it, and scale it.
+
+## Prerequisites
+
+- Azure CLI installed and logged in (`az login`)
+- Docker installed locally (for building images)
+- Node.js installed (for smoke tests)
+- An Azure subscription with permissions to create resources
+
+## 1. Set Variables
+
+Every command below uses these. Set them once in your shell.
+
+```bash
+RG="game-rg"
+LOCATION="eastus"
+ACR_NAME="gameacr$(openssl rand -hex 4)"   # must be globally unique
+ENV_NAME="game-env"
+PG_SERVER="game-pg-$(openssl rand -hex 4)"
+PG_ADMIN="gameadmin"
+PG_PASSWORD="$(openssl rand -base64 24)"    # save this somewhere safe
+PG_DB="game"
+```
+
+> Write down `PG_PASSWORD` and `ACR_NAME` — you'll need them later.
+
+## 2. Create Resource Group
+
+```bash
+az group create --name $RG --location $LOCATION
+```
+
+## 3. Create Azure Container Registry
+
+```bash
+az acr create --resource-group $RG --name $ACR_NAME --sku Basic --admin-enabled true
+az acr login --name $ACR_NAME
+```
+
+Get the login server:
+
+```bash
+ACR_LOGIN=$(az acr show --name $ACR_NAME --query loginServer -o tsv)
+```
+
+## 4. Build and Push Docker Images
+
+From the repo root:
+
+```bash
+# Build all service targets and push
+for SERVICE in gateway simulation eventlog progression operatorapi; do
+  docker build --target $SERVICE -t $ACR_LOGIN/game-$SERVICE:latest .
+  docker push $ACR_LOGIN/game-$SERVICE:latest
+done
+```
+
+This uses the multi-stage Dockerfile. Each target produces a ~120MB image.
+
+## 5. Create PostgreSQL Flexible Server
+
+```bash
+az postgres flexible-server create \
+  --resource-group $RG \
+  --name $PG_SERVER \
+  --location $LOCATION \
+  --admin-user $PG_ADMIN \
+  --admin-password "$PG_PASSWORD" \
+  --database-name $PG_DB \
+  --sku-name Standard_B1ms \
+  --tier Burstable \
+  --storage-size 32 \
+  --version 16 \
+  --yes
+```
+
+Allow Azure services to connect:
+
+```bash
+az postgres flexible-server firewall-rule create \
+  --resource-group $RG \
+  --name $PG_SERVER \
+  --rule-name AllowAzureServices \
+  --start-ip-address 0.0.0.0 \
+  --end-ip-address 0.0.0.0
+```
+
+### 5a. Initialize the Database Schema
+
+```bash
+PG_HOST=$(az postgres flexible-server show --resource-group $RG --name $PG_SERVER --query fullyQualifiedDomainName -o tsv)
+
+psql "host=$PG_HOST dbname=$PG_DB user=$PG_ADMIN password=$PG_PASSWORD sslmode=require" -f infra/docker/init.sql
+```
+
+If you don't have `psql` locally, use Azure Cloud Shell or a temporary container:
+
+```bash
+docker run --rm -v $(pwd)/infra/docker/init.sql:/init.sql postgres:16-alpine \
+  psql "host=$PG_HOST dbname=$PG_DB user=$PG_ADMIN password=$PG_PASSWORD sslmode=require" -f /init.sql
+```
+
+## 6. Create Container Apps Environment
+
+```bash
+az containerapp env create \
+  --resource-group $RG \
+  --name $ENV_NAME \
+  --location $LOCATION
+```
+
+## 7. Build the Connection String
+
+```bash
+CONN_STR="Host=$PG_HOST;Database=$PG_DB;Username=$PG_ADMIN;Password=$PG_PASSWORD;Ssl Mode=Require;Trust Server Certificate=true"
+```
+
+## 8. Deploy Services
+
+Deploy in order: internal services first, then services that depend on them.
+
+### 8a. EventLog (internal only)
+
+```bash
+az containerapp create \
+  --resource-group $RG \
+  --environment $ENV_NAME \
+  --name eventlog \
+  --image $ACR_LOGIN/game-eventlog:latest \
+  --registry-server $ACR_LOGIN \
+  --registry-username $(az acr credential show --name $ACR_NAME --query username -o tsv) \
+  --registry-password $(az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv) \
+  --target-port 4002 \
+  --ingress internal \
+  --min-replicas 1 \
+  --max-replicas 1 \
+  --env-vars \
+    "Urls=http://+:4002" \
+    "ConnectionStrings__GameDb=$CONN_STR"
+```
+
+### 8b. Progression (internal only)
+
+```bash
+az containerapp create \
+  --resource-group $RG \
+  --environment $ENV_NAME \
+  --name progression \
+  --image $ACR_LOGIN/game-progression:latest \
+  --registry-server $ACR_LOGIN \
+  --registry-username $(az acr credential show --name $ACR_NAME --query username -o tsv) \
+  --registry-password $(az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv) \
+  --target-port 4003 \
+  --ingress internal \
+  --min-replicas 1 \
+  --max-replicas 1 \
+  --env-vars \
+    "Urls=http://+:4003" \
+    "ConnectionStrings__GameDb=$CONN_STR"
+```
+
+### 8c. Simulation (internal only)
+
+```bash
+az containerapp create \
+  --resource-group $RG \
+  --environment $ENV_NAME \
+  --name simulation \
+  --image $ACR_LOGIN/game-simulation:latest \
+  --registry-server $ACR_LOGIN \
+  --registry-username $(az acr credential show --name $ACR_NAME --query username -o tsv) \
+  --registry-password $(az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv) \
+  --target-port 4001 \
+  --ingress internal \
+  --min-replicas 1 \
+  --max-replicas 1 \
+  --env-vars \
+    "Urls=http://+:4001" \
+    "ConnectionStrings__GameDb=$CONN_STR" \
+    "ServiceUrls__EventLog=https://eventlog.internal.$ENV_NAME.azurecontainerapps.io" \
+    "ServiceUrls__Progression=https://progression.internal.$ENV_NAME.azurecontainerapps.io"
+```
+
+### 8d. Gateway (external — public WebSocket endpoint)
+
+```bash
+az containerapp create \
+  --resource-group $RG \
+  --environment $ENV_NAME \
+  --name gateway \
+  --image $ACR_LOGIN/game-gateway:latest \
+  --registry-server $ACR_LOGIN \
+  --registry-username $(az acr credential show --name $ACR_NAME --query username -o tsv) \
+  --registry-password $(az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv) \
+  --target-port 4000 \
+  --ingress external \
+  --transport http \
+  --min-replicas 1 \
+  --max-replicas 1 \
+  --env-vars \
+    "Urls=http://+:4000" \
+    "ConnectionStrings__GameDb=$CONN_STR" \
+    "ServiceUrls__Simulation=https://simulation.internal.$ENV_NAME.azurecontainerapps.io" \
+    "ServiceUrls__EventLog=https://eventlog.internal.$ENV_NAME.azurecontainerapps.io" \
+    "ServiceUrls__Progression=https://progression.internal.$ENV_NAME.azurecontainerapps.io"
+
+GATEWAY_URL=$(az containerapp show --resource-group $RG --name gateway --query "properties.configuration.ingress.fqdn" -o tsv)
+echo "Gateway: wss://$GATEWAY_URL"
+```
+
+### 8e. OperatorApi (external — admin dashboard)
+
+```bash
+az containerapp create \
+  --resource-group $RG \
+  --environment $ENV_NAME \
+  --name operatorapi \
+  --image $ACR_LOGIN/game-operatorapi:latest \
+  --registry-server $ACR_LOGIN \
+  --registry-username $(az acr credential show --name $ACR_NAME --query username -o tsv) \
+  --registry-password $(az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv) \
+  --target-port 4004 \
+  --ingress external \
+  --min-replicas 1 \
+  --max-replicas 1 \
+  --env-vars \
+    "Urls=http://+:4004" \
+    "ConnectionStrings__GameDb=$CONN_STR" \
+    "ServiceUrls__Gateway=https://gateway.internal.$ENV_NAME.azurecontainerapps.io" \
+    "ServiceUrls__Simulation=https://simulation.internal.$ENV_NAME.azurecontainerapps.io" \
+    "ServiceUrls__EventLog=https://eventlog.internal.$ENV_NAME.azurecontainerapps.io" \
+    "ServiceUrls__Progression=https://progression.internal.$ENV_NAME.azurecontainerapps.io" \
+    "CORS_ORIGINS=https://$GATEWAY_URL,http://localhost:5173"
+
+OPERATOR_URL=$(az containerapp show --resource-group $RG --name operatorapi --query "properties.configuration.ingress.fqdn" -o tsv)
+echo "Operator API: https://$OPERATOR_URL"
+```
+
+## 9. Smoke Tests
+
+### 9a. Health Checks
+
+Verify every service is responding:
+
+```bash
+# External services (direct)
+curl -s https://$GATEWAY_URL/health | jq .
+curl -s https://$OPERATOR_URL/health | jq .
+
+# Internal services (via operator proxy)
+curl -s https://$OPERATOR_URL/api/status | jq .
+```
+
+Expected: `{"status":"ok","service":"gateway",...}` for each.
+
+### 9b. WebSocket Connection Test
+
+Quick manual validation:
+
+```bash
+# Requires wscat: npm install -g wscat
+wscat -c "wss://$GATEWAY_URL"
+# Should receive: {"version":1,"type":"session_started",...}
+```
+
+### 9c. Tick Loop
+
+```bash
+curl -s https://$OPERATOR_URL/api/tick | jq .
+# Should show: current_tick > 0, tick_rate_hz: 20, uptime_seconds > 0
+```
+
+### 9d. Multiplayer Test (automated)
+
+Run the multi-player test script against the live deployment:
+
+```bash
+node scripts/test-multiplayer.js 5 wss://$GATEWAY_URL
+```
+
+This spawns 5 concurrent WebSocket players who join a region, place structures, and verify broadcasts. All assertions should pass.
+
+### 9e. Resume Test
+
+```bash
+node scripts/test-resume.js wss://$GATEWAY_URL
+```
+
+Validates disconnect/reconnect with resume token works through Azure's load balancer.
+
+### 9f. Challenge Test
+
+```bash
+node scripts/test-challenges.js wss://$GATEWAY_URL
+```
+
+Validates guild challenge creation, progress increment, and auto-completion.
+
+### 9g. Full Validation Checklist
+
+| Check | Command | Expected |
+|-------|---------|----------|
+| Gateway health | `curl https://$GATEWAY_URL/health` | `{"status":"ok"}` |
+| Operator health | `curl https://$OPERATOR_URL/health` | `{"status":"ok"}` |
+| Service status | `curl https://$OPERATOR_URL/api/status` | All 5 services `ok` |
+| Tick running | `curl https://$OPERATOR_URL/api/tick` | `current_tick > 0` |
+| WS connects | `wscat -c wss://$GATEWAY_URL` | `session_started` envelope |
+| Multiplayer | `node scripts/test-multiplayer.js 5 wss://$GATEWAY_URL` | All pass |
+| Resume | `node scripts/test-resume.js wss://$GATEWAY_URL` | All pass |
+| Challenges | `node scripts/test-challenges.js wss://$GATEWAY_URL` | All pass |
+| DB persistence | Restart gateway, reconnect — structures still there | Data survives restart |
+
+## 10. Updating Services
+
+After code changes, rebuild and redeploy:
+
+```bash
+# Rebuild and push a single service
+SERVICE=gateway
+docker build --target $SERVICE -t $ACR_LOGIN/game-$SERVICE:latest .
+docker push $ACR_LOGIN/game-$SERVICE:latest
+
+# Update the container app (pulls new image)
+az containerapp update \
+  --resource-group $RG \
+  --name $SERVICE \
+  --image $ACR_LOGIN/game-$SERVICE:latest
+```
+
+To update all services at once:
+
+```bash
+for SERVICE in gateway simulation eventlog progression operatorapi; do
+  docker build --target $SERVICE -t $ACR_LOGIN/game-$SERVICE:latest .
+  docker push $ACR_LOGIN/game-$SERVICE:latest
+  az containerapp update --resource-group $RG --name $SERVICE --image $ACR_LOGIN/game-$SERVICE:latest
+done
+```
+
+## 11. Scaling
+
+### Scale-to-Zero (save money when idle)
+
+Set min replicas to 0 for services that don't need to run continuously. **Not recommended for Simulation** (tick loop must be always-on) but fine for EventLog and Progression during testing:
+
+```bash
+az containerapp update --resource-group $RG --name eventlog --min-replicas 0 --max-replicas 3
+az containerapp update --resource-group $RG --name progression --min-replicas 0 --max-replicas 3
+```
+
+Gateway and Simulation should stay at min 1:
+
+```bash
+az containerapp update --resource-group $RG --name gateway --min-replicas 1 --max-replicas 5
+az containerapp update --resource-group $RG --name simulation --min-replicas 1 --max-replicas 1
+```
+
+### HTTP Scaling Rules
+
+Container Apps scales based on concurrent HTTP requests (default: 10 concurrent per replica). Override:
+
+```bash
+# Gateway: scale at 50 concurrent connections per replica
+az containerapp update \
+  --resource-group $RG \
+  --name gateway \
+  --scale-rule-name http-scaling \
+  --scale-rule-type http \
+  --scale-rule-http-concurrency 50 \
+  --min-replicas 1 \
+  --max-replicas 10
+```
+
+### Manual Scaling
+
+For load tests or events where you know the expected player count:
+
+```bash
+# Set exact replica count
+az containerapp update --resource-group $RG --name gateway --min-replicas 3 --max-replicas 3
+```
+
+### Scaling Constraints
+
+| Service | Min | Max | Notes |
+|---------|-----|-----|-------|
+| Gateway | 1 | 10 | Stateful WebSocket sessions — scaling requires sticky sessions or session migration. For now, keep at 1 replica until session handoff is implemented. |
+| Simulation | 1 | 1 | **Single instance only.** World state is in-memory. Multiple replicas would create split-brain. Scale vertically (more CPU/RAM) not horizontally. |
+| EventLog | 0 | 5 | Stateless, scales freely. |
+| Progression | 0 | 5 | Stateless, atomic DB upserts handle concurrency. |
+| OperatorApi | 0 | 3 | Stateless proxy, low traffic. |
+
+### Vertical Scaling (more CPU/RAM per replica)
+
+```bash
+# Give Simulation more resources (default is 0.25 CPU / 0.5Gi)
+az containerapp update \
+  --resource-group $RG \
+  --name simulation \
+  --cpu 1.0 \
+  --memory 2Gi
+
+# Give Gateway more resources for WebSocket connections
+az containerapp update \
+  --resource-group $RG \
+  --name gateway \
+  --cpu 0.5 \
+  --memory 1Gi
+```
+
+### PostgreSQL Scaling
+
+Upgrade the Postgres tier when you outgrow Burstable B1ms:
+
+```bash
+# Check current tier
+az postgres flexible-server show --resource-group $RG --name $PG_SERVER --query "sku" -o json
+
+# Scale up (causes brief downtime)
+az postgres flexible-server update \
+  --resource-group $RG \
+  --name $PG_SERVER \
+  --sku-name Standard_B2ms \
+  --tier Burstable
+```
+
+| Tier | vCores | RAM | Cost/mo | Good for |
+|------|--------|-----|---------|----------|
+| B1ms | 1 | 2 GB | ~$13 | Testing, <20 concurrent players |
+| B2ms | 2 | 4 GB | ~$26 | Friend testing, <100 concurrent |
+| B2s  | 2 | 4 GB | ~$30 | Sustained friend testing |
+| D2s_v3 | 2 | 8 GB | ~$100 | Alpha launch |
+
+## 12. Monitoring
+
+### View Logs
+
+```bash
+# Stream live logs from a service
+az containerapp logs show --resource-group $RG --name gateway --follow
+
+# Query recent logs
+az containerapp logs show --resource-group $RG --name simulation --tail 100
+```
+
+### Check Replica Status
+
+```bash
+az containerapp replica list --resource-group $RG --name gateway -o table
+```
+
+### Postgres Metrics
+
+```bash
+az postgres flexible-server show --resource-group $RG --name $PG_SERVER --query "{cpu:sku.name,storage:storage.storageSizeGb,state:state}" -o json
+```
+
+## 13. Teardown
+
+Remove everything when done testing:
+
+```bash
+# Delete the resource group (removes ALL resources inside it)
+az group delete --name $RG --yes --no-wait
+```
+
+This deletes the Container Apps, ACR, Postgres, and all associated resources. Data in Postgres is **permanently lost**.
+
+## Cost Estimate
+
+| Resource | Tier | Monthly Cost |
+|----------|------|-------------|
+| Postgres Flexible Server | B1ms | ~$13 |
+| Container Apps (5 services, always-on) | Consumption | ~$5-15 |
+| Container Registry | Basic | ~$5 |
+| **Total (testing)** | | **~$25-35/mo** |
+
+With scale-to-zero on idle services, costs drop to ~$15-20/mo during periods of no activity.
+
+## Troubleshooting
+
+**Container won't start:**
+```bash
+az containerapp logs show --resource-group $RG --name <service> --tail 50
+```
+Usually a bad connection string or missing env var.
+
+**WebSocket won't connect:**
+- Container Apps requires `--transport http` for WebSocket support (set in step 8d)
+- Client must use `wss://` (TLS), not `ws://`
+- Check Gateway logs for connection errors
+
+**DB connection refused:**
+- Verify firewall rule allows Azure services (step 5)
+- Verify connection string has `Ssl Mode=Require;Trust Server Certificate=true`
+
+**Internal service-to-service calls fail:**
+- Internal ingress URLs follow the pattern: `https://<app-name>.internal.<env-name>.azurecontainerapps.io`
+- Verify the env vars use the correct internal URLs
+- Check that the target service has `--ingress internal` set
+
+**Resume test fails:**
+- Gateway must be single-replica — session state is in-memory
+- If running multiple replicas, the reconnecting client may hit a different instance

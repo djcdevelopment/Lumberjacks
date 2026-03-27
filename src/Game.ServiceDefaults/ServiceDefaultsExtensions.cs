@@ -21,7 +21,17 @@ public static class ServiceDefaultsExtensions
         {
             options.AddDefaultPolicy(policy =>
             {
-                policy.WithOrigins("http://localhost:5173", "http://localhost:5174")
+                // CORS_ORIGINS env var: comma-separated list of allowed origins
+                // e.g. "https://myapp.azurecontainerapps.io,http://localhost:5173"
+                // Falls back to localhost dev defaults if not set.
+                var originsEnv = builder.Configuration["CORS_ORIGINS"]
+                    ?? Environment.GetEnvironmentVariable("CORS_ORIGINS");
+
+                var origins = !string.IsNullOrWhiteSpace(originsEnv)
+                    ? originsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    : new[] { "http://localhost:5173", "http://localhost:5174" };
+
+                policy.WithOrigins(origins)
                     .AllowAnyHeader()
                     .AllowAnyMethod();
             });

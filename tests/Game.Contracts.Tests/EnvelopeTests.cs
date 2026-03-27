@@ -21,7 +21,7 @@ public class EnvelopeTests
     public void Serialize_and_parse_round_trip()
     {
         var original = EnvelopeFactory.Create(MessageType.PlayerMove,
-            new PlayerMoveMessage(new Contracts.Entities.Vec3(1, 2, 3), new Contracts.Entities.Vec3(0, 0, 1), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+            new PlayerMoveMessage(new Contracts.Entities.Vec3(1, 2, 3), new Contracts.Entities.Vec3(0, 0, 1)));
 
         var json = EnvelopeFactory.Serialize(original);
         var parsed = EnvelopeFactory.Parse(json);

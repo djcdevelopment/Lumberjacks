@@ -36,51 +36,26 @@ public class ChallengeEngine
             if (!MatchesFilters(challenge.TriggerFilters, payload))
                 continue;
 
-            // Get or create progress row
-            var progress = await _db.ChallengeProgress
-                .FirstOrDefaultAsync(p => p.ChallengeId == challenge.Id && p.GuildId == guildId);
+            // Atomic upsert + increment via raw SQL to avoid lost updates
+            var newValue = await AtomicIncrementAsync(
+                challenge.Id, guildId, challenge.ProgressMode, incrementValue);
 
-            if (progress is null)
-            {
-                progress = new ChallengeProgressEntity
-                {
-                    ChallengeId = challenge.Id,
-                    GuildId = guildId,
-                };
-                _db.ChallengeProgress.Add(progress);
-            }
-
-            if (progress.Completed) continue;
-
-            // Increment based on progress mode
-            progress.CurrentValue = challenge.ProgressMode switch
-            {
-                "sum" => progress.CurrentValue + incrementValue,
-                "max" => Math.Max(progress.CurrentValue, incrementValue),
-                "count" => progress.CurrentValue + 1,
-                _ => progress.CurrentValue + incrementValue,
-            };
-            progress.UpdatedAt = DateTimeOffset.UtcNow;
+            if (newValue is null)
+                continue; // already completed, no-op
 
             // Check completion
-            if (progress.CurrentValue >= challenge.Target)
+            if (newValue.Value >= challenge.Target)
             {
-                progress.Completed = true;
-                progress.CompletedAt = DateTimeOffset.UtcNow;
+                // Mark completed atomically (only first to reach target wins)
+                var completed = await TryMarkCompletedAsync(challenge.Id, guildId);
+                if (!completed)
+                    continue; // another request already completed it
 
                 // Award guild points from rewards
                 var rewardPoints = ParseRewardPoints(challenge.Rewards);
                 if (rewardPoints > 0)
                 {
-                    var guild = await _db.GuildProgress.FindAsync(guildId);
-                    if (guild is null)
-                    {
-                        guild = new GuildProgressEntity { GuildId = guildId };
-                        _db.GuildProgress.Add(guild);
-                    }
-                    guild.Points += rewardPoints;
-                    guild.ChallengesCompleted += 1;
-                    guild.UpdatedAt = DateTimeOffset.UtcNow;
+                    await AwardGuildPointsAsync(guildId, rewardPoints);
                 }
 
                 results.Add(new ChallengeCompletionResult(
@@ -92,8 +67,77 @@ public class ChallengeEngine
             }
         }
 
-        await _db.SaveChangesAsync();
         return results;
+    }
+
+    /// <summary>
+    /// Atomically inserts or increments the progress row.
+    /// Returns the new current_value, or null if already completed.
+    /// </summary>
+    private async Task<int?> AtomicIncrementAsync(
+        string challengeId, string guildId, string progressMode, int incrementValue)
+    {
+        // Atomic upsert via Postgres ON CONFLICT
+        if (progressMode == "max")
+        {
+            await _db.Database.ExecuteSqlInterpolatedAsync($@"
+                INSERT INTO challenge_progress (challenge_id, guild_id, current_value, completed, updated_at)
+                VALUES ({challengeId}, {guildId}, {incrementValue}, false, now())
+                ON CONFLICT (challenge_id, guild_id)
+                DO UPDATE SET
+                    current_value = GREATEST(challenge_progress.current_value, EXCLUDED.current_value),
+                    updated_at = now()
+                WHERE NOT challenge_progress.completed");
+        }
+        else
+        {
+            await _db.Database.ExecuteSqlInterpolatedAsync($@"
+                INSERT INTO challenge_progress (challenge_id, guild_id, current_value, completed, updated_at)
+                VALUES ({challengeId}, {guildId}, {incrementValue}, false, now())
+                ON CONFLICT (challenge_id, guild_id)
+                DO UPDATE SET
+                    current_value = challenge_progress.current_value + EXCLUDED.current_value,
+                    updated_at = now()
+                WHERE NOT challenge_progress.completed");
+        }
+
+        // Read back the current value (same connection, sees our write)
+        var row = await _db.ChallengeProgress
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.ChallengeId == challengeId && p.GuildId == guildId);
+
+        if (row is null || row.Completed) return null;
+        return row.CurrentValue;
+    }
+
+    /// <summary>
+    /// Atomically marks the challenge as completed. Returns true only for the
+    /// first caller that transitions completed from false to true.
+    /// </summary>
+    private async Task<bool> TryMarkCompletedAsync(string challengeId, string guildId)
+    {
+        var rows = await _db.Database.ExecuteSqlInterpolatedAsync($@"
+            UPDATE challenge_progress
+            SET completed = true, completed_at = now()
+            WHERE challenge_id = {challengeId}
+              AND guild_id = {guildId}
+              AND NOT completed");
+        return rows > 0;
+    }
+
+    /// <summary>
+    /// Atomically upserts guild progress and adds points.
+    /// </summary>
+    private async Task AwardGuildPointsAsync(string guildId, int points)
+    {
+        await _db.Database.ExecuteSqlInterpolatedAsync($@"
+            INSERT INTO guild_progress (guild_id, points, challenges_completed, updated_at)
+            VALUES ({guildId}, {points}, 1, now())
+            ON CONFLICT (guild_id)
+            DO UPDATE SET
+                points = guild_progress.points + {points},
+                challenges_completed = guild_progress.challenges_completed + 1,
+                updated_at = now()");
     }
 
     private static bool MatchesFilters(string filtersJson, JsonElement payload)

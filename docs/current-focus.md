@@ -10,58 +10,57 @@ A player can connect, join a region, place structures, trigger guild challenges,
 have progression evaluated automatically, and see inventory flow — all through
 server-authoritative .NET services with PostgreSQL persistence and canonical events.
 
-**What works today (all 5 services on ports 4000-4004):**
-- WebSocket connection → session_started with server-assigned player_id
-- join_region with guild_id → world_snapshot with entities
-- place_structure → persisted to Postgres, event emitted, progression updated
-- Guild challenges: create → trigger match → progress increment → auto-complete → guild points awarded
-- Inventory: item spawn, pickup, store in container, quantity tracking
-- Admin-web (React/Vite) shows service status, regions, events, players
-- E2E test script: `node scripts/test-challenges.js`
+## Network Refactor Status: ALL 5 PHASES COMPLETE (2026-03-26)
 
-## Active Workstream 1: Multi-User Network Testing
+All phases of the network infrastructure refactoring plan (`implementation_plan.md`) are done:
+
+- **Phase 1 (Binary Serialization):** BitWriter/BitReader, CompactVec3, BinaryEnvelope
+- **Phase 2 (Input-Driven Simulation):** InputQueue, SimulationStep (physics), StateHasher, TickBroadcaster, PlayerHandler extraction, MessageRouter converted from HTTP to direct handler calls
+- **Phase 3 (Spatial Interest Management):** SpatialGrid, InterestManager (near/mid/far AoI bands), TickBroadcaster rewritten for per-player AoI filtering
+- **Phase 4 (Client Prediction — server-side):** Binary payload serializers (EntityUpdate ~33B, PlayerInput 5B), outbound binary framing, inbound binary fast-path — JSON payloads fully replaced for hot-path messages
+- **Phase 5 (Dual-Channel Transport):** UdpTransport BackgroundService (port 4005), session UDP binding via token, TickBroadcaster sends datagram-lane via UDP when available, WebSocket fallback
+
+**What works today:**
+
+Gateway (port 4000) is the unified host — WebSocket, tick loop, simulation, and broadcasting all run in-process:
+- WebSocket connection → session_started with server-assigned player_id
+- Session resume: disconnect/reconnect with `?resume=TOKEN`, world re-sync
+- join_region with guild_id → world_snapshot with entities
+- Input-driven simulation: `player_input` → InputQueue → 20Hz TickLoop → SimulationStep (direction/speed physics, friction, bounds clamping) → StateHasher → TickBroadcaster
+- Per-player AoI filtering: near (0–100u, every tick), mid (100–300u, every 4th tick), far (300+u, dropped)
+- SpatialGrid: grid-based spatial hash for fast radius queries (XZ-plane, Y ignored)
+- MessageRouter calls PlayerHandler/PlaceStructureHandler/InventoryHandler directly (no HTTP self-calls)
+- Binary payload serializers: EntityUpdate (~33 bytes vs ~200+ JSON), PlayerInput (5 bytes vs ~120 JSON)
+- Dual-channel transport: UDP (port 4005) for datagram-lane, WebSocket for reliable-lane, automatic fallback
+- place_structure → persisted to Postgres, event emitted, progression updated
+- Movement validation: server-authoritative physics, speed clamping, region bounds clamping
+- Dynamic regions: create/delete via API, persisted to Postgres, bounds validation
+- Guild challenges: create → trigger match → progress increment → auto-complete → guild points
+- Inventory: item spawn, pickup, store in container, quantity tracking
+- Admin-web: tick diagnostics (live), region create/delete, service health, events, structures, players, guilds
+- CORS configurable via `CORS_ORIGINS` env var (deployment-ready)
+- Docker: multi-stage Dockerfile, docker-compose.yml, docker-compose.dev.yml
+- Graceful startup: DB loader failures caught, runs with in-memory defaults if Postgres unavailable
+- 157 tests passing (106 Contracts + 51 Simulation)
+- E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`
+
+Simulation (port 4001) can also run standalone with NullTickBroadcaster for HTTP-only testing.
+
+## Active Workstream 1: Azure Deployment
 
 Objective:
-Prove the platform works with multiple concurrent users across real networks.
+Deploy to Azure Container Apps and validate with real users over the internet.
 
 Why now:
-The vertical slice proves the loop works for one player locally. The next risk
-to retire is whether it holds up with real latency, concurrent state mutations,
-and distributed players. This is the core value prop — 100+ player communities.
+CORS is configurable, Docker images are ready, movement validation prevents cheating.
+The backend is deployment-ready — the risk to retire is real-world latency and NAT.
 
-Exit criteria:
-- 2+ simultaneous WebSocket sessions see each other's actions in real time
-- Structure placement by player A appears for player B
-- Challenge progress accumulates correctly across multiple players in the same guild
-- Works across the internet, not just localhost
-
-### Testing paths (pick one or both):
-
-**Option A — Distribute a test client .exe to friends:**
-- Build a minimal CLI or Godot test client that connects to a public endpoint
-- Deploy backend services to Azure (App Service or Container Apps)
-- Friends run the .exe, connect to the Azure endpoint, place structures together
-- Validates real-world latency, NAT traversal (none needed — WebSocket over HTTPS)
-
-**Option B — Azure load test with simulated players:**
-- Deploy backend to Azure Container Apps (or single VM with all 5 services)
-- Write a Node.js script that spawns N concurrent WebSocket clients
-- Each client joins, places structures, verifies world_snapshot updates
-- Validates concurrent state mutations, broadcast fan-out, DB contention
-
-### Deployment prep needed:
-- Dockerfiles for each service (or a single multi-service Dockerfile)
-- docker-compose.yml for local multi-service testing
-- Azure deployment config (Container Apps or App Service)
-- Connection strings for Azure PostgreSQL
-- CORS/WebSocket origin config for non-localhost
-
-Next actions:
-- Write Dockerfiles for the 5 .NET services
-- Create docker-compose.yml (services + Postgres)
-- Write a multi-player test script (N concurrent WebSocket clients)
-- Test locally with multiple concurrent sessions first
-- Then deploy to Azure and test across the internet
+### Next actions:
+- Push Docker images to Azure Container Registry
+- Deploy to Azure Container Apps (see docs/deployment-strategy.md)
+- Set `CORS_ORIGINS` env var to Azure frontend URL
+- Run `node scripts/test-multiplayer.js 10 wss://azure-host` against live deployment
+- Distribute test client (Node.js script or Godot .exe) to friends
 
 ## Active Workstream 2: Godot Client Prototype
 
@@ -75,13 +74,15 @@ can consume the WebSocket protocol and render the authoritative world state.
 Exit criteria:
 - Godot client connects via WebSocket, receives session_started
 - Joins region, renders player positions from world_snapshot
-- Sends place_structure, sees result appear in the world
+- Sends player_input, sees authoritative entity_update with position
 - Other players' actions appear in real time
 
 ## Parked
 
 - Community edge node alpha
-- Distant settlement rendering / interest management
 - Advanced economy systems
 - Combat zones and high-tick simulation
-- UDP/QUIC datagram lane (ADR 0003 — designed for, not yet implemented)
+- Phase 4: Client prediction / reconciliation (server-side complete, client-side needs Godot)
+- Content registry service
+- Discord bridge service
+- Auth / player identity

@@ -1,8 +1,17 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 
 interface ServiceStatus {
   service: string
   status: string
+}
+
+interface TickInfo {
+  current_tick: number
+  tick_rate_hz: number
+  uptime_seconds: number
+  total_players: number
+  connected_players: number
+  regions: { id: string; player_count: number; active: boolean }[]
 }
 
 interface GameEvent {
@@ -56,22 +65,101 @@ const preStyle = { background: '#161b22', padding: 16, borderRadius: 6, overflow
 const subtitleStyle = { color: '#8b949e', marginBottom: 16 }
 const badgeUp = { color: '#3fb950', fontWeight: 'bold' as const }
 const badgeDown = { color: '#f85149', fontWeight: 'bold' as const }
+const cardStyle = {
+  background: '#161b22',
+  border: '1px solid #30363d',
+  borderRadius: 6,
+  padding: 16,
+  marginBottom: 16,
+}
+const statValueStyle = { fontSize: 28, fontWeight: 'bold' as const, color: '#58a6ff' }
+const statLabelStyle = { fontSize: 12, color: '#8b949e', marginTop: 4 }
+const inputStyle = {
+  background: '#0d1117',
+  border: '1px solid #30363d',
+  borderRadius: 6,
+  color: '#c9d1d9',
+  padding: '6px 10px',
+  fontSize: 14,
+  width: '100%',
+}
+const btnStyle = {
+  background: '#238636',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 6,
+  padding: '8px 16px',
+  cursor: 'pointer',
+  fontSize: 14,
+  fontWeight: 'bold' as const,
+}
+const btnDangerStyle = {
+  ...btnStyle,
+  background: 'transparent',
+  color: '#f85149',
+  border: '1px solid #f85149',
+  padding: '4px 10px',
+  fontSize: 12,
+}
+
+function formatUptime(seconds: number) {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = seconds % 60
+  if (h > 0) return `${h}h ${m}m ${s}s`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState<string>('status')
   const [services, setServices] = useState<ServiceStatus[]>([])
+  const [tick, setTick] = useState<TickInfo | null>(null)
   const [events, setEvents] = useState<GameEvent[]>([])
   const [regions, setRegions] = useState<Region[]>([])
   const [structures, setStructures] = useState<Structure[]>([])
   const [players, setPlayers] = useState<PlayerProgress[]>([])
   const [guilds, setGuilds] = useState<GuildProgress[]>([])
 
+  // Region creation form
+  const [newRegion, setNewRegion] = useState({
+    name: '',
+    id: '',
+    minX: '-200', minY: '-10', minZ: '-200',
+    maxX: '200', maxY: '100', maxZ: '200',
+    tickRate: '20',
+  })
+  const [regionError, setRegionError] = useState<string | null>(null)
+
+  const fetchTick = useCallback(() => {
+    fetch('/api/tick')
+      .then((r) => r.json())
+      .then((d) => setTick(d))
+      .catch(() => setTick(null))
+  }, [])
+
+  const fetchRegions = useCallback(() => {
+    fetch('/api/regions')
+      .then((r) => r.json())
+      .then((d) => setRegions(Array.isArray(d) ? d : []))
+      .catch(() => setRegions([]))
+  }, [])
+
+  // Load service status + tick on mount
   useEffect(() => {
     fetch('/api/status')
       .then((r) => r.json())
       .then((d) => setServices(d.services || []))
       .catch(() => setServices([]))
-  }, [])
+    fetchTick()
+  }, [fetchTick])
+
+  // Auto-refresh tick every 2 seconds when on status tab
+  useEffect(() => {
+    if (activeTab !== 'status') return
+    const interval = setInterval(fetchTick, 2000)
+    return () => clearInterval(interval)
+  }, [activeTab, fetchTick])
 
   useEffect(() => {
     if (activeTab === 'events') {
@@ -81,10 +169,7 @@ function App() {
         .catch(() => setEvents([]))
     }
     if (activeTab === 'regions') {
-      fetch('/api/regions')
-        .then((r) => r.json())
-        .then((d) => setRegions(Array.isArray(d) ? d : []))
-        .catch(() => setRegions([]))
+      fetchRegions()
     }
     if (activeTab === 'structures') {
       fetch('/api/structures')
@@ -114,7 +199,48 @@ function App() {
         .then((d) => setGuilds(Array.isArray(d) ? d : []))
         .catch(() => setGuilds([]))
     }
-  }, [activeTab])
+  }, [activeTab, fetchRegions])
+
+  const handleCreateRegion = async () => {
+    setRegionError(null)
+    const body = {
+      id: newRegion.id || undefined,
+      name: newRegion.name || undefined,
+      bounds_min: { x: Number(newRegion.minX), y: Number(newRegion.minY), z: Number(newRegion.minZ) },
+      bounds_max: { x: Number(newRegion.maxX), y: Number(newRegion.maxY), z: Number(newRegion.maxZ) },
+      tick_rate: Number(newRegion.tickRate),
+    }
+    try {
+      const res = await fetch('/api/regions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setRegionError(data.error || 'Failed to create region')
+        return
+      }
+      setNewRegion({ name: '', id: '', minX: '-200', minY: '-10', minZ: '-200', maxX: '200', maxY: '100', maxZ: '200', tickRate: '20' })
+      fetchRegions()
+    } catch {
+      setRegionError('Network error')
+    }
+  }
+
+  const handleDeleteRegion = async (id: string) => {
+    try {
+      const res = await fetch(`/api/regions/${id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete region')
+        return
+      }
+      fetchRegions()
+    } catch {
+      alert('Network error')
+    }
+  }
 
   const tabs = ['status', 'events', 'regions', 'structures', 'players', 'guilds']
 
@@ -162,7 +288,49 @@ function App() {
 
         {activeTab === 'status' && (
           <div>
-            <p style={subtitleStyle}>Service health overview</p>
+            {/* Tick diagnostics */}
+            {tick && (
+              <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{tick.current_tick.toLocaleString()}</div>
+                  <div style={statLabelStyle}>Current Tick</div>
+                </div>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{formatUptime(tick.uptime_seconds)}</div>
+                  <div style={statLabelStyle}>Uptime</div>
+                </div>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{tick.connected_players}</div>
+                  <div style={statLabelStyle}>Connected Players</div>
+                </div>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{tick.regions.length}</div>
+                  <div style={statLabelStyle}>Active Regions</div>
+                </div>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{tick.tick_rate_hz} Hz</div>
+                  <div style={statLabelStyle}>Tick Rate</div>
+                </div>
+              </div>
+            )}
+
+            {/* Region breakdown */}
+            {tick && tick.regions.length > 0 && (
+              <div style={{ ...cardStyle, marginBottom: 24 }}>
+                <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#8b949e' }}>Region Load</h3>
+                {tick.regions.map((r) => (
+                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #21262d' }}>
+                    <span>{r.id}</span>
+                    <span>
+                      <span style={r.active ? badgeUp : badgeDown}>{r.active ? '●' : '○'}</span>
+                      {' '}{r.player_count} player{r.player_count !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p style={subtitleStyle}>Service health</p>
             <table style={tableStyle}>
               <thead>
                 <tr>
@@ -221,6 +389,67 @@ function App() {
         {activeTab === 'regions' && (
           <div>
             <p style={subtitleStyle}>Active world regions</p>
+
+            {/* Create region form */}
+            <div style={{ ...cardStyle, marginBottom: 24 }}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#8b949e' }}>Create Region</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>Name</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="e.g. The Meadows"
+                    value={newRegion.name}
+                    onChange={(e) => setNewRegion({ ...newRegion, name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>ID (optional)</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="auto-generated if empty"
+                    value={newRegion.id}
+                    onChange={(e) => setNewRegion({ ...newRegion, id: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto repeat(3, 1fr)', gap: 8, alignItems: 'end', marginBottom: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>Min X</label>
+                  <input style={inputStyle} type="number" value={newRegion.minX} onChange={(e) => setNewRegion({ ...newRegion, minX: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>Min Y</label>
+                  <input style={inputStyle} type="number" value={newRegion.minY} onChange={(e) => setNewRegion({ ...newRegion, minY: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>Min Z</label>
+                  <input style={inputStyle} type="number" value={newRegion.minZ} onChange={(e) => setNewRegion({ ...newRegion, minZ: e.target.value })} />
+                </div>
+                <div style={{ padding: '0 8px', color: '#8b949e', fontSize: 18, paddingBottom: 8 }}>→</div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>Max X</label>
+                  <input style={inputStyle} type="number" value={newRegion.maxX} onChange={(e) => setNewRegion({ ...newRegion, maxX: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>Max Y</label>
+                  <input style={inputStyle} type="number" value={newRegion.maxY} onChange={(e) => setNewRegion({ ...newRegion, maxY: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>Max Z</label>
+                  <input style={inputStyle} type="number" value={newRegion.maxZ} onChange={(e) => setNewRegion({ ...newRegion, maxZ: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'end' }}>
+                <div style={{ width: 120 }}>
+                  <label style={{ display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 4 }}>Tick Rate</label>
+                  <input style={inputStyle} type="number" value={newRegion.tickRate} onChange={(e) => setNewRegion({ ...newRegion, tickRate: e.target.value })} />
+                </div>
+                <button style={btnStyle} onClick={handleCreateRegion}>Create Region</button>
+              </div>
+              {regionError && <p style={{ color: '#f85149', marginTop: 8, fontSize: 13 }}>{regionError}</p>}
+            </div>
+
             {regions.length === 0 ? (
               <p>No regions loaded.</p>
             ) : (
@@ -233,6 +462,7 @@ function App() {
                     <th style={thStyle}>Players</th>
                     <th style={thStyle}>Tick Rate</th>
                     <th style={thStyle}>Bounds</th>
+                    <th style={thStyle}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -250,6 +480,16 @@ function App() {
                       <td style={{ ...tdStyle, fontSize: 12, color: '#8b949e' }}>
                         ({r.bounds_min.x}, {r.bounds_min.y}, {r.bounds_min.z}) →
                         ({r.bounds_max.x}, {r.bounds_max.y}, {r.bounds_max.z})
+                      </td>
+                      <td style={tdStyle}>
+                        {r.id !== 'region-spawn' && (
+                          <button
+                            style={btnDangerStyle}
+                            onClick={() => handleDeleteRegion(r.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

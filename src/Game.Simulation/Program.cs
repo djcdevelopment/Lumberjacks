@@ -9,21 +9,33 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 builder.Services.AddSingleton<WorldState>();
+builder.Services.AddSingleton<InputQueue>();
+builder.Services.AddSingleton<Game.Contracts.Protocol.ITickBroadcaster, Game.Contracts.Protocol.NullTickBroadcaster>();
 builder.Services.AddHostedService<TickLoop>();
+builder.Services.AddScoped<PlayerHandler>();
 builder.Services.AddScoped<PlaceStructureHandler>();
 builder.Services.AddScoped<InventoryHandler>();
 builder.Services.AddScoped<Game.Simulation.Startup.StructureLoader>();
+builder.Services.AddScoped<Game.Simulation.Startup.RegionLoader>();
 builder.Services.AddDbContextFactory<GameDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("GameDb")
         ?? "Host=localhost;Database=game;Username=game;Password=game"));
 
 var app = builder.Build();
 
-// Load persisted structures into WorldState on startup
-await using (var scope = app.Services.CreateAsyncScope())
+// Load persisted data into WorldState on startup (graceful — works without DB)
+try
 {
-    var loader = scope.ServiceProvider.GetRequiredService<Game.Simulation.Startup.StructureLoader>();
-    await loader.LoadAsync();
+    await using var scope = app.Services.CreateAsyncScope();
+    var regionLoader = scope.ServiceProvider.GetRequiredService<Game.Simulation.Startup.RegionLoader>();
+    await regionLoader.LoadAsync();
+
+    var structureLoader = scope.ServiceProvider.GetRequiredService<Game.Simulation.Startup.StructureLoader>();
+    await structureLoader.LoadAsync();
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Could not load persisted data — running with in-memory defaults only");
 }
 
 app.MapServiceDefaults();
@@ -32,5 +44,6 @@ Game.Simulation.Endpoints.RegionEndpoints.Map(app);
 Game.Simulation.Endpoints.PlayerEndpoints.Map(app);
 Game.Simulation.Endpoints.StructureEndpoints.Map(app);
 Game.Simulation.Endpoints.InventoryEndpoints.Map(app);
+Game.Simulation.Endpoints.TickEndpoints.Map(app);
 
 app.Run();

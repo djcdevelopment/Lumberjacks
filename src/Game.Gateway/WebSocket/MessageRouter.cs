@@ -2,29 +2,40 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Game.Contracts.Protocol;
+using Game.Contracts.Protocol.Binary;
+using Game.Simulation.Handlers;
+using Game.Simulation.Tick;
+using Game.Simulation.World;
 
 namespace Game.Gateway.WebSocket;
 
 public class MessageRouter
 {
-    private readonly IHttpClientFactory _httpFactory;
     private readonly SessionManager _sessions;
-    private readonly IConfiguration _config;
+    private readonly InputQueue _inputQueue;
+    private readonly WorldState _world;
+    private readonly PlayerHandler _playerHandler;
+    private readonly PlaceStructureHandler _placeStructureHandler;
+    private readonly InventoryHandler _inventoryHandler;
     private readonly ILogger<MessageRouter> _logger;
 
     public MessageRouter(
-        IHttpClientFactory httpFactory,
         SessionManager sessions,
-        IConfiguration config,
+        InputQueue inputQueue,
+        WorldState world,
+        PlayerHandler playerHandler,
+        PlaceStructureHandler placeStructureHandler,
+        InventoryHandler inventoryHandler,
         ILogger<MessageRouter> logger)
     {
-        _httpFactory = httpFactory;
         _sessions = sessions;
-        _config = config;
+        _inputQueue = inputQueue;
+        _world = world;
+        _playerHandler = playerHandler;
+        _placeStructureHandler = placeStructureHandler;
+        _inventoryHandler = inventoryHandler;
         _logger = logger;
     }
-
-    private string SimUrl => _config["ServiceUrls:Simulation"] ?? "http://localhost:4001";
 
     public async Task RouteAsync(GameSession session, Envelope envelope)
     {
@@ -42,6 +53,10 @@ public class MessageRouter
                 await HandlePlayerMoveAsync(session, envelope);
                 break;
 
+            case MessageType.PlayerInput:
+                HandlePlayerInput(session, envelope);
+                break;
+
             case MessageType.PlaceStructure:
                 await HandlePlaceStructureAsync(session, envelope);
                 break;
@@ -56,6 +71,61 @@ public class MessageRouter
         }
     }
 
+    /// <summary>
+    /// Sends a fresh world_snapshot to a resumed session (re-sync after reconnect).
+    /// </summary>
+    public async Task SendWorldSnapshotAsync(GameSession session)
+    {
+        if (session.RegionId == null) return;
+
+        try
+        {
+            var joinResult = _playerHandler.Join(new JoinRequest
+            {
+                PlayerId = session.PlayerId,
+                RegionId = session.RegionId,
+                GuildId = session.GuildId,
+            });
+
+            if (joinResult.Success)
+            {
+                var snapshot = new
+                {
+                    region_id = session.RegionId,
+                    entities = joinResult.Entities,
+                    tick = 0,
+                };
+
+                var snapshotEnvelope = EnvelopeFactory.Create(MessageType.WorldSnapshot, snapshot);
+                await SendToSessionAsync(session, snapshotEnvelope);
+
+                // Notify others in the region
+                var playerUpdate = new
+                {
+                    entity_id = session.PlayerId,
+                    entity_type = "player",
+                    data = new Dictionary<string, object>
+                    {
+                        ["player_id"] = session.PlayerId,
+                        ["name"] = $"Player-{session.PlayerId[..8]}",
+                        ["position"] = new { x = 0, y = 0, z = 0 },
+                        ["connected"] = true,
+                    },
+                    tick = 0,
+                };
+                var updateEnvelope = EnvelopeFactory.Create(MessageType.EntityUpdate, playerUpdate);
+                await BroadcastToRegionAsync(session.RegionId, session.SessionId, updateEnvelope);
+
+                _logger.LogInformation("Player {PlayerId} re-joined {RegionId} after resume",
+                    session.PlayerId, session.RegionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send world snapshot on resume for {PlayerId}", session.PlayerId);
+        }
+    }
+
     public async Task HandleDisconnectAsync(GameSession session)
     {
         await HandleLeaveRegionAsync(session);
@@ -63,42 +133,36 @@ public class MessageRouter
 
     private async Task HandleJoinRegionAsync(GameSession session, Envelope envelope)
     {
-        var client = _httpFactory.CreateClient();
         var payload = envelope.Payload;
 
         var regionId = payload.GetProperty("region_id").GetString() ?? "region-spawn";
         var guildId = payload.TryGetProperty("guild_id", out var gidEl) ? gidEl.GetString() : null;
 
+        // Leave current region first if switching
+        if (session.RegionId != null && session.RegionId != regionId)
+            await HandleLeaveRegionAsync(session);
+
         // Store guild_id on the session so downstream actions can use it
         if (!string.IsNullOrEmpty(guildId))
             session.GuildId = guildId;
 
-        var response = await client.PostAsJsonAsync($"{SimUrl}/players/join", new
+        var result = _playerHandler.Join(new JoinRequest
         {
-            player_id = session.PlayerId,
-            region_id = regionId,
-            guild_id = session.GuildId,
+            PlayerId = session.PlayerId,
+            RegionId = regionId,
+            GuildId = session.GuildId,
         });
 
-        if (response.IsSuccessStatusCode)
+        if (result.Success)
         {
-            var body = await response.Content.ReadAsStringAsync();
-            var result = JsonDocument.Parse(body).RootElement;
+            // Track which region this session is in
+            session.RegionId = regionId;
 
             // Send world_snapshot to the joining player
-            var entities = new List<Dictionary<string, object>>();
-            if (result.TryGetProperty("entities", out var entArray))
-            {
-                foreach (var ent in entArray.EnumerateArray())
-                {
-                    entities.Add(JsonSerializer.Deserialize<Dictionary<string, object>>(ent.GetRawText())!);
-                }
-            }
-
             var snapshot = new
             {
                 region_id = regionId,
-                entities,
+                entities = result.Entities,
                 tick = 0,
             };
 
@@ -121,152 +185,183 @@ public class MessageRouter
             };
 
             var updateEnvelope = EnvelopeFactory.Create(MessageType.EntityUpdate, playerUpdate);
-            await BroadcastAsync(session.SessionId, updateEnvelope);
+            await BroadcastToRegionAsync(regionId, session.SessionId, updateEnvelope);
 
             _logger.LogInformation("Player {PlayerId} joined {RegionId}", session.PlayerId, regionId);
         }
         else
         {
-            var errorBody = await response.Content.ReadAsStringAsync();
-            await SendErrorAsync(session, "JOIN_FAILED", $"Join failed: {errorBody}");
+            await SendErrorAsync(session, "JOIN_FAILED", $"Join failed: {result.Error}");
         }
     }
 
+    /// <summary>
+    /// New input-driven path: enqueue raw input directly into the simulation's InputQueue.
+    /// No HTTP roundtrip — this is the key scalability improvement.
+    /// The TickLoop will process this input on the next tick.
+    /// </summary>
+    private void HandlePlayerInput(GameSession session, Envelope envelope)
+    {
+        var payload = envelope.Payload;
+
+        var direction = payload.TryGetProperty("direction", out var dirEl) ? dirEl.GetByte() : (byte)0;
+        var speedPercent = payload.TryGetProperty("speed_percent", out var spdEl) ? spdEl.GetByte() : (byte)0;
+        var actionFlags = payload.TryGetProperty("action_flags", out var actEl) ? actEl.GetByte() : (byte)0;
+        var inputSeq = payload.TryGetProperty("input_seq", out var seqEl) ? (ushort)seqEl.GetUInt32() : (ushort)0;
+
+        EnqueueInput(session.PlayerId, direction, speedPercent, actionFlags, inputSeq);
+    }
+
+    /// <summary>
+    /// Binary input path: called directly from middleware when a binary player_input frame arrives.
+    /// Skips JSON deserialization entirely.
+    /// </summary>
+    public void HandlePlayerInputBinary(GameSession session, PlayerInputBinary input)
+    {
+        EnqueueInput(session.PlayerId, input.Direction, input.SpeedPercent, input.ActionFlags, input.InputSeq);
+    }
+
+    private void EnqueueInput(string playerId, byte direction, byte speedPercent, byte actionFlags, ushort inputSeq)
+    {
+        var input = new PlayerInputMessage
+        {
+            Direction = direction,
+            SpeedPercent = speedPercent,
+            ActionFlags = actionFlags,
+            InputSeq = inputSeq,
+        };
+
+        _inputQueue.Enqueue(playerId, input, _world.CurrentTick);
+    }
+
+    /// <summary>
+    /// Legacy path: accepts absolute positions. Kept for backwards compatibility.
+    /// New clients should use player_input. Movement broadcasting is handled by TickBroadcaster.
+    /// </summary>
     private async Task HandlePlayerMoveAsync(GameSession session, Envelope envelope)
     {
-        var client = _httpFactory.CreateClient();
         var payload = envelope.Payload;
 
         var position = payload.GetProperty("position");
         var velocity = payload.TryGetProperty("velocity", out var vel) ? vel : default;
 
-        var posObj = new
-        {
-            x = position.GetProperty("x").GetDouble(),
-            y = position.GetProperty("y").GetDouble(),
-            z = position.GetProperty("z").GetDouble(),
-        };
+        var posVec = new Game.Contracts.Entities.Vec3(
+            position.GetProperty("x").GetDouble(),
+            position.GetProperty("y").GetDouble(),
+            position.GetProperty("z").GetDouble());
 
-        var velObj = new
-        {
-            x = velocity.ValueKind != JsonValueKind.Undefined ? velocity.GetProperty("x").GetDouble() : 0.0,
-            y = velocity.ValueKind != JsonValueKind.Undefined ? velocity.GetProperty("y").GetDouble() : 0.0,
-            z = velocity.ValueKind != JsonValueKind.Undefined ? velocity.GetProperty("z").GetDouble() : 0.0,
-        };
+        var velVec = new Game.Contracts.Entities.Vec3(
+            velocity.ValueKind != JsonValueKind.Undefined ? velocity.GetProperty("x").GetDouble() : 0.0,
+            velocity.ValueKind != JsonValueKind.Undefined ? velocity.GetProperty("y").GetDouble() : 0.0,
+            velocity.ValueKind != JsonValueKind.Undefined ? velocity.GetProperty("z").GetDouble() : 0.0);
 
-        var response = await client.PostAsJsonAsync($"{SimUrl}/players/move", new
+        var result = _playerHandler.Move(new MoveRequest
         {
-            player_id = session.PlayerId,
-            position = posObj,
-            velocity = velObj,
+            PlayerId = session.PlayerId,
+            Position = posVec,
+            Velocity = velVec,
         });
 
-        if (response.IsSuccessStatusCode)
+        if (result.Success && result.Corrected)
         {
-            // Broadcast position to all other players
-            var moveUpdate = new
+            // Send correction back to the mover
+            var correction = new
             {
                 entity_id = session.PlayerId,
                 entity_type = "player",
                 data = new Dictionary<string, object>
                 {
                     ["player_id"] = session.PlayerId,
-                    ["position"] = posObj,
-                    ["velocity"] = velObj,
+                    ["position"] = new { x = result.Position.X, y = result.Position.Y, z = result.Position.Z },
+                    ["velocity"] = new { x = result.Velocity.X, y = result.Velocity.Y, z = result.Velocity.Z },
+                    ["corrected"] = true,
                 },
                 tick = 0,
             };
-
-            var updateEnvelope = EnvelopeFactory.Create(MessageType.EntityUpdate, moveUpdate);
-            await BroadcastAsync(session.SessionId, updateEnvelope);
+            var corrEnvelope = EnvelopeFactory.Create(MessageType.EntityUpdate, correction);
+            await SendToSessionAsync(session, corrEnvelope);
         }
     }
 
     private async Task HandleLeaveRegionAsync(GameSession session)
     {
-        var client = _httpFactory.CreateClient();
+        var leavingRegion = session.RegionId;
 
-        var response = await client.PostAsJsonAsync($"{SimUrl}/players/leave", new
+        var result = _playerHandler.Leave(new LeaveRequest
         {
-            player_id = session.PlayerId,
+            PlayerId = session.PlayerId,
         });
 
-        if (response.IsSuccessStatusCode)
+        if (result.Removed)
         {
-            var body = await response.Content.ReadAsStringAsync();
-            var result = JsonDocument.Parse(body).RootElement;
-
-            if (result.TryGetProperty("removed", out var removed) && removed.GetBoolean())
+            // Broadcast entity_removed to players in the region the player was in
+            var removeEnvelope = EnvelopeFactory.Create(MessageType.EntityRemoved, new
             {
-                // Broadcast entity_removed to all remaining players
-                var removeEnvelope = EnvelopeFactory.Create(MessageType.EntityRemoved, new
-                {
-                    entity_id = session.PlayerId,
-                    tick = 0,
-                });
-                await BroadcastAsync(session.SessionId, removeEnvelope);
-
-                _logger.LogInformation("Player {PlayerId} left region", session.PlayerId);
-            }
+                entity_id = session.PlayerId,
+                tick = 0,
+            });
+            await BroadcastToRegionAsync(leavingRegion, session.SessionId, removeEnvelope);
         }
+
+        session.RegionId = null;
     }
 
     private async Task HandlePlaceStructureAsync(GameSession session, Envelope envelope)
     {
-        var client = _httpFactory.CreateClient();
-
         var payload = envelope.Payload;
         var structureType = payload.GetProperty("structure_type").GetString() ?? "unknown";
         var position = payload.GetProperty("position");
         var rotation = payload.TryGetProperty("rotation", out var rotEl) ? rotEl.GetDouble() : 0.0;
 
-        var request = new
+        var result = await _placeStructureHandler.HandleAsync(new PlaceStructureRequest
         {
-            player_id = session.PlayerId,
-            region_id = "region-spawn",
-            structure_type = structureType,
-            position = new
-            {
-                x = position.GetProperty("x").GetDouble(),
-                y = position.GetProperty("y").GetDouble(),
-                z = position.GetProperty("z").GetDouble(),
-            },
-            rotation,
-            guild_id = session.GuildId,
-        };
+            PlayerId = session.PlayerId,
+            RegionId = session.RegionId ?? "region-spawn",
+            StructureType = structureType,
+            Position = new Game.Contracts.Entities.Vec3(
+                position.GetProperty("x").GetDouble(),
+                position.GetProperty("y").GetDouble(),
+                position.GetProperty("z").GetDouble()),
+            Rotation = rotation,
+            GuildId = session.GuildId,
+        });
 
-        var response = await client.PostAsJsonAsync($"{SimUrl}/structures/place", request);
-
-        if (response.IsSuccessStatusCode)
+        if (result.Success)
         {
-            var body = await response.Content.ReadAsStringAsync();
-            var result = JsonDocument.Parse(body).RootElement;
-
+            var s = result.Structure!;
             var entityUpdate = new
             {
-                entity_id = result.GetProperty("structure_id").GetString(),
+                entity_id = s.Id,
                 entity_type = "structure",
-                data = JsonSerializer.Deserialize<Dictionary<string, object>>(body),
+                data = new Dictionary<string, object>
+                {
+                    ["structure_id"] = s.Id,
+                    ["type"] = s.Type,
+                    ["position"] = new { x = s.Position.X, y = s.Position.Y, z = s.Position.Z },
+                    ["rotation"] = s.Rotation,
+                    ["owner_id"] = s.OwnerId,
+                    ["region_id"] = s.RegionId,
+                    ["placed_at"] = s.PlacedAt,
+                    ["tags"] = s.Tags,
+                },
                 tick = 0,
             };
 
             var updateEnvelope = EnvelopeFactory.Create(MessageType.EntityUpdate, entityUpdate);
             await SendToSessionAsync(session, updateEnvelope);
-            await BroadcastAsync(session.SessionId, updateEnvelope);
+            await BroadcastToRegionAsync(session.RegionId, session.SessionId, updateEnvelope);
 
             _logger.LogInformation("Structure placed by {PlayerId}: {StructureId}",
-                session.PlayerId, result.GetProperty("structure_id").GetString());
+                session.PlayerId, s.Id);
         }
         else
         {
-            var errorBody = await response.Content.ReadAsStringAsync();
-            await SendErrorAsync(session, "PLACEMENT_FAILED", $"Structure placement failed: {errorBody}");
+            await SendErrorAsync(session, "PLACEMENT_FAILED", $"Structure placement failed: {result.Error}");
         }
     }
 
     private async Task HandleInteractAsync(GameSession session, Envelope envelope)
     {
-        var client = _httpFactory.CreateClient();
         var payload = envelope.Payload;
         var action = payload.GetProperty("action").GetString();
 
@@ -275,41 +370,31 @@ public class MessageRouter
             case "pickup":
             {
                 var itemId = payload.GetProperty("item_id").GetString()!;
-                var response = await client.PostAsJsonAsync($"{SimUrl}/items/pickup", new
-                {
-                    player_id = session.PlayerId,
-                    item_id = itemId,
-                });
+                var result = await _inventoryHandler.PickupItemAsync(session.PlayerId, itemId);
 
-                if (response.IsSuccessStatusCode)
+                if (result.Success)
                 {
-                    var body = await response.Content.ReadAsStringAsync();
-                    var result = JsonDocument.Parse(body).RootElement;
-
-                    // Tell the picker their inventory changed
                     var pickupEnv = EnvelopeFactory.Create(MessageType.EventEmitted, new
                     {
                         event_type = "item_picked_up",
                         item_id = itemId,
-                        item_type = result.GetProperty("item_type").GetString(),
-                        quantity = result.GetProperty("quantity").GetInt32(),
+                        item_type = result.Item!.ItemType,
+                        quantity = result.Item.Quantity,
                     });
                     await SendToSessionAsync(session, pickupEnv);
 
-                    // Broadcast entity_removed for the item to all players
                     var removeEnv = EnvelopeFactory.Create(MessageType.EntityRemoved, new
                     {
                         entity_id = itemId,
                         tick = 0,
                     });
-                    await BroadcastAsync(null, removeEnv);
+                    await BroadcastToRegionAsync(session.RegionId, null, removeEnv);
 
                     _logger.LogInformation("Player {PlayerId} picked up item {ItemId}", session.PlayerId, itemId);
                 }
                 else
                 {
-                    var errorBody = await response.Content.ReadAsStringAsync();
-                    await SendErrorAsync(session, "PICKUP_FAILED", errorBody);
+                    await SendErrorAsync(session, "PICKUP_FAILED", result.Error!);
                 }
                 break;
             }
@@ -320,15 +405,9 @@ public class MessageRouter
                 var itemType = payload.GetProperty("item_type").GetString()!;
                 var quantity = payload.TryGetProperty("quantity", out var qtyEl) ? qtyEl.GetInt32() : 1;
 
-                var response = await client.PostAsJsonAsync($"{SimUrl}/items/store", new
-                {
-                    player_id = session.PlayerId,
-                    container_id = containerId,
-                    item_type = itemType,
-                    quantity,
-                });
+                var result = await _inventoryHandler.StoreItemAsync(session.PlayerId, containerId, itemType, quantity);
 
-                if (response.IsSuccessStatusCode)
+                if (result.Success)
                 {
                     var storeEnv = EnvelopeFactory.Create(MessageType.EventEmitted, new
                     {
@@ -344,8 +423,7 @@ public class MessageRouter
                 }
                 else
                 {
-                    var errorBody = await response.Content.ReadAsStringAsync();
-                    await SendErrorAsync(session, "STORE_FAILED", errorBody);
+                    await SendErrorAsync(session, "STORE_FAILED", result.Error!);
                 }
                 break;
             }
@@ -374,12 +452,20 @@ public class MessageRouter
         await SendToSessionAsync(session, errEnvelope);
     }
 
-    private async Task BroadcastAsync(string? excludeSessionId, Envelope envelope)
+    /// <summary>
+    /// Broadcasts to all sessions in the given region, excluding the specified session.
+    /// Falls back to global broadcast if regionId is null (for backwards compatibility).
+    /// </summary>
+    private async Task BroadcastToRegionAsync(string? regionId, string? excludeSessionId, Envelope envelope)
     {
         var json = EnvelopeFactory.Serialize(envelope);
         var bytes = Encoding.UTF8.GetBytes(json);
 
-        foreach (var s in _sessions.GetAll())
+        var targets = regionId != null
+            ? _sessions.GetByRegion(regionId)
+            : _sessions.GetAll();
+
+        foreach (var s in targets)
         {
             if (excludeSessionId != null && s.SessionId == excludeSessionId) continue;
             if (s.Socket.State != WebSocketState.Open) continue;

@@ -33,8 +33,18 @@ public class PlaceStructureHandler
     public async Task<PlaceStructureResult> HandleAsync(PlaceStructureRequest request)
     {
         // Validate region exists
-        if (!_world.Regions.ContainsKey(request.RegionId))
+        if (!_world.Regions.TryGetValue(request.RegionId, out var region))
             return PlaceStructureResult.Fail("Region not found");
+
+        // Validate position is within region bounds
+        var pos = request.Position;
+        if (pos.X < region.BoundsMin.X || pos.X > region.BoundsMax.X ||
+            pos.Y < region.BoundsMin.Y || pos.Y > region.BoundsMax.Y ||
+            pos.Z < region.BoundsMin.Z || pos.Z > region.BoundsMax.Z)
+        {
+            return PlaceStructureResult.Fail(
+                $"Position ({pos.X},{pos.Y},{pos.Z}) is outside region bounds");
+        }
 
         // Create the structure
         var structure = new Structure
