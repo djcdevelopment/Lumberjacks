@@ -22,6 +22,7 @@ services:
       target: gateway
     ports:
       - "4000:4000"
+      - "4005:4005/udp"
     environment:
       Urls: "http://+:4000"
       ConnectionStrings__GameDb: "Host=postgres;Database=game;Username=game;Password=game"

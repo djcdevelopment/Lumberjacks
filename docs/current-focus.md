@@ -42,7 +42,7 @@ Gateway (port 4000) is the unified host — WebSocket, tick loop, simulation, an
 - Docker: multi-stage Dockerfile, docker-compose.yml, docker-compose.dev.yml
 - Graceful startup: DB loader failures caught, runs with in-memory defaults if Postgres unavailable
 - 157 tests passing (106 Contracts + 51 Simulation)
-- E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`
+- E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`, `test-movement.js`, `test-vertical-slice.js`
 
 Simulation (port 4001) can also run standalone with NullTickBroadcaster for HTTP-only testing.
 

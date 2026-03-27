@@ -61,7 +61,7 @@ All service projects   (→ Contracts, Persistence, ServiceDefaults)
 
 ### Services
 
-`src/Game.Gateway` (port 4000)
+`src/Game.Gateway` (port 4000 WebSocket/HTTP, port 4005 UDP)
 - **Unified host**: runs WebSocket middleware, UDP transport, tick loop, simulation step, and broadcasting all in-process.
 - WebSocket middleware: session lifecycle, resume with `?resume=TOKEN`, binary + JSON dual-mode.
 - UdpTransport: UDP datagram channel (port 4005), session binding via token, fast-path player_input deserialization.
