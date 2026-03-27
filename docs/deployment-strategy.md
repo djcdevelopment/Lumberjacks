@@ -15,12 +15,9 @@ Get the backend stack reachable from the public internet so real players (friend
               │                  │
               │  ┌─────────┐    │
      ws:4000──┤  │ Gateway │    │
+              │  │ (+ Sim) │    │
               │  └────┬────┘    │
               │       │ http    │
-              │  ┌────┴────┐    │
-   http:4001──┤  │  Sim    │    │
-              │  └────┬────┘    │
-              │       │         │
               │  ┌────┴────┐   ┌┴──────────┐
    http:4002──┤  │EventLog │   │ Postgres  │
               │  └─────────┘   │ (Flexible │
@@ -33,6 +30,8 @@ Get the backend stack reachable from the public internet so real players (friend
               └─────────────────┘
 ```
 
+> The Gateway runs the simulation in-process (WorldState, TickLoop, all handlers). There is no separate Simulation service to deploy.
+
 ## Option A: Azure Container Apps (recommended for first deploy)
 
 **Why:** Managed container hosting, built-in ingress with TLS, scales to zero when idle (cheap during testing), supports WebSocket natively.
@@ -42,14 +41,14 @@ Get the backend stack reachable from the public internet so real players (friend
 2. Push Docker images: `docker tag game-gateway <acr>.azurecr.io/game-gateway && docker push`
 3. Create Azure Container Apps Environment
 4. Deploy each service as a Container App within the environment
-   - Internal services (Sim, EventLog, Progression) get internal ingress only
-   - Gateway gets external ingress (public WebSocket endpoint)
-   - OperatorApi gets external ingress (admin dashboard)
+   - Internal services (EventLog, Progression) get internal ingress only
+   - Gateway gets external ingress (public WebSocket endpoint, simulation in-process)
+   - OperatorApi gets external ingress (admin dashboard, proxies to Gateway for simulation data)
 5. Create Azure Database for PostgreSQL Flexible Server (cheapest tier: Burstable B1ms ~$13/mo)
 6. Run the DB init script against Azure Postgres to create tables
 7. Set connection strings via Container App secrets/env vars
 
-**Estimated cost:** ~$20-30/month during testing (Postgres + minimal container usage). Scale-to-zero means containers cost near $0 when nobody's connected.
+**Estimated cost:** ~$25-30/month during testing (Postgres + minimal container usage). Scale-to-zero means containers cost near $0 when nobody's connected.
 
 **Networking:**
 - Gateway exposed via HTTPS (Container Apps provides TLS termination)
@@ -89,13 +88,15 @@ Get the backend stack reachable from the public internet so real players (friend
 
 ## DB Schema Init
 
-The Postgres tables were created by the original TS services and must exist before .NET services start. For a fresh Azure Postgres, run the init script:
+The Postgres tables must exist before .NET services start. For a fresh Azure Postgres, run the init script:
 
 ```
 infra/docker/init.sql   ← Full schema including regions table. Ready for fresh deployments.
 ```
 
-Regenerate if schema changes: `docker exec langfuse-postgres-1 pg_dump -U game -d game --schema-only > infra/docker/init.sql`
+Regenerate if schema changes: `docker exec game-postgres pg_dump -U game -d game --schema-only > infra/docker/init.sql`
+
+The local Docker compose auto-mounts `init.sql` via `/docker-entrypoint-initdb.d/` so fresh volumes get the schema automatically.
 
 ## CORS Configuration
 
@@ -111,12 +112,20 @@ For WebSocket connections, CORS is not enforced by the browser the same way — 
 
 ## Test Commands
 
+All smoke test scripts accept an optional gateway URL argument for remote testing:
+
 ```bash
-# Against local Docker stack
+# Against local stack
 node scripts/test-multiplayer.js 10
+node scripts/test-vertical-slice.js
+node scripts/test-challenges.js
+node scripts/test-resume.js
 
 # Against Azure deployment
-node scripts/test-multiplayer.js 10 ws://your-azure-host:4000
+node scripts/test-multiplayer.js 10 wss://$GATEWAY_URL
+node scripts/test-vertical-slice.js wss://$GATEWAY_URL
+node scripts/test-challenges.js wss://$GATEWAY_URL
+node scripts/test-resume.js wss://$GATEWAY_URL
 
 # Against a friend's machine
 node scripts/test-multiplayer.js 1 ws://friend-ip:4000

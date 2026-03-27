@@ -27,22 +27,6 @@ services:
     environment:
       Urls: "http://+:4000"
       ConnectionStrings__GameDb: "Host=postgres;Database=game;Username=game;Password=game"
-      ServiceUrls__Simulation: "http://simulation:4001"
-      ServiceUrls__EventLog: "http://eventlog:4002"
-      ServiceUrls__Progression: "http://progression:4003"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  simulation:
-    build:
-      context: ../..
-      target: simulation
-    ports:
-      - "4001:4001"
-    environment:
-      Urls: "http://+:4001"
-      ConnectionStrings__GameDb: "Host=postgres;Database=game;Username=game;Password=game"
       ServiceUrls__EventLog: "http://eventlog:4002"
       ServiceUrls__Progression: "http://progression:4003"
     depends_on:
@@ -85,7 +69,6 @@ services:
       Urls: "http://+:4004"
       ConnectionStrings__GameDb: "Host=postgres;Database=game;Username=game;Password=game"
       ServiceUrls__Gateway: "http://gateway:4000"
-      ServiceUrls__Simulation: "http://simulation:4001"
       ServiceUrls__EventLog: "http://eventlog:4002"
       ServiceUrls__Progression: "http://progression:4003"
     depends_on:

@@ -50,8 +50,8 @@ ACR_LOGIN=$(az acr show --name $ACR_NAME --query loginServer -o tsv)
 From the repo root:
 
 ```bash
-# Build all service targets and push
-for SERVICE in gateway simulation eventlog progression operatorapi; do
+# Build all service targets and push (4 services — simulation runs in-process in the Gateway)
+for SERVICE in gateway eventlog progression operatorapi; do
   docker build --target $SERVICE -t $ACR_LOGIN/game-$SERVICE:latest .
   docker push $ACR_LOGIN/game-$SERVICE:latest
 done
@@ -121,6 +121,8 @@ CONN_STR="Host=$PG_HOST;Database=$PG_DB;Username=$PG_ADMIN;Password=$PG_PASSWORD
 
 Deploy in order: internal services first, then services that depend on them.
 
+> **Note:** The Gateway runs the simulation in-process (WorldState, TickLoop, handlers). There is no separate Simulation container to deploy.
+
 ### 8a. EventLog (internal only)
 
 ```bash
@@ -161,29 +163,7 @@ az containerapp create \
     "ConnectionStrings__GameDb=$CONN_STR"
 ```
 
-### 8c. Simulation (internal only)
-
-```bash
-az containerapp create \
-  --resource-group $RG \
-  --environment $ENV_NAME \
-  --name simulation \
-  --image $ACR_LOGIN/game-simulation:latest \
-  --registry-server $ACR_LOGIN \
-  --registry-username $(az acr credential show --name $ACR_NAME --query username -o tsv) \
-  --registry-password $(az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv) \
-  --target-port 4001 \
-  --ingress internal \
-  --min-replicas 1 \
-  --max-replicas 1 \
-  --env-vars \
-    "Urls=http://+:4001" \
-    "ConnectionStrings__GameDb=$CONN_STR" \
-    "ServiceUrls__EventLog=https://eventlog.internal.$ENV_NAME.azurecontainerapps.io" \
-    "ServiceUrls__Progression=https://progression.internal.$ENV_NAME.azurecontainerapps.io"
-```
-
-### 8d. Gateway (external — public WebSocket endpoint)
+### 8c. Gateway (external — public WebSocket endpoint, runs simulation in-process)
 
 ```bash
 az containerapp create \
@@ -202,7 +182,6 @@ az containerapp create \
   --env-vars \
     "Urls=http://+:4000" \
     "ConnectionStrings__GameDb=$CONN_STR" \
-    "ServiceUrls__Simulation=https://simulation.internal.$ENV_NAME.azurecontainerapps.io" \
     "ServiceUrls__EventLog=https://eventlog.internal.$ENV_NAME.azurecontainerapps.io" \
     "ServiceUrls__Progression=https://progression.internal.$ENV_NAME.azurecontainerapps.io"
 
@@ -210,7 +189,7 @@ GATEWAY_URL=$(az containerapp show --resource-group $RG --name gateway --query "
 echo "Gateway: wss://$GATEWAY_URL"
 ```
 
-### 8e. OperatorApi (external — admin dashboard)
+### 8d. OperatorApi (external — admin dashboard)
 
 ```bash
 az containerapp create \
@@ -229,7 +208,6 @@ az containerapp create \
     "Urls=http://+:4004" \
     "ConnectionStrings__GameDb=$CONN_STR" \
     "ServiceUrls__Gateway=https://gateway.internal.$ENV_NAME.azurecontainerapps.io" \
-    "ServiceUrls__Simulation=https://simulation.internal.$ENV_NAME.azurecontainerapps.io" \
     "ServiceUrls__EventLog=https://eventlog.internal.$ENV_NAME.azurecontainerapps.io" \
     "ServiceUrls__Progression=https://progression.internal.$ENV_NAME.azurecontainerapps.io" \
     "CORS_ORIGINS=https://$GATEWAY_URL,http://localhost:5173"
@@ -298,18 +276,19 @@ node scripts/test-challenges.js wss://$GATEWAY_URL
 
 Validates guild challenge creation, progress increment, and auto-completion.
 
+> **Note:** The challenge and vertical-slice tests hit HTTP endpoints on ports 4002-4004 directly. When testing against Azure, internal services are not directly reachable — these tests work best for local dev or when OperatorApi proxies are used.
+
 ### 9g. Full Validation Checklist
 
 | Check | Command | Expected |
 |-------|---------|----------|
 | Gateway health | `curl https://$GATEWAY_URL/health` | `{"status":"ok"}` |
 | Operator health | `curl https://$OPERATOR_URL/health` | `{"status":"ok"}` |
-| Service status | `curl https://$OPERATOR_URL/api/status` | All 5 services `ok` |
+| Service status | `curl https://$OPERATOR_URL/api/status` | All 4 services `up` |
 | Tick running | `curl https://$OPERATOR_URL/api/tick` | `current_tick > 0` |
 | WS connects | `wscat -c wss://$GATEWAY_URL` | `session_started` envelope |
 | Multiplayer | `node scripts/test-multiplayer.js 5 wss://$GATEWAY_URL` | All pass |
 | Resume | `node scripts/test-resume.js wss://$GATEWAY_URL` | All pass |
-| Challenges | `node scripts/test-challenges.js wss://$GATEWAY_URL` | All pass |
 | DB persistence | Restart gateway, reconnect — structures still there | Data survives restart |
 
 ## 10. Updating Services
@@ -332,7 +311,7 @@ az containerapp update \
 To update all services at once:
 
 ```bash
-for SERVICE in gateway simulation eventlog progression operatorapi; do
+for SERVICE in gateway eventlog progression operatorapi; do
   docker build --target $SERVICE -t $ACR_LOGIN/game-$SERVICE:latest .
   docker push $ACR_LOGIN/game-$SERVICE:latest
   az containerapp update --resource-group $RG --name $SERVICE --image $ACR_LOGIN/game-$SERVICE:latest
@@ -343,18 +322,17 @@ done
 
 ### Scale-to-Zero (save money when idle)
 
-Set min replicas to 0 for services that don't need to run continuously. **Not recommended for Simulation** (tick loop must be always-on) but fine for EventLog and Progression during testing:
+Set min replicas to 0 for services that don't need to run continuously. Fine for EventLog and Progression during testing:
 
 ```bash
 az containerapp update --resource-group $RG --name eventlog --min-replicas 0 --max-replicas 3
 az containerapp update --resource-group $RG --name progression --min-replicas 0 --max-replicas 3
 ```
 
-Gateway and Simulation should stay at min 1:
+Gateway must stay at min 1 (runs tick loop + holds WebSocket sessions):
 
 ```bash
 az containerapp update --resource-group $RG --name gateway --min-replicas 1 --max-replicas 5
-az containerapp update --resource-group $RG --name simulation --min-replicas 1 --max-replicas 1
 ```
 
 ### HTTP Scaling Rules
@@ -386,8 +364,7 @@ az containerapp update --resource-group $RG --name gateway --min-replicas 3 --ma
 
 | Service | Min | Max | Notes |
 |---------|-----|-----|-------|
-| Gateway | 1 | 10 | Stateful WebSocket sessions — scaling requires sticky sessions or session migration. For now, keep at 1 replica until session handoff is implemented. |
-| Simulation | 1 | 1 | **Single instance only.** World state is in-memory. Multiple replicas would create split-brain. Scale vertically (more CPU/RAM) not horizontally. |
+| Gateway | 1 | 10 | Runs simulation in-process. Stateful WebSocket sessions — scaling requires sticky sessions or session migration. Keep at 1 replica until session handoff is implemented. |
 | EventLog | 0 | 5 | Stateless, scales freely. |
 | Progression | 0 | 5 | Stateless, atomic DB upserts handle concurrency. |
 | OperatorApi | 0 | 3 | Stateless proxy, low traffic. |
@@ -395,19 +372,12 @@ az containerapp update --resource-group $RG --name gateway --min-replicas 3 --ma
 ### Vertical Scaling (more CPU/RAM per replica)
 
 ```bash
-# Give Simulation more resources (default is 0.25 CPU / 0.5Gi)
-az containerapp update \
-  --resource-group $RG \
-  --name simulation \
-  --cpu 1.0 \
-  --memory 2Gi
-
-# Give Gateway more resources for WebSocket connections
+# Give Gateway more resources for WebSocket connections + simulation
 az containerapp update \
   --resource-group $RG \
   --name gateway \
-  --cpu 0.5 \
-  --memory 1Gi
+  --cpu 1.0 \
+  --memory 2Gi
 ```
 
 ### PostgreSQL Scaling
@@ -442,7 +412,7 @@ az postgres flexible-server update \
 az containerapp logs show --resource-group $RG --name gateway --follow
 
 # Query recent logs
-az containerapp logs show --resource-group $RG --name simulation --tail 100
+az containerapp logs show --resource-group $RG --name gateway --tail 100
 ```
 
 ### Check Replica Status
@@ -473,9 +443,9 @@ This deletes the Container Apps, ACR, Postgres, and all associated resources. Da
 | Resource | Tier | Monthly Cost |
 |----------|------|-------------|
 | Postgres Flexible Server | B1ms | ~$13 |
-| Container Apps (5 services, always-on) | Consumption | ~$5-15 |
+| Container Apps (4 services, always-on) | Consumption | ~$5-10 |
 | Container Registry | Basic | ~$5 |
-| **Total (testing)** | | **~$25-35/mo** |
+| **Total (testing)** | | **~$25-30/mo** |
 
 With scale-to-zero on idle services, costs drop to ~$15-20/mo during periods of no activity.
 
@@ -488,7 +458,7 @@ az containerapp logs show --resource-group $RG --name <service> --tail 50
 Usually a bad connection string or missing env var.
 
 **WebSocket won't connect:**
-- Container Apps requires `--transport http` for WebSocket support (set in step 8d)
+- Container Apps requires `--transport http` for WebSocket support (set in step 8c)
 - Client must use `wss://` (TLS), not `ws://`
 - Check Gateway logs for connection errors
 

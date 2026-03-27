@@ -1,9 +1,14 @@
 // End-to-end vertical slice test
-// Usage: node scripts/test-vertical-slice.js
+// Usage: node scripts/test-vertical-slice.js [gatewayUrl]
 
 const WebSocket = require('ws');
 
-const ws = new WebSocket('ws://localhost:4000');
+const GATEWAY = process.argv[2] || 'ws://localhost:4000';
+const SIM = GATEWAY.replace('ws://', 'http://').replace('wss://', 'https://');
+const EVENTS = GATEWAY.replace('ws://', 'http://').replace('wss://', 'https://').replace(':4000', ':4002');
+const PROGRESSION_URL = GATEWAY.replace('ws://', 'http://').replace('wss://', 'https://').replace(':4000', ':4003');
+const OPERATOR = GATEWAY.replace('ws://', 'http://').replace('wss://', 'https://').replace(':4000', ':4004');
+const ws = new WebSocket(GATEWAY);
 let sessionId, playerId;
 
 ws.on('open', () => {
@@ -43,22 +48,22 @@ ws.on('message', (data) => {
         setTimeout(async () => {
             try {
                 // Check structures in simulation
-                const structRes = await fetch('http://localhost:4000/structures?region_id=region-spawn');
+                const structRes = await fetch(`${SIM}/structures?region_id=region-spawn`);
                 const structures = await structRes.json();
                 console.log(`\n[5] Structures in region: ${structures.length}`);
 
                 // Check events in event-log
-                const evtRes = await fetch('http://localhost:4002/events?type=structure_placed&limit=1');
+                const evtRes = await fetch(`${EVENTS}/events?type=structure_placed&limit=1`);
                 const events = await evtRes.json();
                 console.log(`[6] structure_placed events: ${events.count}`);
 
                 // Check player progress
-                const progRes = await fetch(`http://localhost:4003/players/${playerId}/progress`);
+                const progRes = await fetch(`${PROGRESSION_URL}/players/${playerId}/progress`);
                 const progress = await progRes.json();
                 console.log(`[7] Player progress: ${JSON.stringify(progress)}`);
 
                 // Check operator API
-                const opRes = await fetch('http://localhost:4004/api/structures');
+                const opRes = await fetch(`${OPERATOR}/api/structures`);
                 const opStructures = await opRes.json();
                 console.log(`[8] Operator API structures: ${opStructures.length}`);
 

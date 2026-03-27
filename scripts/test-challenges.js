@@ -1,7 +1,8 @@
 /**
  * End-to-end test: Inventory + Guild Challenge system
  *
- * Prerequisites: All 5 .NET services running on ports 4000-4004, Postgres on 5433
+ * Prerequisites: Gateway (4000), EventLog (4002), Progression (4003), OperatorApi (4004), Postgres on 5433
+ * Usage: node scripts/test-challenges.js [gatewayUrl]
  *
  * Flow:
  * 1. Create a guild challenge: "Place 3 structures" → awards 50 guild points
@@ -13,9 +14,9 @@
 
 const WebSocket = require("ws");
 
-const SIM = "http://localhost:4000";
-const PROGRESSION = "http://localhost:4003";
-const GATEWAY = "ws://localhost:4000";
+const GATEWAY = process.argv[2] || "ws://localhost:4000";
+const SIM = GATEWAY.replace("ws://", "http://").replace("wss://", "https://");
+const PROGRESSION = GATEWAY.replace("ws://", "http://").replace("wss://", "https://").replace(":4000", ":4003");
 
 const guildId = "guild-" + Math.random().toString(36).slice(2, 10);
 
