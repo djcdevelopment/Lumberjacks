@@ -29,6 +29,8 @@ ADRs:
 - [ADR 0003: Multi-Lane Transport Strategy](./adrs/0003-websocket-transport.md)
 - [ADR 0004: PostgreSQL Event Log](./adrs/0004-postgresql-event-log.md)
 - [ADR 0005: .NET as Authoritative Backend Runtime](./adrs/0005-dotnet-authoritative-backend-runtime.md)
+- [ADR 0012: Binary Payload Serialization](./adrs/0012-binary-payload-serialization.md)
+- [ADR 0013: Dual-Channel UDP Transport](./adrs/0013-dual-channel-udp-transport.md)
 
 Templates:
 
