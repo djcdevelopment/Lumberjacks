@@ -7,4 +7,9 @@
     <ProjectReference Include="..\Game.Persistence\Game.Persistence.csproj" />
     <ProjectReference Include="..\Game.ServiceDefaults\Game.ServiceDefaults.csproj" />
   </ItemGroup>
+
+  <!-- Prevent appsettings.json from conflicting when this project is referenced by Gateway -->
+  <ItemGroup>
+    <Content Update="appsettings.json" CopyToPublishDirectory="Never" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+  </ItemGroup>
 </Project>
