@@ -8,6 +8,21 @@ This repository contains the monorepo for the platform, scaled for a clean separ
 - `clients`, `services`, `shared` packages, `plugins`, `infra`, `tests`, and `docs`.
 - A deterministic, authoritative backend (.NET + PostgreSQL) emphasizing relevance management, data-driven content, and a thin-client architecture.
 
+## Prerequisites
+To build and run the platform locally, you must install:
+- **.NET 8+ SDK** (for the authoritative backend simulation & handlers)
+- **Node.js v18+ & npm** (for the Admin Web UI, `concurrently` tooling, and smoke testing scripts)
+- **Docker & Docker Compose** (for spinning up the local PostgreSQL database)
+
+## Local Development & Smoke Testing
+1. **Install dependencies:** `npm install`
+2. **Boot the infrastructure (PostgreSQL):** `npm run dev:infra` *(stop it via `npm run dev:stop-infra`)*
+3. **Build the .NET services:** `npm run build:dotnet`
+4. **Verify unit tests:** `npm run test:dotnet` *(Expected: 157+ passing tests, 0 failures).*
+5. **Run the full stack natively:** `npm run dev`
+   *This concurrently starts the Gateway (port 4000 for WS, 4005 for UDP), Simulation, EventLog, Progression, OperatorApi, and Admin UI.*
+6. **End-to-End Smoke Testing:** With the stack running, execute `node scripts/test-vertical-slice.js` or `node scripts/test-multiplayer.js` in a new terminal to simulate clients connecting, dropping inputs, and validating server constraints.
+
 ## Architecture Decision Records (ADRs)
 We document our core architecture decisions in `docs/adrs/`. Key ones include:
 - [0001: Thin Client Platform](docs/adrs/0001-thin-client-platform.md)
