@@ -44,7 +44,7 @@ Gateway (port 4000) is the unified host — WebSocket, tick loop, simulation, an
 - 157 tests passing (106 Contracts + 51 Simulation)
 - E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`, `test-movement.js`, `test-vertical-slice.js`
 
-Simulation (port 4001) can also run standalone with NullTickBroadcaster for HTTP-only testing.
+Game.Simulation can also run standalone (port 4001) with NullTickBroadcaster for HTTP-only testing, but is not deployed as a separate service.
 
 ## Completed: Azure Deployment (2026-03-27)
 

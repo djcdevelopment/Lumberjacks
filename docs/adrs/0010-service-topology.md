@@ -10,17 +10,18 @@ The platform backend needs to be decomposed into services. Too few services and 
 
 ## Decision
 
-Five services in a single monorepo, with three shared libraries:
+Four deployed services in a single monorepo, with three shared libraries:
 
 ### Services
 
 | Service | Port | Responsibility | State |
 |---------|------|---------------|-------|
-| **Game.Gateway** | 4000 | WebSocket connections, session management, envelope routing | In-memory sessions |
-| **Game.Simulation** | 4001 | Authoritative world state, 20Hz tick loop, region/player management | In-memory (regions, players) |
+| **Game.Gateway** | 4000 (WS/HTTP), 4005 (UDP) | Unified host: WebSocket, UDP transport, in-process simulation (tick loop, physics, broadcasting), session management | In-memory (sessions, regions, players) |
 | **Game.EventLog** | 4002 | Append-only event ingestion and query | PostgreSQL (events table) |
 | **Game.Progression** | 4003 | Consume events, update player/guild progress | PostgreSQL (player_progress, guild_progress) |
 | **Game.OperatorApi** | 4004 | Admin dashboard backend, proxies to other services, health aggregation | Proxies + PostgreSQL read |
+
+> **Note:** `Game.Simulation` exists as a library project referenced by Gateway (runs in-process). It can also run standalone on port 4001 for isolated HTTP-only testing, but is **not deployed** as a separate service.
 
 ### Shared Libraries
 
@@ -45,9 +46,8 @@ All services (→ Contracts, Persistence*, ServiceDefaults)
 
 ## Rationale
 
-**Five services, not one or fifteen.** Each service maps to a distinct scaling and failure domain:
-- Gateway scales with connection count
-- Simulation scales with world complexity and tick rate
+**Four deployed services, not one or fifteen.** Each service maps to a distinct scaling and failure domain:
+- Gateway scales with connection count and world complexity (simulation runs in-process for minimal latency)
 - EventLog scales with write throughput
 - Progression scales with event consumption rate
 - OperatorApi is low-traffic admin tooling
@@ -56,12 +56,12 @@ All services (→ Contracts, Persistence*, ServiceDefaults)
 
 **Shared Contracts library.** Type definitions (entities, events, protocol messages) are shared at compile time rather than duplicated or generated. Changes to wire format are caught by the compiler across all services simultaneously.
 
-**Service-to-service communication is HTTP.** OperatorApi proxies to Simulation and EventLog over HTTP. No message bus, no service mesh, no RPC framework. HTTP is debuggable with curl, observable in logs, and sufficient for the current scale.
+**Service-to-service communication is HTTP.** OperatorApi proxies to Gateway, EventLog, and Progression over HTTP. No message bus, no service mesh, no RPC framework. HTTP is debuggable with curl, observable in logs, and sufficient for the current scale.
 
 ## Consequences
 
 - All services deploy independently but are developed in the same repo
 - `Game.Contracts` changes require rebuilding all downstream projects (by design — catches breaking changes)
 - Adding a new service means: create project, add to `Game.sln`, reference shared libraries, pick a port
-- The `npm run dev` script starts all 5 .NET services + admin-web via concurrently
+- The `npm run dev` script starts all 4 .NET services + admin-web via concurrently
 - Future: services may move to separate processes, containers, or hosts — the HTTP boundaries make this straightforward

@@ -9,8 +9,8 @@ Monorepo. The platform is too contract-heavy to scatter across unrelated reposit
   /Game.Contracts             # Shared types: entities, protocol, events
   /Game.Persistence           # EF Core DbContext, entity configs (Npgsql)
   /Game.ServiceDefaults       # Health checks, CORS, JSON snake_case config
-  /Game.Gateway               # Port 4000 — unified host: WebSocket, tick loop, simulation, broadcasting
-  /Game.Simulation            # Port 4001 — standalone simulation (also used as library by Gateway)
+  /Game.Gateway               # Port 4000 (WS/HTTP) + 4005 (UDP) — unified host: WebSocket, tick loop, simulation, broadcasting
+  /Game.Simulation            # Library (in-process in Gateway); can run standalone on port 4001 for testing
   /Game.EventLog              # Port 4002 — append/query events via Postgres
   /Game.Progression           # Port 4003 — consume events, challenges, progress
   /Game.OperatorApi           # Port 4004 — proxies to services, admin endpoints
@@ -71,8 +71,8 @@ All service projects   (→ Contracts, Persistence, ServiceDefaults)
 - TickBroadcaster: per-player AoI-filtered broadcasting using InterestManager. Sends via UDP for datagram-lane (binary sessions), WebSocket fallback.
 - Graceful startup: DB loader failures caught, runs with in-memory defaults if Postgres unavailable.
 
-`src/Game.Simulation` (port 4001)
-- Authoritative world simulation library (also runs standalone for HTTP-only testing).
+`src/Game.Simulation` (library, in-process in Gateway; standalone on port 4001 for testing)
+- Authoritative world simulation library.
 - WorldState: ConcurrentDictionary-backed state for regions, players, structures, items, plus SpatialGrid.
 - Handlers: PlayerHandler (join/move/leave), PlaceStructureHandler, InventoryHandler — used by both Gateway's MessageRouter and Simulation's HTTP endpoints.
 - Tick: InputQueue (per-player input buffer), SimulationStep (direction/speed physics, friction, bounds clamping), StateHasher (CRC32 determinism check).
@@ -102,9 +102,11 @@ All service projects   (→ Contracts, Persistence, ServiceDefaults)
 - Tabs: Status (tick diagnostics, service health), Events, Regions (create/delete), Structures, Players, Guilds.
 - Calls OperatorApi at /api/*.
 
-`clients/game-client`
-- Godot thin client (ADR 0006). Not yet built.
-- Will connect via WebSocket, send player_input, render entity_update messages.
+`clients/godot`
+- Godot 4.x thin client (ADR 0006). Vertical slice complete.
+- Connects via WebSocket, sends player_input, renders entity_update messages.
+- WASD movement, click-to-place structures, build mode, HUD overlay.
+- Reconnect with resume token, works against local and Azure backends.
 
 ### Scripts
 

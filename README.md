@@ -4,13 +4,19 @@
 Build a community-operated survival platform inspired by the charm of Valheim, but designed for 100+ player communities, Discord-native operations, event-driven progression, and robust operator tooling. The platform lets communities focus on memories and creativity instead of fragile mod stacks and manual bookkeeping.
 
 ## Overview
-This repository contains the monorepo for the platform, scaled for a clean separation of concerns:
-- `clients`, `services`, `shared` packages, `plugins`, `infra`, `tests`, and `docs`.
-- A deterministic, authoritative backend (.NET + PostgreSQL) emphasizing relevance management, data-driven content, and a thin-client architecture.
+This repository contains the monorepo for the platform:
+- `src/` — .NET 9 backend services (4 deployed: Gateway, EventLog, Progression, OperatorApi)
+- `clients/godot/` — Godot 4.x thin client (vertical slice complete)
+- `clients/admin-web/` — React + Vite operator console
+- `infra/` — Docker, docker-compose, Azure deployment config
+- `tests/` — 157+ unit tests across Contracts and Simulation
+- `docs/` — ADRs, architecture, roadmap
+
+A deterministic, authoritative backend (.NET 9 + PostgreSQL) emphasizing relevance management, data-driven content, and a thin-client architecture.
 
 ## Prerequisites
 To build and run the platform locally, you must install:
-- **.NET 8+ SDK** (for the authoritative backend simulation & handlers)
+- **.NET 9 SDK** (for the authoritative backend simulation & handlers)
 - **Node.js v18+ & npm** (for the Admin Web UI, `concurrently` tooling, and smoke testing scripts)
 - **Docker & Docker Compose** (for spinning up the local PostgreSQL database)
 
@@ -20,7 +26,7 @@ To build and run the platform locally, you must install:
 3. **Build the .NET services:** `npm run build:dotnet`
 4. **Verify unit tests:** `npm run test:dotnet` *(Expected: 157+ passing tests, 0 failures).*
 5. **Run the full stack natively:** `npm run dev`
-   *This concurrently starts the Gateway (port 4000 — WS, UDP :4005, and in-process Simulation), EventLog, Progression, OperatorApi, and Admin UI.*
+   *This concurrently starts Gateway (port 4000 WS/HTTP + 4005 UDP, with in-process Simulation), EventLog, Progression, OperatorApi, and Admin UI.*
 6. **End-to-End Smoke Testing:** With the stack running, execute `node scripts/test-vertical-slice.js` or `node scripts/test-multiplayer.js` in a new terminal to simulate clients connecting, dropping inputs, and validating server constraints.
 
 > **Note:** PostgreSQL runs on port **5433** (not the default 5432) to avoid conflicts with other local Postgres instances. The `dev:infra` script starts only the Postgres container. To run the full stack in Docker instead, use `npm run dev:docker`.
@@ -28,7 +34,7 @@ To build and run the platform locally, you must install:
 ### Stopping Services
 ```bash
 # From PowerShell — kill any stale .NET processes before restarting:
-taskkill /F /IM dotnet.exe /IM Game.Gateway.exe /IM Game.EventLog.exe /IM Game.Progression.exe /IM Game.OperatorApi.exe /IM Game.Simulation.exe
+taskkill /F /IM dotnet.exe /IM Game.Gateway.exe /IM Game.EventLog.exe /IM Game.Progression.exe /IM Game.OperatorApi.exe
 npm run dev:stop-infra
 ```
 
@@ -43,28 +49,26 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
 - [0013: Dual-Channel UDP Transport](docs/adrs/0013-dual-channel-udp-transport.md)
 
 ## What We've Built So Far
-- **Vertical Slice:** Proven end-to-end. Players can connect, join a region, place structures, trigger guild challenges, and update progression through server-authoritative .NET services.
+- **Vertical Slice:** Proven end-to-end. Players can connect, join a region, place structures, trigger guild challenges, and update progression through server-authoritative .NET 9 services.
 - **Network Refactor:** 5 phases fully completed!
   - Binary serialization (BitWriter/BitReader)
   - Input-driven simulation (InputQueue, TickBroadcaster)
   - Spatial Interest Management (AoI filtering on near/mid/far volume bands)
   - Server-side prediction & binary payload serializers (shrinking payload bandwidth 84-96%)
   - Dual-Channel transport (WebSocket reliable lane + UDP datagram lane on port 4005)
+- **Azure Deployment:** 4 services deployed to Azure Container Apps (eastus2). Gateway and OperatorApi are external; EventLog and Progression are internal. PostgreSQL Flexible Server. All smoke tests passing.
+- **Godot Client:** Vertical slice complete. Connects via WebSocket, WASD movement, click-to-place structures, build mode, HUD overlay, remote player interpolation, reconnect with resume token.
 
-## Retro Results (2026-03-26)
-*(See [docs/simulation-retrospective-2026-03-26.md](docs/simulation-retrospective-2026-03-26.md) for full details)*
-- The network infrastructure refactor was completed smoothly.
-- **Testing:** 157 tests across `Contracts` and `Simulation` are passing perfectly (0 failures, 0 errors).
-- **Performance:** Massive bandwidth savings achieved (`PlayerInput` reduced by 96%, `EntityUpdate` by 84%). 
-
-## Lessons Learned
-- **What Worked Well:** Incremental phasing pays off—each phase built cleanly on the previous without massive structural breaks. Adding an optional `UdpTransport` preserved backwards compatibility for existing JSON clients and tests. Fast-path binary message processing mapping to zero extra allocations on the hot path. Crypto-random UDP tokens effectively prevent session spoofing.
-- **What Was Awkward:** Adding properties to `session_started` required anonymous objects to avoid breaking shared records; a proper session handshake message needs designing. We also lack a automated E2E test for the new UDP dual-channel path (currently WebSocket path is validated via JS scripts).
+## Retro Results
+*(See [docs/simulation-retrospective-2026-03-26.md](docs/simulation-retrospective-2026-03-26.md) and [docs/retrospective-2026-03-27.md](docs/retrospective-2026-03-27.md) for full details)*
+- **Testing:** 157 tests across `Contracts` and `Simulation` passing (0 failures, 0 errors).
+- **Performance:** Massive bandwidth savings (`PlayerInput` reduced by 96%, `EntityUpdate` by 84%).
+- **Thesis Compliance:** Scored 0.85 ("Era-Authentic") — see [audit](docs/thesis-compliance-audit-2026-03-27.md). Plan to reach 0.9+ via [delta compression and client prediction](docs/plan-thesis-gold.md).
 
 ## What's Planned Next
-Currently, we are focusing on two main active workstreams:
-1. **Azure Deployment:** Deploying the Dockerized backend to Azure Container Apps and validating the movement and simulation with real users over the internet.
-2. **Godot Client Prototype:** Building a thin Godot client to connect to the backend, handle the incoming `session_started` data, bind to UDP, send binary `player_input`, and render the authoritative `entity_update`.
+Currently focusing on:
+1. **Thesis Gold (0.9+):** Delta compression (server-side bandwidth reduction) and client-side prediction with reconciliation. See [plan-thesis-gold.md](docs/plan-thesis-gold.md).
+2. **Multi-User Testing:** Validating the Godot client with multiple concurrent players against the Azure deployment.
 
 *(See `docs/current-focus.md` and `docs/90-day-roadmap.md` for deeper details on our upcoming objectives like advanced region management, Discord bot integration, and operator feedback loops).*
 
@@ -99,5 +103,6 @@ Evaluate the client-side reconciliation and prediction logic. How does the simul
 | **0.9 - 1.0** | **"Thesis Gold"** | Full Progressive Enhancement. The game is 100% playable on a 28.8k-style "Core" channel while using modern bandwidth only for visual fidelity. |
 
 ### Latest Audit Result
-- [2026-03-26 - Score: 0.85 (Era-Authentic / Thesis Gold)](docs/simulation-audit-2026-03-26.md)
+- [2026-03-27 - Score: 0.85 (Era-Authentic)](docs/thesis-compliance-audit-2026-03-27.md)
+- [2026-03-26 - Score: 0.85 (Era-Authentic)](docs/simulation-audit-2026-03-26.md)
 

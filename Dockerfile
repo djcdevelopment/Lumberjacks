@@ -39,6 +39,8 @@ ENV ASPNETCORE_URLS=http://+:4000
 EXPOSE 4000
 ENTRYPOINT ["dotnet", "Game.Gateway.dll"]
 
+# Simulation runs in-process inside Gateway in production.
+# This standalone target is kept for isolated HTTP-only testing.
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS simulation
 WORKDIR /app
 COPY --from=build /app/simulation .
