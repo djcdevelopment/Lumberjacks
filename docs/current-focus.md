@@ -46,36 +46,29 @@ Gateway (port 4000) is the unified host — WebSocket, tick loop, simulation, an
 
 Simulation (port 4001) can also run standalone with NullTickBroadcaster for HTTP-only testing.
 
-## Active Workstream 1: Azure Deployment
+## Completed: Azure Deployment (2026-03-27)
+
+Backend deployed to Azure Container Apps (eastus2). 4 services: Gateway (external), OperatorApi (external), EventLog (internal), Progression (internal). PostgreSQL Flexible Server. All smoke tests passing including multiplayer (10 players) and resume. See `docs/azure-deployment-runbook.md` for deploy/update workflow.
+
+- Gateway: `wss://gateway.wittyplant-6c0ca715.eastus2.azurecontainerapps.io`
+- OperatorApi: `https://operatorapi.wittyplant-6c0ca715.eastus2.azurecontainerapps.io`
+
+## Active Workstream: Godot Client Vertical Slice
 
 Objective:
-Deploy to Azure Container Apps and validate with real users over the internet.
+Build the thinnest possible Godot 4.x client that connects to the backend, renders the world, and lets a player walk around and place structures. See `docs/godot-client-plan.md` for the full plan.
 
 Why now:
-CORS is configurable, Docker images are ready, movement validation prevents cheating.
-The backend is deployment-ready — the risk to retire is real-world latency and NAT.
-
-### Next actions:
-- Push Docker images to Azure Container Registry
-- Deploy to Azure Container Apps (see docs/deployment-strategy.md)
-- Set `CORS_ORIGINS` env var to Azure frontend URL
-- Run `node scripts/test-multiplayer.js 10 wss://azure-host` against live deployment
-- Distribute test client (Node.js script or Godot .exe) to friends
-
-## Active Workstream 2: Godot Client Prototype
-
-Objective:
-Build the thinnest possible Godot client shell that connects to the backend.
-
-Why now:
-Once multi-user networking is proven, the next step is proving a real game client
-can consume the WebSocket protocol and render the authoritative world state.
+Backend is deployed and proven (Azure + local). The next risk to retire is whether a real game client can consume the WebSocket protocol and render the authoritative world state with acceptable feel.
 
 Exit criteria:
 - Godot client connects via WebSocket, receives session_started
-- Joins region, renders player positions from world_snapshot
-- Sends player_input, sees authoritative entity_update with position
-- Other players' actions appear in real time
+- Joins region, renders world from world_snapshot (ground, players, structures)
+- WASD movement via player_input → server-authoritative position
+- Other players visible and moving in real time (interpolated)
+- Click-to-place structures
+- Disconnect/reconnect with resume token
+- Works against both local and Azure backends
 
 ## Parked
 
