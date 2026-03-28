@@ -103,5 +103,57 @@ public static class ProxyEndpoints
 
             return Results.Ok(guilds);
         });
+
+        // --- Progression proxies (challenges & guild progress) ---
+
+        app.MapGet("/api/challenges", async (HttpContext context, IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Progression"] ?? "http://localhost:4003";
+            var client = httpFactory.CreateClient();
+            var qs = context.Request.QueryString;
+            var response = await client.GetAsync($"{url}/challenges{qs}");
+            var content = await response.Content.ReadAsStringAsync();
+            return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
+        });
+
+        app.MapPost("/api/challenges", async (HttpContext context, IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Progression"] ?? "http://localhost:4003";
+            var client = httpFactory.CreateClient();
+            var body = await new StreamReader(context.Request.Body).ReadToEndAsync();
+            var payload = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+            var response = await client.PostAsync($"{url}/challenges", payload);
+            var content = await response.Content.ReadAsStringAsync();
+            return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
+        });
+
+        app.MapPatch("/api/challenges/{id}", async (string id, HttpContext context, IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Progression"] ?? "http://localhost:4003";
+            var client = httpFactory.CreateClient();
+            var body = await new StreamReader(context.Request.Body).ReadToEndAsync();
+            var payload = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+            var response = await client.PatchAsync($"{url}/challenges/{id}", payload);
+            var content = await response.Content.ReadAsStringAsync();
+            return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
+        });
+
+        app.MapGet("/api/challenges/{id}/progress", async (string id, IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Progression"] ?? "http://localhost:4003";
+            var client = httpFactory.CreateClient();
+            var response = await client.GetAsync($"{url}/challenges/{id}/progress");
+            var content = await response.Content.ReadAsStringAsync();
+            return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
+        });
+
+        app.MapGet("/api/guilds/{id}/progress", async (string id, IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Progression"] ?? "http://localhost:4003";
+            var client = httpFactory.CreateClient();
+            var response = await client.GetAsync($"{url}/guilds/{id}/progress");
+            var content = await response.Content.ReadAsStringAsync();
+            return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
+        });
     }
 }

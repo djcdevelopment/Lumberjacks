@@ -5,9 +5,12 @@ Step-by-step instructions to deploy the game backend to Azure Container Apps, sm
 ## Prerequisites
 
 - Azure CLI installed and logged in (`az login`)
-- Docker installed locally (for building images)
+- Docker Desktop installed (for building images)
 - Node.js installed (for smoke tests)
+- PowerShell (all commands in section 10+ use PowerShell syntax)
 - An Azure subscription with permissions to create resources
+
+> **Note:** Sections 1–9 use bash syntax (for first-time setup, which may be done from Cloud Shell). Section 10+ uses PowerShell for the ongoing build/deploy workflow.
 
 ## 1. Set Variables
 
@@ -276,7 +279,7 @@ node scripts/test-challenges.js wss://$GATEWAY_URL
 
 Validates guild challenge creation, progress increment, and auto-completion.
 
-> **Note:** The challenge and vertical-slice tests hit HTTP endpoints on ports 4002-4004 directly. When testing against Azure, internal services are not directly reachable — these tests work best for local dev or when OperatorApi proxies are used.
+> **Note:** The multiplayer and challenge tests automatically route HTTP calls through the OperatorApi proxy when targeting Azure URLs. The vertical-slice test still hits EventLog/Progression directly and only works locally.
 
 ### 9g. Full Validation Checklist
 
@@ -291,31 +294,121 @@ Validates guild challenge creation, progress increment, and auto-completion.
 | Resume | `node scripts/test-resume.js wss://$GATEWAY_URL` | All pass |
 | DB persistence | Restart gateway, reconnect — structures still there | Data survives restart |
 
-## 10. Updating Services
+## 10. Updating Services (Build & Deploy)
 
-After code changes, rebuild and redeploy:
+After code changes, rebuild the Docker image(s), push to ACR, and force a new Container Apps revision.
 
-```bash
-# Rebuild and push a single service
-SERVICE=gateway
-docker build --target $SERVICE -t $ACR_LOGIN/game-$SERVICE:latest .
-docker push $ACR_LOGIN/game-$SERVICE:latest
+### Current Deployment Details
 
-# Update the container app (pulls new image)
-az containerapp update \
-  --resource-group $RG \
-  --name $SERVICE \
-  --image $ACR_LOGIN/game-$SERVICE:latest
+These are the values from the current Azure deployment. If you created fresh resources, substitute your own.
+
+```powershell
+$RG         = "game-rg"
+$ACR_LOGIN  = "gameacr8c23e1c1.azurecr.io"
+$ACR_NAME   = "gameacr8c23e1c1"
+$ENV_NAME   = "game-env"
+$GATEWAY_URL = "gateway.wittyplant-6c0ca715.eastus2.azurecontainerapps.io"
+$OPERATOR_URL = "operatorapi.wittyplant-6c0ca715.eastus2.azurecontainerapps.io"
 ```
 
-To update all services at once:
+### Step-by-step: Deploy a Single Service
 
-```bash
-for SERVICE in gateway eventlog progression operatorapi; do
-  docker build --target $SERVICE -t $ACR_LOGIN/game-$SERVICE:latest .
-  docker push $ACR_LOGIN/game-$SERVICE:latest
-  az containerapp update --resource-group $RG --name $SERVICE --image $ACR_LOGIN/game-$SERVICE:latest
-done
+Example: deploying `operatorapi` after a code change.
+
+```powershell
+# 1. Kill any running local .NET processes (they lock DLLs and break Docker builds)
+taskkill /F /IM Game.OperatorApi.exe 2>$null
+taskkill /F /IM Game.Gateway.exe 2>$null
+taskkill /F /IM dotnet.exe 2>$null
+
+# 2. Rebuild the Docker image — use --no-cache to ensure code changes are picked up
+#    The multi-stage Dockerfile builds from source, so stale layer cache can skip your changes.
+docker build --no-cache --target operatorapi -t game-operatorapi .
+
+# 3. Tag with a UNIQUE version tag (not just "latest")
+#    Azure Container Apps won't pull a new image if the tag hasn't changed.
+$TAG = "v" + (Get-Date -Format "yyyyMMdd-HHmmss")
+docker tag game-operatorapi "${ACR_LOGIN}/game-operatorapi:${TAG}"
+
+# 4. Push to ACR (you must be logged in: docker login $ACR_LOGIN)
+docker push "${ACR_LOGIN}/game-operatorapi:${TAG}"
+
+# 5. Update the container app with the new tag AND force a new revision
+az containerapp update `
+  --resource-group $RG `
+  --name operatorapi `
+  --image "${ACR_LOGIN}/game-operatorapi:${TAG}"
+
+# 6. Verify the new revision is active
+az containerapp revision list --name operatorapi --resource-group $RG --output table
+```
+
+### Deploy All Services at Once
+
+```powershell
+$TAG = "v" + (Get-Date -Format "yyyyMMdd-HHmmss")
+
+foreach ($svc in @("gateway", "eventlog", "progression", "operatorapi")) {
+    Write-Host "=== Building $svc ===" -ForegroundColor Cyan
+    docker build --no-cache --target $svc -t "game-${svc}" .
+
+    docker tag "game-${svc}" "${ACR_LOGIN}/game-${svc}:${TAG}"
+    docker push "${ACR_LOGIN}/game-${svc}:${TAG}"
+
+    az containerapp update `
+      --resource-group $RG `
+      --name $svc `
+      --image "${ACR_LOGIN}/game-${svc}:${TAG}"
+
+    Write-Host "=== $svc deployed ===" -ForegroundColor Green
+}
+```
+
+### ACR Login
+
+If `docker push` fails with auth errors, re-authenticate:
+
+```powershell
+# Option A: az acr login (if az is on PATH)
+az acr login --name $ACR_NAME
+
+# Option B: manual docker login
+$ACR_PASSWORD = az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv
+docker login $ACR_LOGIN -u $ACR_NAME -p $ACR_PASSWORD
+```
+
+### Common Gotchas
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| Docker build succeeds but old code runs on Azure | Docker layer cache served stale build output | Always use `--no-cache` when deploying |
+| `az containerapp update` succeeds but old revision still serves traffic | Same image tag — Azure doesn't re-pull | Use a unique tag per deploy (timestamp-based) |
+| `dotnet build` fails with "file in use" errors | Local .NET processes lock DLLs | Kill `dotnet.exe` and `Game.*.exe` processes first |
+| `docker push` access denied | ACR login expired | Run `az acr login` or `docker login` again |
+
+### Verify Deployment
+
+After deploying, confirm the new code is live:
+
+```powershell
+# Health check
+Invoke-RestMethod "https://$OPERATOR_URL/api/status"
+
+# Quick smoke test
+node scripts/test-resume.js "wss://$GATEWAY_URL"
+
+# Full multiplayer test
+node scripts/test-multiplayer.js 10 "wss://$GATEWAY_URL"
+```
+
+### View Admin Dashboard Against Azure
+
+The admin dashboard runs locally and proxies API calls to the remote OperatorApi:
+
+```powershell
+$env:API_TARGET = "https://$OPERATOR_URL"
+npm run dev -w @game/admin-web
+# Open http://localhost:5173
 ```
 
 ## 11. Scaling

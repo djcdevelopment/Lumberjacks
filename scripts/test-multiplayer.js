@@ -20,7 +20,16 @@ const WebSocket = require("ws");
 const PLAYER_COUNT = parseInt(process.argv[2]) || 5;
 const GATEWAY = process.argv[3] || "ws://localhost:4000";
 const SIM = GATEWAY.replace("ws://", "http://").replace("wss://", "https://");
-const PROGRESSION = GATEWAY.replace("ws://", "http://").replace("wss://", "https://").replace(":4000", ":4003");
+// For remote deployments, route challenge/guild calls through OperatorApi's /api proxy.
+// Pass OperatorApi URL as 4th arg, or it will be derived for Azure Container Apps URLs.
+const OPERATOR = process.argv[4]
+  || (GATEWAY.includes("azurecontainerapps")
+    ? SIM.replace("gateway.", "operatorapi.")
+    : "http://localhost:4004");
+const isRemote = !GATEWAY.includes("localhost");
+// Remote: OperatorApi proxies to Progression at /api/challenges etc.
+// Local: hit Progression directly (no /api prefix needed)
+const PROGRESSION = isRemote ? OPERATOR + "/api" : SIM.replace(":4000", ":4003");
 
 const guildId = "guild-mp-" + Math.random().toString(36).slice(2, 8);
 
@@ -203,11 +212,12 @@ async function main() {
 
   // --- Step 6: Verify all players visible in world ---
   console.log(`\n6. Checking world state`);
-  const playersRes = await get(`${SIM}/players`);
+  const simApi = isRemote ? `${OPERATOR}/api` : SIM;
+  const playersRes = await get(`${simApi}/players`);
   const connectedPlayers = playersRes.data.filter((p) => p.connected);
   console.log(`   Connected players: ${connectedPlayers.length}`);
 
-  const structuresRes = await get(`${SIM}/structures?region_id=region-spawn`);
+  const structuresRes = await get(`${simApi}/structures?region_id=region-spawn`);
   console.log(`   Structures in region: ${structuresRes.data.length}`);
 
   // --- Step 7: Check challenge progress ---
@@ -243,7 +253,7 @@ async function main() {
   await sleep(500);
 
   // Verify players removed
-  const playersAfter = await get(`${SIM}/players`);
+  const playersAfter = await get(`${simApi}/players`);
   const stillConnected = playersAfter.data.filter((p) => p.connected);
   console.log(`   Players still connected: ${stillConnected.length}`);
 
