@@ -42,8 +42,8 @@ Gateway (port 4000) is the unified host — WebSocket, tick loop, simulation, an
 - CORS configurable via `CORS_ORIGINS` env var (deployment-ready)
 - Docker: multi-stage Dockerfile, docker-compose.yml, docker-compose.dev.yml
 - Graceful startup: DB loader failures caught, runs with in-memory defaults if Postgres unavailable
-- 157 tests passing (106 Contracts + 51 Simulation)
-- E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`, `test-movement.js`, `test-vertical-slice.js`
+- [C# Unit Test Suite](Tests.md) with full coverage (Contracts + Simulation) passing.
+- E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`, `test-movement.js`, `test-vertical-slice.js`, `load-test-dual-channel.js`
 
 Game.Simulation can also run standalone (port 4001) with NullTickBroadcaster for HTTP-only testing, but is not deployed as a separate service.
 

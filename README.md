@@ -9,7 +9,7 @@ This repository contains the monorepo for the platform:
 - `clients/godot/` — Godot 4.x thin client (vertical slice complete)
 - `clients/admin-web/` — React + Vite operator console
 - `infra/` — Docker, docker-compose, Azure deployment config
-- `tests/` — 157 tests passing (106 Contracts + 51 Simulation)
+- `tests/` — [Comprehensive test suite and strategy](docs/Tests.md)
 - E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`, `test-movement.js`, `test-vertical-slice.js`, `load-test-dual-channel.js` (validated with 50+ bots)
 - **Dual-Channel Validation (2026-03-27):** Confirmed UDP offloading (99% of simulation traffic) with WebSocket fallback verified on Azure. [See report](docs/load-test-dual-channel-results.md).
 
@@ -25,7 +25,7 @@ To build and run the platform locally, you must install:
 1. **Install dependencies:** `npm install`
 2. **Boot the infrastructure (PostgreSQL on port 5433):** `npm run dev:infra` *(stop it via `npm run dev:stop-infra`)*
 3. **Build the .NET services:** `npm run build:dotnet`
-4. **Verify unit tests:** `npm run test:dotnet` *(Expected: 157+ passing tests, 0 failures).*
+28: 4. **Verify unit tests:** `npm run test:dotnet` *(Expected: All suites passing — see [Tests.md](docs/Tests.md) for details).*
 5. **Run the full stack natively:** `npm run dev`
    *This concurrently starts Gateway (port 4000 WS/HTTP + 4005 UDP, with in-process Simulation), EventLog, Progression, OperatorApi, and Admin UI.*
 6. **End-to-End Smoke Testing:** With the stack running, execute `node scripts/test-vertical-slice.js` or `node scripts/test-multiplayer.js` in a new terminal to simulate clients connecting, dropping inputs, and validating server constraints.
@@ -62,7 +62,7 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
 
 ## Retro Results
 *(See [docs/simulation-retrospective-2026-03-26.md](docs/simulation-retrospective-2026-03-26.md) and [docs/retrospective-2026-03-27.md](docs/retrospective-2026-03-27.md) for full details)*
-- **Testing:** 157 tests across `Contracts` and `Simulation` passing (0 failures, 0 errors).
+- **Testing:** The [C# unit test suite](docs/Tests.md) is fully passing (0 failures, 0 errors).
 - **Performance:** Massive bandwidth savings (`PlayerInput` reduced by 96%, `EntityUpdate` by 84%).
 - **Thesis Compliance:** Scored 0.85 ("Era-Authentic") — see [audit](docs/thesis-compliance-audit-2026-03-27.md). Plan to reach 0.9+ via [delta compression and client prediction](docs/plan-thesis-gold.md).
 
