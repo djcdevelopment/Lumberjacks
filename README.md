@@ -46,8 +46,16 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
 - [0003: Multi-Lane Transport Strategy](docs/adrs/0003-websocket-transport.md)
 - [0004: PostgreSQL Event Log](docs/adrs/0004-postgresql-event-log.md)
 - [0005: .NET as Authoritative Backend Runtime](docs/adrs/0005-dotnet-authoritative-backend-runtime.md)
+- [0006: Godot as Game Client Engine](docs/adrs/0006-godot-game-client.md)
+- [0007: Canonical Event Schema](docs/adrs/0007-canonical-event-schema.md)
+- [0008: Delivery Lane Classification](docs/adrs/0008-delivery-lane-classification.md)
+- [0009: EF Core without Migrations](docs/adrs/0009-ef-core-query-layer.md)
+- [0010: Monorepo Service Topology](docs/adrs/0010-service-topology.md)
+- [0011: Graceful Degradation & Combat Zones](docs/adrs/0011-graceful-degradation-combat-zones.md)
 - [0012: Binary Payload Serialization](docs/adrs/0012-binary-payload-serialization.md)
 - [0013: Dual-Channel UDP Transport](docs/adrs/0013-dual-channel-udp-transport.md)
+- [0014: Input-Driven Deterministic Simulation](docs/adrs/0014-input-driven-deterministic-simulation.md)
+- [0015: Spatial Interest Management](docs/adrs/0015-spatial-interest-management.md)
 
 ## What We've Built So Far
 - **Vertical Slice:** Proven end-to-end. Players can connect, join a region, place structures, trigger guild challenges, and update progression through server-authoritative .NET 9 services.
