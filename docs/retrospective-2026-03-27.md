@@ -8,7 +8,7 @@ A TypeScript monorepo scaffold. ADRs 0001–0011 documented the architecture vis
 
 ## What We Shipped
 
-A fully deployed, multiplayer-tested game backend running on Azure with 157 passing tests.
+A fully deployed, multiplayer-tested game backend running on Azure with a comprehensive [C# unit test suite](Tests.md).
 
 ### By the Numbers
 
@@ -20,7 +20,7 @@ A fully deployed, multiplayer-tested game backend running on Azure with 157 pass
 | Lines removed | 2,588 |
 | .NET projects created | 8 |
 | Domain classes | 100+ |
-| Unit/integration tests | 157 (all passing) |
+| Unit/integration tests | [C# Suite](Tests.md) (all passing) |
 | E2E test scripts | 6 |
 | Docker images | 5 |
 | Azure services deployed | 4 |
@@ -39,7 +39,7 @@ A fully deployed, multiplayer-tested game backend running on Azure with 157 pass
    - Spatial interest management (SpatialGrid, InterestManager with near/mid/far AoI bands)
    - Client prediction support (binary payloads, input_seq echo for reconciliation)
    - Dual-channel transport (UDP port 4005, WebSocket fallback, session-bound tokens)
-4. Wrote 157 tests covering protocol serialization, simulation physics, spatial queries, input queuing, and state hashing.
+4. Wrote the [C# unit test suite](Tests.md) covering protocol serialization, simulation physics, spatial queries, input queuing, and state hashing.
 5. Built 6 E2E test scripts: multiplayer (N concurrent WebSocket players), movement, challenges, resume, input broadcast, vertical slice.
 
 **March 27 — Documentation, Deployment, Planning**
@@ -63,7 +63,7 @@ A fully deployed, multiplayer-tested game backend running on Azure with 157 pass
 
 **Binary protocol achieves the bandwidth goal.** EntityUpdate went from ~200 bytes (JSON) to ~33 bytes (binary). PlayerInput went from ~120 bytes to 5 bytes. The core simulation stream runs at <3.6 KB/s per client, well within the 28.8k "dialup" constraint from ADR 0003. This was a design goal from day one, and it's met.
 
-**Testing kept pace with development.** 157 tests isn't exhaustive, but it covers the critical paths: serialization round-trips, physics determinism, spatial queries, input ordering, and state hashing. The 6 E2E scripts validate the full stack end-to-end. This confidence enabled aggressive refactoring without fear.
+**Testing kept pace with development.** The [C# test suite](Tests.md) isn't exhaustive, but it covers the critical paths: serialization round-trips, physics determinism, spatial queries, input ordering, and state hashing. The 6 E2E scripts validate the full stack end-to-end. This confidence enabled aggressive refactoring without fear.
 
 **Azure deployment was smooth (enough).** Container Apps + Flexible Server PostgreSQL is a good fit. Scale-to-zero keeps costs at ~$25/month for testing. The deployment runbook captures every gotcha encountered (Docker cache, tag reuse, provider registration, location restrictions).
 

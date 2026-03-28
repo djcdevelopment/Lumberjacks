@@ -169,7 +169,7 @@ config["ConnectionStrings:GameDb"] ?? "Host=localhost;Port=5433;Database=game;Us
 
 ### No Integration Tests for WebSocket Protocol
 
-**Current coverage:** 157 unit tests for serialization and simulation. Zero tests for the WebSocket handshake, session resume, message routing, or binary fast-path end-to-end.
+**Current coverage:** The [C# unit test suite](Tests.md) for serialization and simulation is fully passing. Zero tests for the WebSocket handshake, session resume, message routing, or binary fast-path end-to-end.
 
 **Risk:** Protocol regressions caught only by manual testing or E2E JS scripts.
 
