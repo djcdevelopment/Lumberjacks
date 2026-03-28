@@ -17,7 +17,10 @@
     "test:dotnet": "dotnet test",
     "lint": "eslint . --ext .ts,.tsx --ignore-path .gitignore",
     "format": "prettier --write \"clients/**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
-    "format:check": "prettier --check \"clients/**/*.{ts,tsx,json,md}\" --ignore-path .gitignore"
+    "format:check": "prettier --check \"clients/**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
+    "test:load": "node scripts/load-test-dual-channel.js",
+    "test:load:50": "node scripts/load-test-dual-channel.js ws://localhost:4000 50 30",
+    "test:load:100": "node scripts/load-test-dual-channel.js ws://localhost:4000 100 60"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.0.0",
