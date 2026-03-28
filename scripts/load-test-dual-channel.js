@@ -86,6 +86,18 @@ class BitReader {
   readByte() { return this.readBits(8); }
   readUInt16() { return this.readBits(16); }
   readUInt32() { return this.readBits(32); }
+
+  readVarInt() {
+    let result = 0;
+    let shift = 0;
+    let chunk;
+    do {
+      chunk = this.readByte();
+      result |= (chunk & 0x7F) << shift;
+      shift += 7;
+    } while ((chunk & 0x80) !== 0);
+    return result;
+  }
 }
 
 // Message type IDs (from MessageTypeId.cs)
@@ -108,6 +120,10 @@ function buildPlayerInputPacket(direction, speed, inputSeq) {
   w.writeBool(true);               // lane = Datagram (1)
   w.writeUInt16(0);                // seq = 0 (datagrams don't need ordering)
   w.writeUInt16(payloadSize);      // payloadLen = 5
+
+  // Align to byte boundry (43 bits + 5 bits = 48 bits / 6 bytes)
+  w.writeBits(0, 5);
+
   // Payload
   w.writeByte(direction);
   w.writeByte(speed);
@@ -200,7 +216,7 @@ class Bot {
 
       this.ws.on("message", (data, isBinary) => {
         metrics.wsMessagesRecv++;
-        if (isBinary || data instanceof ArrayBuffer || Buffer.isBuffer(data)) {
+        if (isBinary) {
           this._handleBinary(Buffer.isBuffer(data) ? data : Buffer.from(data));
         } else {
           this._handleJson(typeof data === "string" ? data : data.toString());
@@ -255,12 +271,22 @@ class Bot {
 
     if (header.type === MSG.EntityUpdate) {
       metrics.entityUpdatesWs++;
-      // Try to extract tick from payload for tick tracking
-      // Payload starts at byte 6; tick is near the end but varies with entityId length
-      // Just count the update — detailed parsing not needed for metrics
+      this._extractBinaryLatency(buf.subarray(6));
     } else if (header.type === MSG.EntityRemoved) {
       metrics.entityRemoved++;
     }
+  }
+
+  _extractBinaryLatency(payloadBuf) {
+    try {
+      const r = new BitReader(payloadBuf);
+      const entityIdLen = r.readVarInt();
+      for (let i = 0; i < entityIdLen; i++) r.readByte(); // skip string
+      for (let i = 0; i < 12; i++) r.readByte(); // skip pos + vel (12 bytes)
+      r.readUInt16(); // skip heading
+      const seq = r.readUInt16(); // read lastInputSeq
+      this._recordLatency(seq);
+    } catch { /* ignore bad parse */ }
   }
 
   _bindUdp() {
@@ -276,6 +302,7 @@ class Bot {
         const header = parseEnvelopeHeader(envBuf);
         if (header && header.type === MSG.EntityUpdate) {
           metrics.entityUpdatesUdp++;
+          this._extractBinaryLatency(envBuf.subarray(6));
         }
       }
     });

@@ -9,8 +9,9 @@ This repository contains the monorepo for the platform:
 - `clients/godot/` — Godot 4.x thin client (vertical slice complete)
 - `clients/admin-web/` — React + Vite operator console
 - `infra/` — Docker, docker-compose, Azure deployment config
-- `tests/` — 157+ unit tests across Contracts and Simulation
-- `docs/` — ADRs, architecture, roadmap
+- `tests/` — 157 tests passing (106 Contracts + 51 Simulation)
+- E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`, `test-movement.js`, `test-vertical-slice.js`, `load-test-dual-channel.js` (validated with 50+ bots)
+- **Dual-Channel Validation (2026-03-27):** Confirmed UDP offloading (99% of simulation traffic) with WebSocket fallback verified on Azure. [See report](docs/load-test-dual-channel-results.md).
 
 A deterministic, authoritative backend (.NET 9 + PostgreSQL) emphasizing relevance management, data-driven content, and a thin-client architecture.
 
@@ -55,7 +56,7 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
   - Input-driven simulation (InputQueue, TickBroadcaster)
   - Spatial Interest Management (AoI filtering on near/mid/far volume bands)
   - Server-side prediction & binary payload serializers (shrinking payload bandwidth 84-96%)
-  - Dual-Channel transport (WebSocket reliable lane + UDP datagram lane on port 4005)
+  - **Dual-Channel Transport Validation:** Successfully debugged and validated the dual-channel (WebSocket + UDP) transport. Fixed binary/text frame detection and bit-alignment issues in the Node.js load test client. [Read the full test results and charts here](docs/load-test-dual-channel-results.md).
 - **Azure Deployment:** 4 services deployed to Azure Container Apps (eastus2). Gateway and OperatorApi are external; EventLog and Progression are internal. PostgreSQL Flexible Server. All smoke tests passing.
 - **Godot Client:** Vertical slice complete. Connects via WebSocket, WASD movement, click-to-place structures, build mode, HUD overlay, remote player interpolation, reconnect with resume token.
 
