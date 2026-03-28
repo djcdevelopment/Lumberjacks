@@ -22,5 +22,4 @@ obj/
 # Godot
 .godot/
 *.import
-export_presets.cfg
 builds/

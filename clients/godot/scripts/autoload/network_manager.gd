@@ -4,6 +4,7 @@ extends Node
 
 signal connected
 signal disconnected
+signal attempting_reconnect(attempt: int)
 signal session_started(payload: Dictionary)
 signal world_snapshot(payload: Dictionary)
 signal entity_updated(payload: Dictionary)
@@ -24,6 +25,7 @@ var last_url: String = ""
 var _reconnect_timer: float = 0.0
 var _reconnect_delay: float = 2.0
 var _should_reconnect: bool = false
+var _reconnect_attempt: int = 0
 
 
 func connect_to_server(url: String, resume: String = "") -> void:
@@ -89,6 +91,8 @@ func _process(delta: float) -> void:
 			_reconnect_timer -= delta
 			if _reconnect_timer <= 0.0:
 				_should_reconnect = false
+				_reconnect_attempt += 1
+				attempting_reconnect.emit(_reconnect_attempt)
 				reconnect()
 		return
 
@@ -100,6 +104,7 @@ func _process(delta: float) -> void:
 			if not _connected:
 				_connected = true
 				_should_reconnect = false
+				_reconnect_attempt = 0
 				print("[Network] Connected")
 				connected.emit()
 

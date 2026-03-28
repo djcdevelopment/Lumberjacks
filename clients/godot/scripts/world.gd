@@ -17,6 +17,17 @@ func _ready() -> void:
 		_on_entity_added(eid, GameState.entities[eid])
 
 
+func _exit_tree() -> void:
+	# Disconnect signals when world is freed (returning to menu)
+	if GameState.entity_added.is_connected(_on_entity_added):
+		GameState.entity_added.disconnect(_on_entity_added)
+	if GameState.entity_changed.is_connected(_on_entity_changed):
+		GameState.entity_changed.disconnect(_on_entity_changed)
+	if GameState.entity_deleted.is_connected(_on_entity_deleted):
+		GameState.entity_deleted.disconnect(_on_entity_deleted)
+	entity_nodes.clear()
+
+
 func _on_entity_added(entity_id: String, entity: Dictionary) -> void:
 	if entity_id in entity_nodes:
 		return  # Already spawned

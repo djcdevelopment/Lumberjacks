@@ -24,7 +24,7 @@ func _ready() -> void:
 	NetworkManager.error_received.connect(_on_error)
 	error_label.text = ""
 	build_label.text = ""
-	_set_status(false)
+	_set_status(NetworkManager.is_connected_to_server())
 
 
 func _process(delta: float) -> void:
