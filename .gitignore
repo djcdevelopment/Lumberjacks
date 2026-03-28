@@ -18,3 +18,9 @@ bin/
 obj/
 *.user
 .vs/
+
+# Godot
+.godot/
+*.import
+export_presets.cfg
+builds/
