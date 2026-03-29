@@ -127,9 +127,8 @@ public partial class TreeEntity : Node3D
         SetColor(_canopy3, canopyColor);
         SetColor(_stump, trunkColor);
 
-        // Diagnostic: only log first tree to avoid overflow
-        if (_entityId?.GetHashCode() % 50 == 0)
-            GD.Print($"Tree sample: trunk={trunkColor}, canopy={canopyColor}, age={_age}, scars={_fireScars}, children={GetChildCount()}");
+        if (_entityId?.GetHashCode() % 100 == 0)
+            GD.Print($"Tree: pos={Position}, trunk_vis={_trunk.Visible}, canopy_vis={_canopy.Visible}, canopy_pos={_canopy.Position}, health={_health}");
     }
 
     private void ApplyCanopy(MeshInstance3D c, Random rng, float rot, float scaleMin, float scaleMax, Vector3 pos)

@@ -24,9 +24,14 @@ public partial class RemoteEntity : Node3D
         _targetRotationY = headingRad;
     }
 
+    public bool DebugOverrideY { get; set; }
+
     public void UpdateFromServer(Vector3 position, Vector3 velocity, float headingRad, long tick)
     {
-        _targetPosition = position;
+        if (DebugOverrideY)
+            _targetPosition = new Vector3(position.X, _targetPosition.Y, position.Z);
+        else
+            _targetPosition = position;
         _targetRotationY = headingRad;
 
         double now = Time.GetTicksMsec() / 1000.0;

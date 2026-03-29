@@ -17,6 +17,7 @@ public partial class World : Node3D
 
     private static readonly HashSet<string> TreeTypes = new()
         { "tree", "natural_resource", "oak_tree", "pine_tree", "birch_tree" };
+    private int _treeCount, _structCount, _playerCount;
 
     public override void _Ready()
     {
@@ -32,7 +33,9 @@ public partial class World : Node3D
         _state.TerrainReady += OnTerrainReady;
 
         GD.Print("World: ready");
+        _treeCount = 0; _structCount = 0; _playerCount = 0;
         _state.ReplayEntities();
+        GD.Print($"World: spawned {_playerCount} players, {_treeCount} trees, {_structCount} structures");
     }
 
     public override void _ExitTree()
@@ -47,8 +50,13 @@ public partial class World : Node3D
     private void OnTerrainReady()
     {
         if (!_state.HasTerrain) return;
-        // TODO: re-enable terrain mesh generation after visual debugging
-        GD.Print($"World: terrain data available ({_state.GridWidth}x{_state.GridHeight}) — generation disabled for debugging");
+        var mesh = TerrainGenerator.Generate(_state.AltitudeGrid, _state.GridWidth, _state.GridHeight);
+        if (mesh != null && _ground != null)
+        {
+            _ground.Mesh = mesh;
+            _ground.MaterialOverride = null;
+            GD.Print("World: terrain mesh applied");
+        }
     }
 
     private void OnAdded(string id, string type, Vector3 pos, float heading,
@@ -57,13 +65,13 @@ public partial class World : Node3D
         if (_entities.ContainsKey(id)) return;
 
         if (type == "player")
-            SpawnPlayer(id, pos, heading, meta);
+        { SpawnPlayer(id, pos, heading, meta); _playerCount++; }
         else if (TreeTypes.Contains(type))
-            SpawnTree(id, pos, heading, meta);
+        { SpawnTree(id, pos, heading, meta); _treeCount++; }
         else if (type == "structure")
-            SpawnPlaceholder(id, pos, new Vector3(1f, 1f, 1f), new Color(0.55f, 0.35f, 0.15f));
+        { SpawnPlaceholder(id, pos, new Vector3(1f, 1f, 1f), new Color(0.55f, 0.35f, 0.15f)); _structCount++; }
         else
-            SpawnPlaceholder(id, pos, new Vector3(1f, 1f, 1f), new Color(0.5f, 0.5f, 0.5f));
+        { SpawnPlaceholder(id, pos, new Vector3(1f, 1f, 1f), new Color(0.5f, 0.5f, 0.5f)); }
     }
 
     private void SpawnTree(string id, Vector3 pos, float heading, Godot.Collections.Dictionary meta)
@@ -91,7 +99,14 @@ public partial class World : Node3D
         _entities[id] = instance;
         AddChild(instance);
 
-        // Initialize after AddChild so node is in scene tree
+        // Snap to terrain height if available
+        if (_state.HasTerrain && pos.Y < 0.1f)
+        {
+            float terrainY = TerrainGenerator.GetAltitudeAt(
+                _state.AltitudeGrid, _state.GridWidth, _state.GridHeight, pos.X, pos.Z);
+            pos = new Vector3(pos.X, terrainY, pos.Z);
+        }
+
         var re = instance as RemoteEntity;
         re?.Initialize(pos, heading);
 
@@ -116,8 +131,23 @@ public partial class World : Node3D
                 instance.GetNode<Camera3D>("CameraPivot/Camera3D").Current = true;
             if (instance.HasNode("Nametag"))
                 instance.GetNode<Label3D>("Nametag").Visible = false;
+
+            // Replace static camera with orbitable WoW-style camera
+            if (instance.HasNode("CameraPivot"))
+            {
+                var pivot = instance.GetNode<Node3D>("CameraPivot");
+                var camCtrl = new Player.CameraController();
+                // Move Camera3D to be child of the controller
+                var cam = instance.GetNode<Camera3D>("CameraPivot/Camera3D");
+                cam.GetParent().RemoveChild(cam);
+                camCtrl.AddChild(cam);
+                cam.Position = new Vector3(0, 0, 15); // Distance behind
+                pivot.AddChild(camCtrl);
+                camCtrl.Name = "CameraController";
+            }
+
             instance.AddChild(new Player.PlayerController());
-            GD.Print("World: local player spawned");
+            GD.Print("World: local player spawned with orbit camera");
         }
         else
         {
