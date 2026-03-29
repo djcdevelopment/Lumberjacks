@@ -80,16 +80,20 @@ public partial class World : Node3D
         _entities[id] = instance;
         AddChild(instance);
 
+        // Snap tree Y to terrain surface — server stores raw altitude,
+        // but terrain mesh scales altitude by 0.3x
+        if (_state.HasTerrain)
+        {
+            float terrainY = TerrainGenerator.GetAltitudeAt(
+                _state.AltitudeGrid, _state.GridWidth, _state.GridHeight, pos.X, pos.Z);
+            pos = new Vector3(pos.X, terrainY, pos.Z);
+        }
+
         meta["entity_id"] = id;
         if (instance is TreeEntity tree)
-        {
             tree.Initialize(pos, heading, meta);
-        }
         else
-        {
-            GD.PrintErr($"World: Tree {id[..8]} is {instance.GetType().Name}, NOT TreeEntity!");
             instance.Position = pos;
-        }
     }
 
     private void SpawnPlayer(string id, Vector3 pos, float heading,
