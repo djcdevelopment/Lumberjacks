@@ -6,7 +6,8 @@ Build a community-operated survival platform inspired by the charm of Valheim, b
 ## Overview
 This repository contains the monorepo for the platform:
 - `src/` — .NET 9 backend services (4 deployed: Gateway, EventLog, Progression, OperatorApi)
-- `clients/godot/` — Godot 4.x thin client (vertical slice complete)
+- `clients/godot-cs/nature-2.0/` — Godot 4.6.1 C# client (active — E2E proven, procedural terrain + forest)
+- `clients/godot/` — Legacy GDScript/C# hybrid (archived, non-functional C#)
 - `clients/admin-web/` — React + Vite operator console
 - `infra/` — Docker, docker-compose, Azure deployment config
 - `tests/` — [Comprehensive test suite and strategy](docs/Tests.md)
@@ -56,6 +57,9 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
 - [0013: Dual-Channel UDP Transport](docs/adrs/0013-dual-channel-udp-transport.md)
 - [0014: Input-Driven Deterministic Simulation](docs/adrs/0014-input-driven-deterministic-simulation.md)
 - [0015: Spatial Interest Management](docs/adrs/0015-spatial-interest-management.md)
+- [0016: JSON Protocol Debt](docs/adrs/0016-json-protocol-debt.md)
+- [0017: Basic Linear Interpolation Debt](docs/adrs/0017-interpolation-debt.md)
+- [0018: Coordinate Mapping](docs/adrs/0018-coordinate-mapping.md)
 
 ## What We've Built So Far
 - **Vertical Slice:** Proven end-to-end. Players can connect, join a region, place structures, trigger guild challenges, and update progression through server-authoritative .NET 9 services.
@@ -66,7 +70,7 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
   - Server-side prediction & binary payload serializers (shrinking payload bandwidth 84-96%)
   - **Dual-Channel Transport Validation:** Successfully debugged and validated the dual-channel (WebSocket + UDP) transport. Fixed binary/text frame detection and bit-alignment issues in the Node.js load test client. [Read the full test results and charts here](docs/load-test-dual-channel-results.md).
 - **Azure Deployment:** 4 services deployed to Azure Container Apps (eastus2). Gateway and OperatorApi are external; EventLog and Progression are internal. PostgreSQL Flexible Server. All smoke tests passing.
-- **Godot Client:** Vertical slice complete. Connects via WebSocket, WASD movement, click-to-place structures, build mode, HUD overlay, remote player interpolation, reconnect with resume token.
+- **Godot C# Client (Nature 2.0):** Full C# client at `clients/godot-cs/nature-2.0/`. Connects via WebSocket with binary protocol, WASD movement (server-authoritative), procedural heightmap terrain from RegionProfile, 297 trees with visual variation from growth_history, orbit camera (right-click), debug fly mode (F1). References `Game.Contracts` directly for protocol types. Proven against both local and Azure deployments. See [retrospective](docs/retrospective-godot-cs-migration-2026-03-29.md).
 
 ## Retro Results
 *(See [docs/simulation-retrospective-2026-03-26.md](docs/simulation-retrospective-2026-03-26.md) and [docs/retrospective-2026-03-27.md](docs/retrospective-2026-03-27.md) for full details)*
@@ -76,8 +80,9 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
 
 ## What's Planned Next
 Currently focusing on:
-1. **Thesis Gold (0.9+):** Delta compression (server-side bandwidth reduction) and client-side prediction with reconciliation. See [plan-thesis-gold.md](docs/plan-thesis-gold.md).
-2. **Multi-User Testing:** Validating the Godot client with multiple concurrent players against the Azure deployment.
+1. **Nature 2.0 Client Polish:** Character models, environmental effects (weather, ambient sound), and tree inspection mechanics. See `docs/current-focus.md`.
+2. **Procedural Generation Iteration:** Refining terrain, forest density, and tree visual variation through user testing.
+3. **Thesis Gold (0.9+):** Delta compression and client-side prediction. See [plan-thesis-gold.md](docs/plan-thesis-gold.md).
 
 *(See `docs/current-focus.md` and `docs/90-day-roadmap.md` for deeper details on our upcoming objectives like advanced region management, Discord bot integration, and operator feedback loops).*
 
