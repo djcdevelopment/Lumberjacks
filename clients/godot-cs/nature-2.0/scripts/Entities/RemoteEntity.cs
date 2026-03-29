@@ -18,7 +18,7 @@ public partial class RemoteEntity : Node3D
 
     public void Initialize(Vector3 position, float headingRad)
     {
-        GlobalPosition = position;
+        Position = position;
         _targetPosition = position;
         Rotation = new Vector3(0, headingRad, 0);
         _targetRotationY = headingRad;
