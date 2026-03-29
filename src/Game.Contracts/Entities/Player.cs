@@ -12,6 +12,7 @@ public record Player
     public double Heading { get; init; }
     /// <summary>Last processed input sequence number (echoed back to client for prediction).</summary>
     public ushort LastInputSeq { get; init; }
+    public string? EquippedItemType { get; init; } // e.g., "axe", "pickaxe"
     public required string RegionId { get; init; }
     public bool Connected { get; init; }
     public DateTimeOffset? ConnectedAt { get; init; }

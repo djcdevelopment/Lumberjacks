@@ -42,6 +42,35 @@ public static class StateHasher
             AppendDouble(crc, player.Velocity.Z);
         }
 
+        // Sort resources by ID for deterministic ordering
+        var sortedResources = world.NaturalResources
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var (id, resource) in sortedResources)
+        {
+            // Hash resource ID
+            crc.Append(Encoding.UTF8.GetBytes(id));
+
+            // Hash health and position
+            AppendDouble(crc, resource.Health);
+            AppendDouble(crc, resource.StumpHealth);
+            AppendDouble(crc, resource.Position.X);
+            AppendDouble(crc, resource.Position.Y);
+            AppendDouble(crc, resource.Position.Z);
+
+            // Hash Axe Geometry state
+            AppendDouble(crc, resource.LeanX);
+            AppendDouble(crc, resource.LeanZ);
+
+            // Hash all modifiers (GrowthHistory)
+            foreach (var (key, val) in resource.GrowthHistory.OrderBy(kv => kv.Key))
+            {
+                crc.Append(Encoding.UTF8.GetBytes(key));
+                crc.Append(Encoding.UTF8.GetBytes(val));
+            }
+        }
+
         // Include tick number for chain integrity
         Span<byte> tickBytes = stackalloc byte[8];
         BitConverter.TryWriteBytes(tickBytes, world.CurrentTick);

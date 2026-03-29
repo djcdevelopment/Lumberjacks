@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: game
       POSTGRES_PASSWORD: game
     ports:
-      - "${PGPORT:-5433}:5432"
+      - "${PGPORT:-5435}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro

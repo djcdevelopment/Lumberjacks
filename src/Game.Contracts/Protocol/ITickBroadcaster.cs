@@ -13,7 +13,9 @@ public interface ITickBroadcaster
     Task BroadcastTickAsync(
         IReadOnlyDictionary<string, Game.Contracts.Entities.Player> players,
         IReadOnlyDictionary<string, Game.Contracts.Entities.Region> regions,
+        IReadOnlyDictionary<string, Game.Contracts.Entities.NaturalResource> resources,
         HashSet<string> changedPlayerIds,
+        HashSet<string> changedResourceIds,
         long tick,
         uint stateHash);
 }

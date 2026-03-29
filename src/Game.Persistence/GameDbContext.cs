@@ -18,6 +18,8 @@ public class GameDbContext : DbContext
     public DbSet<ChallengeEntity> Challenges => Set<ChallengeEntity>();
     public DbSet<ChallengeProgressEntity> ChallengeProgress => Set<ChallengeProgressEntity>();
     public DbSet<RegionEntity> Regions => Set<RegionEntity>();
+    public DbSet<NaturalResourceEntity> NaturalResources => Set<NaturalResourceEntity>();
+    public DbSet<RegionProfileEntity> RegionProfiles => Set<RegionProfileEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -181,6 +183,44 @@ public class GameDbContext : DbContext
             e.Property(x => x.CompletedAt).HasColumnName("completed_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasIndex(x => new { x.ChallengeId, x.GuildId }).IsUnique();
+        });
+
+        modelBuilder.Entity<NaturalResourceEntity>(e =>
+        {
+            e.ToTable("natural_resources");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.Type).HasColumnName("type");
+            e.Property(x => x.PositionX).HasColumnName("position_x");
+            e.Property(x => x.PositionY).HasColumnName("position_y");
+            e.Property(x => x.PositionZ).HasColumnName("position_z");
+            e.Property(x => x.RegionId).HasColumnName("region_id");
+            e.Property(x => x.Health).HasColumnName("health");
+            e.Property(x => x.StumpHealth).HasColumnName("stump_health");
+            e.Property(x => x.RegrowthProgress).HasColumnName("regrowth_progress");
+            e.Property(x => x.LeanX).HasColumnName("lean_x");
+            e.Property(x => x.LeanZ).HasColumnName("lean_z");
+            e.Property(x => x.GrowthHistory).HasColumnName("growth_history").HasColumnType("jsonb");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.LastUpdatedAt).HasColumnName("last_updated_at");
+            e.HasIndex(x => x.RegionId);
+        });
+
+        modelBuilder.Entity<RegionProfileEntity>(e =>
+        {
+            e.ToTable("region_profiles");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.RegionId).HasColumnName("region_id");
+            e.Property(x => x.AltitudeGrid).HasColumnName("altitude_grid").HasColumnType("jsonb");
+            e.Property(x => x.HumidityGrid).HasColumnName("humidity_grid").HasColumnType("jsonb");
+            e.Property(x => x.GridWidth).HasColumnName("grid_width");
+            e.Property(x => x.GridHeight).HasColumnName("grid_height");
+            e.Property(x => x.TradeWindX).HasColumnName("trade_wind_x");
+            e.Property(x => x.TradeWindZ).HasColumnName("trade_wind_z");
+            e.Property(x => x.GeologicHistory).HasColumnName("geologic_history").HasColumnType("jsonb");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.HasIndex(x => x.RegionId);
         });
     }
 }

@@ -10,7 +10,9 @@ public class NullTickBroadcaster : ITickBroadcaster
     public Task BroadcastTickAsync(
         IReadOnlyDictionary<string, Player> players,
         IReadOnlyDictionary<string, Region> regions,
+        IReadOnlyDictionary<string, NaturalResource> resources,
         HashSet<string> changedPlayerIds,
+        HashSet<string> changedResourceIds,
         long tick,
         uint stateHash) => Task.CompletedTask;
 }

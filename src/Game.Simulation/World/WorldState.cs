@@ -9,6 +9,8 @@ public class WorldState
     public ConcurrentDictionary<string, Player> Players { get; } = new();
     public ConcurrentDictionary<string, Structure> Structures { get; } = new();
     public ConcurrentDictionary<string, WorldItem> WorldItems { get; } = new();
+    public ConcurrentDictionary<string, NaturalResource> NaturalResources { get; } = new();
+    public ConcurrentDictionary<string, RegionProfile> RegionProfiles { get; } = new();
 
     /// <summary>Monotonically increasing tick counter, incremented by TickLoop at 20Hz.</summary>
     public long CurrentTick { get; set; }

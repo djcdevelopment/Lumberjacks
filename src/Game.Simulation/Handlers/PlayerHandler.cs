@@ -77,7 +77,26 @@ public class PlayerHandler
             })
             .ToList();
 
-        var allEntities = playerEntities.Concat(structureEntities).ToList();
+        var naturalResourceEntities = _world.NaturalResources.Values
+            .Where(n => n.RegionId == request.RegionId)
+            .Select(n => new Dictionary<string, object>
+            {
+                ["entity_id"] = n.Id,
+                ["entity_type"] = "natural_resource",
+                ["type"] = n.Type,
+                ["position"] = new { x = n.Position.X, y = n.Position.Y, z = n.Position.Z },
+                ["health"] = n.Health,
+                ["lean_x"] = n.LeanX,
+                ["lean_z"] = n.LeanZ,
+                // We skip growth_history in the initial snapshot to keep the message size small.
+                // It can be requested on-demand or sent when interacting.
+            })
+            .ToList();
+
+        var allEntities = playerEntities
+            .Concat(structureEntities)
+            .Concat(naturalResourceEntities)
+            .ToList();
 
         // Fire-and-forget: emit player_connected event
         _ = EmitPlayerEventAsync(EventType.PlayerConnected, request.PlayerId, request.RegionId,

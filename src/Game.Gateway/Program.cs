@@ -29,6 +29,8 @@ builder.Services.AddSingleton<Game.Simulation.Handlers.PlaceStructureHandler>();
 builder.Services.AddSingleton<Game.Simulation.Handlers.InventoryHandler>();
 builder.Services.AddScoped<Game.Simulation.Startup.StructureLoader>();
 builder.Services.AddScoped<Game.Simulation.Startup.RegionLoader>();
+builder.Services.AddScoped<Game.Simulation.Startup.RegionProfileLoader>();
+builder.Services.AddScoped<Game.Simulation.Startup.NaturalResourceLoader>();
 builder.Services.AddDbContextFactory<GameDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("GameDb")
         ?? "Host=localhost;Port=5433;Database=game;Username=game;Password=game"));
@@ -41,6 +43,12 @@ try
     await using var scope = app.Services.CreateAsyncScope();
     var regionLoader = scope.ServiceProvider.GetRequiredService<Game.Simulation.Startup.RegionLoader>();
     await regionLoader.LoadAsync();
+
+    var profileLoader = scope.ServiceProvider.GetRequiredService<Game.Simulation.Startup.RegionProfileLoader>();
+    await profileLoader.LoadAsync();
+
+    var resourceLoader = scope.ServiceProvider.GetRequiredService<Game.Simulation.Startup.NaturalResourceLoader>();
+    await resourceLoader.LoadAsync();
 
     var structureLoader = scope.ServiceProvider.GetRequiredService<Game.Simulation.Startup.StructureLoader>();
     await structureLoader.LoadAsync();

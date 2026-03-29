@@ -37,17 +37,18 @@ public class TickLoop : BackgroundService
 
             // === CORE SIMULATION STEP ===
             // Drain input queue → apply physics → get changed entities
-            var changedPlayers = SimulationStep.Execute(_world, _inputQueue, tick);
+            var (changedPlayers, changedResources) = SimulationStep.Execute(_world, _inputQueue, tick);
 
             // Compute deterministic state hash
             var stateHash = StateHasher.ComputeHash(_world);
             _world.LastStateHash = stateHash;
 
-            // Broadcast authoritative state for changed players
-            if (changedPlayers.Count > 0)
+            // Broadcast authoritative state for changed entities
+            if (changedPlayers.Count > 0 || changedResources.Count > 0)
             {
                 await _broadcaster.BroadcastTickAsync(
-                    _world.Players, _world.Regions, changedPlayers, tick, stateHash);
+                    _world.Players, _world.Regions, _world.NaturalResources, 
+                    changedPlayers, changedResources, tick, stateHash);
             }
 
             // === HOUSEKEEPING ===

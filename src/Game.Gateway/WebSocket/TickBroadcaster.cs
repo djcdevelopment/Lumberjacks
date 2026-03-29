@@ -36,13 +36,14 @@ public class TickBroadcaster : ITickBroadcaster
     public async Task BroadcastTickAsync(
         IReadOnlyDictionary<string, Player> players,
         IReadOnlyDictionary<string, Region> regions,
+        IReadOnlyDictionary<string, NaturalResource> resources,
         HashSet<string> changedPlayerIds,
+        HashSet<string> changedResourceIds,
         long tick,
         uint stateHash)
     {
-        // Pre-build per-player data needed for both JSON and binary paths
+        // 1. Prepare Player data
         var playerData = new Dictionary<string, (string RegionId, Player Player)>();
-
         foreach (var playerId in changedPlayerIds)
         {
             if (!players.TryGetValue(playerId, out var player))
@@ -50,53 +51,72 @@ public class TickBroadcaster : ITickBroadcaster
             playerData[playerId] = (player.RegionId, player);
         }
 
-        // Group changed players by region (for session lookup)
-        var regionIds = playerData.Values.Select(u => u.RegionId).Distinct();
+        // 2. Prepare Resource data
+        var resourceData = new Dictionary<string, (string RegionId, NaturalResource Resource)>();
+        foreach (var resourceId in changedResourceIds)
+        {
+            if (!resources.TryGetValue(resourceId, out var resource))
+                continue;
+            resourceData[resourceId] = (resource.RegionId, resource);
+        }
+
+        // 3. Group all changes by region
+        var regionIds = playerData.Values.Select(u => u.RegionId)
+            .Concat(resourceData.Values.Select(r => r.RegionId))
+            .Distinct();
 
         foreach (var regionId in regionIds)
         {
             var sessions = _sessions.GetByRegion(regionId);
             if (sessions.Count == 0) continue;
 
-            // Changed players in this region
-            var regionChanges = changedPlayerIds
+            var regionPlayerChanges = changedPlayerIds
                 .Where(id => playerData.TryGetValue(id, out var u) && u.RegionId == regionId)
+                .ToHashSet();
+
+            var regionResourceChanges = changedResourceIds
+                .Where(id => resourceData.TryGetValue(id, out var r) && r.RegionId == regionId)
                 .ToHashSet();
 
             foreach (var session in sessions)
             {
                 if (session.Socket.State != WebSocketState.Open) continue;
 
-                // AoI filter: which changed entities does this observer care about?
-                var visible = _interest.FilterForObserver(
-                    session.PlayerId, regionChanges, players, tick);
-
                 var isBinary = session.Protocol == ProtocolMode.Binary;
 
-                foreach (var entityId in visible)
+                // --- Player Updates ---
+                var visiblePlayers = _interest.FilterForObserver(session.PlayerId, regionPlayerChanges, players, tick);
+                foreach (var playerId in visiblePlayers)
                 {
-                    if (!playerData.TryGetValue(entityId, out var data))
-                        continue;
-
+                    if (!playerData.TryGetValue(playerId, out var data)) continue;
                     try
                     {
                         if (isBinary)
                         {
-                            // Try UDP first (datagram lane), fall back to WebSocket binary
-                            if (!TrySendUdpEntityUpdate(session, entityId, data.Player, tick, stateHash))
-                            {
-                                await SendBinaryEntityUpdate(session, entityId, data.Player, tick, stateHash);
-                            }
+                            if (!TrySendUdpEntityUpdate(session, playerId, data.Player, tick, stateHash))
+                                await SendBinaryEntityUpdate(session, playerId, data.Player, tick, stateHash);
                         }
                         else
                         {
-                            await SendJsonEntityUpdate(session, entityId, data.Player, tick, stateHash);
+                            await SendJsonEntityUpdate(session, playerId, data.Player, tick, stateHash);
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to send player update"); }
+                }
+
+                // --- Resource Updates (Nature 2.0) ---
+                // For now, simpler AoI for resources: everyone in region gets them if they change (trees are big)
+                foreach (var resourceId in regionResourceChanges)
+                {
+                    if (!resourceData.TryGetValue(resourceId, out var data)) continue;
+                    try
                     {
-                        _logger.LogWarning(ex, "Failed to send tick update to session {SessionId}", session.SessionId);
+                        if (!isBinary) // Binary path for resources can be added later if needed
+                        {
+                            await SendJsonNaturalResourceUpdate(session, resourceId, data.Resource, tick, stateHash);
+                        }
                     }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to send resource update"); }
                 }
             }
         }
@@ -169,6 +189,36 @@ public class TickBroadcaster : ITickBroadcaster
                 ["velocity"] = new { x = player.Velocity.X, y = player.Velocity.Y, z = player.Velocity.Z },
                 ["heading"] = player.Heading,
                 ["last_input_seq"] = player.LastInputSeq,
+            },
+            tick,
+            state_hash = stateHash,
+        };
+
+        var env = EnvelopeFactory.Create(MessageType.EntityUpdate, updateData);
+        var json = EnvelopeFactory.Serialize(env);
+        await session.Socket.SendAsync(
+            Encoding.UTF8.GetBytes(json),
+            WebSocketMessageType.Text,
+            true,
+            CancellationToken.None);
+    }
+
+    private static async Task SendJsonNaturalResourceUpdate(
+        GameSession session, string resourceId, NaturalResource resource, long tick, uint stateHash)
+    {
+        var updateData = new
+        {
+            entity_id = resourceId,
+            entity_type = resource.Type, // e.g. "oak_tree"
+            data = new Dictionary<string, object>
+            {
+                ["position"] = new { x = resource.Position.X, y = resource.Position.Y, z = resource.Position.Z },
+                ["health"] = resource.Health,
+                ["stump_health"] = resource.StumpHealth,
+                ["regrowth_progress"] = resource.RegrowthProgress,
+                ["lean_x"] = resource.LeanX,
+                ["lean_z"] = resource.LeanZ,
+                ["growth_history"] = resource.GrowthHistory
             },
             tick,
             state_hash = stateHash,

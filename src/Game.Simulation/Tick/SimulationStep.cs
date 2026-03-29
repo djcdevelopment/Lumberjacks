@@ -17,14 +17,15 @@ public class SimulationStep
     public const double FrictionPerTick = 2.0;
 
     /// <summary>
-    /// Process one tick: apply queued inputs → compute physics → return list of changed player IDs.
+    /// Process one tick: apply queued inputs → compute physics → return list of changed entities.
     /// </summary>
-    public static HashSet<string> Execute(
+    public static (HashSet<string> PlayerIds, HashSet<string> ResourceIds) Execute(
         WorldState world,
         InputQueue inputQueue,
         long tick)
     {
-        var changed = new HashSet<string>();
+        var changedPlayers = new HashSet<string>();
+        var changedResources = new HashSet<string>();
 
         // 1. Drain inputs for this tick
         var inputs = inputQueue.DrainForTick(tick);
@@ -38,6 +39,57 @@ public class SimulationStep
                 continue;
 
             var input = queuedInput.Input;
+            
+            // === INTERACTION LOGIC (Axe Geometry) ===
+            if ((input.ActionFlags & 0x04) != 0) // Bit 2: Interact
+            {
+                // Must have axe equipped (Nature 2.0 requirement)
+                if (player.EquippedItemType == "axe")
+                {
+                    var nearby = world.SpatialGrid.QueryRadius(player.Position, 2.5);
+                    foreach (var entityId in nearby)
+                    {
+                        if (world.NaturalResources.TryGetValue(entityId, out var resource))
+                        {
+                            // Calculate strike vector from input direction (0-255)
+                            var swingRad = (input.Direction / 255.0) * 360.0 * Math.PI / 180.0;
+                            var strikeX = Math.Sin(swingRad);
+                            var strikeZ = Math.Cos(swingRad);
+
+                            // Accumulate lean (Axe Geometry)
+                            var updatedResource = resource with
+                            {
+                                Health = Math.Max(0, resource.Health - 5.0), // 20 hits to fell
+                                LeanX = resource.LeanX + strikeX,
+                                LeanZ = resource.LeanZ + strikeZ,
+                                LastUpdatedAt = DateTimeOffset.UtcNow
+                            };
+                            
+                            // If it just fell, finalize growth history with fall direction
+                            if (resource.Health > 0 && updatedResource.Health <= 0)
+                            {
+                                // Final direction = strike mean + trade winds (Phase 0/3)
+                                world.RegionProfiles.TryGetValue(player.RegionId, out var profile);
+                                var windX = profile?.TradeWindX ?? 0;
+                                var windZ = profile?.TradeWindZ ?? 0;
+                                
+                                var finalFallAngle = Math.Atan2(updatedResource.LeanX + windX, updatedResource.LeanZ + windZ);
+                                updatedResource.GrowthHistory["fall_heading"] = (finalFallAngle * 180.0 / Math.PI).ToString("F1");
+                                _ = world.NaturalResources.TryUpdate(entityId, updatedResource, resource);
+                            }
+                            else
+                            {
+                                world.NaturalResources[entityId] = updatedResource;
+                            }
+                            
+                            changedResources.Add(entityId);
+                            break; // only hit one tree per tick
+                        }
+                    }
+                }
+            }
+
+            // === MOVEMENT PHYSICS ===
             var speed = Math.Clamp(input.SpeedPercent, (byte)0, (byte)100) / 100.0 * MaxSpeedPerTick;
 
             // Convert direction byte (0-255) to radians
@@ -76,13 +128,13 @@ public class SimulationStep
             };
             world.SpatialGrid.Update(playerId, newPos);
 
-            changed.Add(playerId);
+            changedPlayers.Add(playerId);
         }
 
         // 3. Apply friction to players who had NO input this tick
         foreach (var (playerId, player) in world.Players)
         {
-            if (changed.Contains(playerId)) continue; // already updated
+            if (changedPlayers.Contains(playerId)) continue; // already updated
             if (!player.Connected) continue;
             if (player.Velocity.X == 0 && player.Velocity.Y == 0 && player.Velocity.Z == 0) continue;
 
@@ -94,7 +146,7 @@ public class SimulationStep
             {
                 // Fully stopped
                 world.Players[playerId] = player with { Velocity = new Vec3(0, 0, 0) };
-                changed.Add(playerId);
+                changedPlayers.Add(playerId);
             }
             else
             {
@@ -121,10 +173,10 @@ public class SimulationStep
                     Velocity = newVel,
                 };
                 world.SpatialGrid.Update(playerId, newPos);
-                changed.Add(playerId);
+                changedPlayers.Add(playerId);
             }
         }
 
-        return changed;
+        return (changedPlayers, changedResources);
     }
 }
