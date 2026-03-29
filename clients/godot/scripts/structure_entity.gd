@@ -17,7 +17,7 @@ func _ready() -> void:
 	should_interpolate = false  # Structures don't move
 
 
-func initialize(entity: Dictionary) -> void:
+func initialize(entity: Dictionary, is_local: bool) -> void:
 	var structure_type: String = entity.get("type", entity.get("structure_type", "unknown"))
 	var visual = STRUCTURE_VISUALS.get(structure_type, DEFAULT_VISUAL)
 
@@ -44,9 +44,8 @@ func initialize(entity: Dictionary) -> void:
 	mat.albedo_color = visual["color"]
 	mesh_instance.material_override = mat
 
-	# Set rotation
-	var rot_deg: float = float(entity.get("rotation", 0.0))
-	rotation.y = deg_to_rad(rot_deg)
+	# Set rotation (ADR 0018: Use the mapped heading from GameState)
+	rotation.y = entity.get("_heading_godot", 0.0)
 
 	# Position mesh so it sits on the ground
 	mesh_instance.position.y = visual["scale"].y / 2.0

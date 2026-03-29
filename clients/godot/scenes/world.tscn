@@ -1,8 +1,8 @@
 [gd_scene load_steps=6 format=3 uid="uid://world_scene"]
 
-[ext_resource type="Script" path="res://scripts/world.gd" id="1_world"]
-[ext_resource type="Script" path="res://scripts/structure_placer.gd" id="2_placer"]
-[ext_resource type="Script" path="res://scripts/hud.gd" id="3_hud"]
+[ext_resource type="Script" path="res://scripts/Core/World.cs" id="1_world"]
+[ext_resource type="Script" path="res://scripts/Player/StructurePlacer.cs" id="2_placer"]
+[ext_resource type="Script" path="res://scripts/UI/HUD.cs" id="3_hud"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_1"]
 size = Vector2(1000, 1000)

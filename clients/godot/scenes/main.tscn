@@ -1,7 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://main_scene"]
+[gd_scene load_steps=4 format=3 uid="uid://main_scene"]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
-[ext_resource type="Script" path="res://scripts/connect_screen.gd" id="2_connect"]
+[ext_resource type="Script" path="res://scripts/Core/Main.cs" id="1_main"]
+[ext_resource type="Script" path="res://scripts/UI/ConnectScreen.cs" id="2_connect"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")

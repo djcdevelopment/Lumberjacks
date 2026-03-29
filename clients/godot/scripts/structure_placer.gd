@@ -2,6 +2,8 @@ extends Node3D
 ## Handles build mode: ghost preview + click-to-place.
 ## Added as a child of the world scene.
 
+signal build_mode_changed(active: bool, type: String)
+
 var build_mode: bool = false
 var selected_type: String = "campfire"
 var _ghost: MeshInstance3D = null
@@ -67,6 +69,7 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_build"):
 		build_mode = !build_mode
 		_ghost.visible = build_mode
+		build_mode_changed.emit(build_mode, selected_type)
 		if build_mode:
 			print("[Build] Build mode ON — type: %s (scroll wheel to change)" % selected_type)
 		else:
@@ -120,6 +123,7 @@ func _cycle_type(direction: int) -> void:
 		idx += STRUCTURE_TYPES.size()
 	selected_type = STRUCTURE_TYPES[idx]
 	_update_ghost_mesh()
+	build_mode_changed.emit(build_mode, selected_type)
 	print("[Build] Selected: %s" % selected_type)
 
 
@@ -128,14 +132,14 @@ func _place_at_ghost() -> void:
 		return
 
 	var pos = _ghost.global_position
-	# Adjust y back to ground level (ghost has mesh offset)
-	pos.y = 0.0
+	# Use CoordinateMapper to sync with server space (ADR 0018)
+	var server_pos = CoordinateMapper.godot_to_server(pos)
 
 	NetworkManager.send_message("place_structure", {
 		"structure_type": selected_type,
-		"position": {"x": pos.x, "y": pos.y, "z": pos.z}
+		"position": server_pos
 	})
-	print("[Build] Placed %s at (%.1f, %.1f, %.1f)" % [selected_type, pos.x, pos.y, pos.z])
+	print("[Build] Placed %s at server pos: %s" % [selected_type, server_pos])
 
 	# Exit build mode after placing
 	build_mode = false

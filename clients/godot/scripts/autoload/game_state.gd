@@ -43,6 +43,12 @@ func _on_world_snapshot(payload: Dictionary) -> void:
 		var eid: String = ent.get("entity_id", "")
 		if eid == "":
 			continue
+		
+		# Coordinate Mapping (ADR 0018)
+		var raw_pos = ent.get("position", {})
+		ent["_pos_godot"] = CoordinateMapper.server_to_godot(raw_pos)
+		ent["_heading_godot"] = CoordinateMapper.server_heading_to_rad(ent.get("heading", 0.0))
+		
 		entities[eid] = ent
 		entity_added.emit(eid, ent)
 
@@ -55,30 +61,45 @@ func _on_entity_updated(payload: Dictionary) -> void:
 		return
 
 	current_tick = maxi(current_tick, payload.get("tick", 0))
+	var data: Dictionary = payload.get("data", {})
 
 	if eid in entities:
-		# Merge update data into existing entity
-		var existing: Dictionary = entities[eid]
-		existing["entity_type"] = payload.get("entity_type", existing.get("entity_type", ""))
-		var data: Dictionary = payload.get("data", {})
-		for key in data:
-			existing[key] = data[key]
-		# Also store data sub-dict for convenience
-		existing["_data"] = data
-		entities[eid] = existing
-		entity_changed.emit(eid, existing)
-	else:
-		# New entity we haven't seen before
-		var ent: Dictionary = {
-			"entity_id": eid,
-			"entity_type": payload.get("entity_type", "unknown"),
-		}
-		var data: Dictionary = payload.get("data", {})
+		var ent: Dictionary = entities[eid]
+		# Apply updates (flattening into the stored entity)
 		for key in data:
 			ent[key] = data[key]
-		ent["_data"] = data
-		entities[eid] = ent
-		entity_added.emit(eid, ent)
+		
+		# Update mapped coordinates ONLY if present in update to prevent resetting to (0,0,0)
+		if "position" in data:
+			ent["_pos_godot"] = CoordinateMapper.server_to_godot(data["position"])
+		if "velocity" in data:
+			ent["_vel_godot"] = CoordinateMapper.server_to_godot(data["velocity"])
+		if "heading" in data:
+			ent["_heading_godot"] = CoordinateMapper.server_heading_to_rad(float(data["heading"]))
+		
+		# Ensure metadata is consistent for world.gd (maps Type -> entity_type)
+		if not "entity_type" in ent and "type" in ent:
+			ent["entity_type"] = ent["type"]
+		
+		entity_changed.emit(eid, ent)
+	else:
+		# New entity arriving via update (e.g. dynamic forest streaming)
+		# Create a proper entity dictionary instead of storing the whole message payload
+		var new_ent: Dictionary = data.duplicate()
+		new_ent["entity_id"] = eid
+		
+		# Coordinate Mapping (safeguard against missing pos)
+		if "position" in data:
+			new_ent["_pos_godot"] = CoordinateMapper.server_to_godot(data["position"])
+		if "heading" in data:
+			new_ent["_heading_godot"] = CoordinateMapper.server_heading_to_rad(float(data.get("heading", 0.0)))
+		
+		# Ensure entity_type is top-level so world.gd spawns the right node
+		if "type" in new_ent and not "entity_type" in new_ent:
+			new_ent["entity_type"] = new_ent["type"]
+
+		entities[eid] = new_ent
+		entity_added.emit(eid, new_ent)
 
 
 func _on_entity_removed(payload: Dictionary) -> void:
@@ -99,9 +120,9 @@ static func get_entity_position(ent: Dictionary) -> Vector3:
 		pos = data.get("position", null)
 	if pos is Dictionary:
 		return Vector3(
-			float(pos.get("x", 0)),
-			float(pos.get("y", 0)),
-			float(pos.get("z", 0))
+			float(pos.get("x", pos.get("X", 0))),
+			float(pos.get("y", pos.get("Y", 0))),
+			float(pos.get("z", pos.get("Z", 0)))
 		)
 	return Vector3.ZERO
 

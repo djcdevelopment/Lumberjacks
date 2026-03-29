@@ -5,6 +5,7 @@ var entity_nodes: Dictionary = {}  # entity_id → Node3D
 
 var _player_scene: PackedScene = preload("res://scenes/entities/player.tscn")
 var _structure_scene: PackedScene = preload("res://scenes/entities/structure.tscn")
+var _tree_scene: PackedScene = preload("res://scenes/entities/tree.tscn")
 
 
 func _ready() -> void:
@@ -32,20 +33,26 @@ func _on_entity_added(entity_id: String, entity: Dictionary) -> void:
 	if entity_id in entity_nodes:
 		return  # Already spawned
 
-	var entity_type: String = entity.get("entity_type", "unknown")
-	var node: Node3D = null
+	var id = entity_id
+	var type = entity.get("entity_type", "unknown")
+	var node = null
 
-	match entity_type:
+	match type:
 		"player":
-			node = _spawn_player(entity_id, entity)
+			node = _spawn_player(id, entity)
 		"structure":
-			node = _spawn_structure(entity_id, entity)
-		_:
-			return  # Unknown entity type, skip
+			node = _spawn_structure(id, entity)
+		"tree", "natural_resource", "oak_tree":
+			node = _spawn_tree(id, entity)
 
 	if node != null:
-		entity_nodes[entity_id] = node
+		entity_nodes[id] = node
 		add_child(node)
+		
+		# Initialize AFTER adding to tree so @onready variables are populated
+		var is_local = (entity.get("player_id", id) == GameState.my_player_id) or (id == GameState.my_player_id)
+		if node.has_method("initialize"):
+			node.initialize(entity, is_local)
 
 
 func _on_entity_changed(entity_id: String, entity: Dictionary) -> void:
@@ -73,19 +80,15 @@ func _spawn_player(entity_id: String, entity: Dictionary) -> Node3D:
 	node.name = "Player_" + entity_id.left(8)
 	node.set_meta("entity_id", entity_id)
 
-	# Set initial position
-	var pos = GameState.get_entity_position(entity)
-	node.position = pos
+	# Set initial position (ADR 0018)
+	node.position = entity.get("_pos_godot", Vector3.ZERO)
+	node.rotation.y = entity.get("_heading_godot", 0.0)
 
 	# Configure as local or remote player
 	if is_local:
 		node.set_meta("is_local", true)
 	else:
 		node.set_meta("is_local", false)
-
-	# Let the node initialize itself
-	if node.has_method("initialize"):
-		node.initialize(entity, is_local)
 
 	return node
 
@@ -95,10 +98,18 @@ func _spawn_structure(entity_id: String, entity: Dictionary) -> Node3D:
 	node.name = "Structure_" + entity_id.left(8)
 	node.set_meta("entity_id", entity_id)
 
-	var pos = GameState.get_entity_position(entity)
-	node.position = pos
+	# Set initial position (ADR 0018)
+	node.position = entity.get("_pos_godot", Vector3.ZERO)
+	node.rotation.y = entity.get("_heading_godot", 0.0)
 
-	if node.has_method("initialize"):
-		node.initialize(entity)
+	return node
+func _spawn_tree(entity_id: String, entity: Dictionary) -> Node3D:
+	var node = _tree_scene.instantiate()
+	node.name = "Tree_" + entity_id.left(8)
+	node.set_meta("entity_id", entity_id)
 
+	# Set initial position (ADR 0018)
+	node.position = entity.get("_pos_godot", Vector3.ZERO)
+	# Heading is handled by the tree's own initialize/update
+	
 	return node

@@ -1,6 +1,6 @@
 [gd_scene load_steps=3 format=3 uid="uid://structure_entity"]
 
-[ext_resource type="Script" path="res://scripts/structure_entity.gd" id="1_structure"]
+[ext_resource type="Script" path="res://scripts/Entities/StructureEntity.cs" id="1_structure"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_1"]
 size = Vector3(1, 1, 1)

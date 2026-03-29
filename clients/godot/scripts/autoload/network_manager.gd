@@ -21,11 +21,14 @@ var _connected: bool = false
 var resume_token: String = ""
 var last_url: String = ""
 
-## Reconnection
+const SESSION_CONFIG_PATH = "user://session.cfg"
 var _reconnect_timer: float = 0.0
 var _reconnect_delay: float = 2.0
 var _should_reconnect: bool = false
 var _reconnect_attempt: int = 0
+
+func _ready() -> void:
+	_load_session()
 
 
 func connect_to_server(url: String, resume: String = "") -> void:
@@ -37,6 +40,10 @@ func connect_to_server(url: String, resume: String = "") -> void:
 	last_url = url
 
 	var connect_url = url
+	# Ensure trailing slash if no path is present (Godot 4 URL parsing fix for query params)
+	if not connect_url.ends_with("/") and not "?" in connect_url:
+		connect_url += "/"
+
 	if resume != "":
 		# Append resume token as query parameter
 		if "?" in connect_url:
@@ -46,6 +53,10 @@ func connect_to_server(url: String, resume: String = "") -> void:
 
 	print("[Network] Connecting to ", connect_url)
 	_socket = WebSocketPeer.new()
+	# Increase buffers for large world snapshots (dense forests)
+	_socket.set_inbound_buffer_size(1024 * 1024) # 1MB
+	_socket.set_outbound_buffer_size(1024 * 1024) # 1MB
+	
 	var err = _socket.connect_to_url(connect_url)
 	if err != OK:
 		print("[Network] Connection failed: ", err)
@@ -147,6 +158,7 @@ func _handle_message(text: String) -> void:
 	match msg_type:
 		"session_started":
 			resume_token = payload.get("resume_token", "")
+			_save_session()
 			print("[Network] Session started — player_id: ", payload.get("player_id", "?"))
 			session_started.emit(payload)
 
@@ -170,3 +182,19 @@ func _handle_message(text: String) -> void:
 
 		_:
 			print("[Network] Unknown message type: ", msg_type)
+
+
+func _save_session() -> void:
+	var config = ConfigFile.new()
+	config.set_value("session", "resume_token", resume_token)
+	config.set_value("session", "last_url", last_url)
+	config.save(SESSION_CONFIG_PATH)
+
+
+func _load_session() -> void:
+	var config = ConfigFile.new()
+	if config.load(SESSION_CONFIG_PATH) == OK:
+		resume_token = config.get_value("session", "resume_token", "")
+		last_url = config.get_value("session", "last_url", "")
+		if resume_token != "":
+			print("[Network] Loaded resume token: ", resume_token.left(8), "...")
