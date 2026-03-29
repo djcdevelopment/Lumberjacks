@@ -19,33 +19,6 @@ All phases of the network infrastructure refactoring plan (`implementation_plan.
 - **Phase 3 (Spatial Interest Management):** SpatialGrid, InterestManager (near/mid/far AoI bands), TickBroadcaster rewritten for per-player AoI filtering
 - **Phase 4 (Client Prediction — server-side):** Binary payload serializers (EntityUpdate ~33B, PlayerInput 5B), outbound binary framing, inbound binary fast-path — JSON payloads fully replaced for hot-path messages
 - **Phase 5 (Dual-Channel Transport):** UdpTransport BackgroundService (port 4005), session UDP binding via token, TickBroadcaster sends datagram-lane via UDP when available, WebSocket fallback. (Validated 2026-03-27 with high-load script).
-- **Transport Validation (2026-03-27):** Debugged and confirmed 99% simulation offload to UDP in local testing. Full report in `docs/load-test-dual-channel-results.md`.
-
-**What works today:**
-
-Gateway (port 4000) is the unified host — WebSocket, tick loop, simulation, and broadcasting all run in-process:
-- WebSocket connection → session_started with server-assigned player_id
-- Session resume: disconnect/reconnect with `?resume=TOKEN`, world re-sync
-- join_region with guild_id → world_snapshot with entities
-- Input-driven simulation: `player_input` → InputQueue → 20Hz TickLoop → SimulationStep (direction/speed physics, friction, bounds clamping) → StateHasher → TickBroadcaster
-- Per-player AoI filtering: near (0–100u, every tick), mid (100–300u, every 4th tick), far (300+u, dropped)
-- SpatialGrid: grid-based spatial hash for fast radius queries (XZ-plane, Y ignored)
-- MessageRouter calls PlayerHandler/PlaceStructureHandler/InventoryHandler directly (no HTTP self-calls)
-- Binary payload serializers: EntityUpdate (~33 bytes vs ~200+ JSON), PlayerInput (5 bytes vs ~120 JSON)
-- Dual-channel transport: UDP (port 4005) for datagram-lane, WebSocket for reliable-lane, automatic fallback
-- place_structure → persisted to Postgres, event emitted, progression updated
-- Movement validation: server-authoritative physics, speed clamping, region bounds clamping
-- Dynamic regions: create/delete via API, persisted to Postgres, bounds validation
-- Guild challenges: create → trigger match → progress increment → auto-complete → guild points
-- Inventory: item spawn, pickup, store in container, quantity tracking
-- Admin-web: tick diagnostics (live), region create/delete, service health, events, structures, players, guilds
-- CORS configurable via `CORS_ORIGINS` env var (deployment-ready)
-- Docker: multi-stage Dockerfile, docker-compose.yml, docker-compose.dev.yml
-- Graceful startup: DB loader failures caught, runs with in-memory defaults if Postgres unavailable
-- [C# Unit Test Suite](Tests.md) with full coverage (Contracts + Simulation) passing.
-- E2E scripts: `test-challenges.js`, `test-multiplayer.js`, `test-resume.js`, `test-input-broadcast.js`, `test-movement.js`, `test-vertical-slice.js`, `load-test-dual-channel.js`
-
-Game.Simulation can also run standalone (port 4001) with NullTickBroadcaster for HTTP-only testing, but is not deployed as a separate service.
 
 ## Completed: Azure Deployment (2026-03-27)
 
@@ -54,22 +27,35 @@ Backend deployed to Azure Container Apps (eastus2). 4 services: Gateway (externa
 - Gateway: `wss://gateway.wittyplant-6c0ca715.eastus2.azurecontainerapps.io`
 - OperatorApi: `https://operatorapi.wittyplant-6c0ca715.eastus2.azurecontainerapps.io`
 
-## Active Workstream: Godot Client Vertical Slice
+## Active Workstream: Godot C# Client — "Nature 2.0" (2026-03-29)
 
-Objective:
-Build the thinnest possible Godot 4.x client that connects to the backend, renders the world, and lets a player walk around and place structures. See `docs/godot-client-plan.md` for the full plan.
+**Location:** `clients/godot-cs/nature-2.0/`
 
-Why now:
-Backend is deployed and proven (Azure + local). The next risk to retire is whether a real game client can consume the WebSocket protocol and render the authoritative world state with acceptable feel.
+**Status:** Slices 1-4 complete, primitive Slice 5. Full E2E pipeline proven.
 
-Exit criteria:
-- Godot client connects via WebSocket, receives session_started
-- Joins region, renders world from world_snapshot (ground, players, structures)
-- WASD movement via player_input → server-authoritative position
-- Other players visible and moving in real time (interpolated)
-- Click-to-place structures
-- Disconnect/reconnect with resume token
-- Works against both local and Azure backends
+**What works today:**
+- Fresh Godot 4.6.1 mono project with C# builds (Alt+B)
+- `Game.Contracts` referenced via ProjectReference (multi-targeted net8.0+net9.0)
+- Connect screen UI with URL input
+- SimulationClient autoload: WebSocket + binary protocol + thread-safe message queue
+- GameState autoload: entity parsing from world_snapshot, coordinate mapping (ADR 0018), RegionProfile terrain data parsing
+- Main scene switching: connect screen → world → ESC back
+- World scene: placeholder entity spawning from server snapshot (trees visible as boxes)
+- Server change: MessageRouter includes `region_profile` in world_snapshot
+
+**What's next (Slices 5-6):**
+- Player capsule mesh + camera + WASD binary input (PlayerController)
+- Remote entity interpolation (ADR 0017)
+- Tree entity scenes with growth_history visual variation
+- Terrain heightmap mesh from RegionProfile altitude grid
+- Structure placement (build mode)
+
+**Previous client (`clients/godot/`) is archived** — created with non-mono Godot editor, GDScript/C# hybrid, never compiled C#. See `docs/retrospective-godot-cs-migration-2026-03-29.md`.
+
+## Server-Side Changes (2026-03-29)
+
+- `Game.Contracts.csproj`: Multi-targeted `net8.0;net9.0` for Godot compatibility
+- `MessageRouter.cs`: Added `BuildRegionProfilePayload()` — includes altitude grid + trade winds in world_snapshot for client terrain generation
 
 ## Parked
 
@@ -80,3 +66,4 @@ Exit criteria:
 - Content registry service
 - Discord bridge service
 - Auth / player identity
+- Thesis Gold push (delta compression + client prediction)

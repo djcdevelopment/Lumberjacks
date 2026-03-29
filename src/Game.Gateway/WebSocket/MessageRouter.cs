@@ -37,6 +37,25 @@ public class MessageRouter
         _logger = logger;
     }
 
+    /// <summary>
+    /// Builds a compact region profile payload for the client to generate terrain.
+    /// Includes altitude grid and trade winds — enough for heightmap rendering.
+    /// </summary>
+    private object? BuildRegionProfilePayload(string regionId)
+    {
+        if (!_world.RegionProfiles.TryGetValue(regionId, out var profile))
+            return null;
+
+        return new
+        {
+            grid_width = profile.GridWidth,
+            grid_height = profile.GridHeight,
+            altitude_grid = profile.AltitudeGrid,
+            trade_wind_x = profile.TradeWindX,
+            trade_wind_z = profile.TradeWindZ,
+        };
+    }
+
     public async Task RouteAsync(GameSession session, Envelope envelope)
     {
         switch (envelope.Type)
@@ -94,6 +113,7 @@ public class MessageRouter
                     region_id = session.RegionId,
                     entities = joinResult.Entities,
                     tick = 0,
+                    region_profile = BuildRegionProfilePayload(session.RegionId),
                 };
 
                 var snapshotEnvelope = EnvelopeFactory.Create(MessageType.WorldSnapshot, snapshot);
@@ -164,6 +184,7 @@ public class MessageRouter
                 region_id = regionId,
                 entities = result.Entities,
                 tick = 0,
+                region_profile = BuildRegionProfilePayload(regionId),
             };
 
             var snapshotEnvelope = EnvelopeFactory.Create(MessageType.WorldSnapshot, snapshot);

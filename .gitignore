@@ -23,5 +23,12 @@ obj/
 .godot/
 *.import
 builds/
-Godot_v4.6.1-stable_win64.exe
-Godot_v4.6.1-stable_win64_console.exe
+*.uid
+
+# Godot executables and SDK (keep out of repo)
+tools/Godot_*.exe
+tools/GodotSharp/
+
+# Personal files
+Documents - Shortcut.lnk
+LI-coach.md
