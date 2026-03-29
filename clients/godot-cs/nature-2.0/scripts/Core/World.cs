@@ -173,6 +173,15 @@ public partial class World : Node3D
     private void OnChanged(string id, Vector3 pos, Vector3 vel, float heading, long tick)
     {
         if (!_entities.TryGetValue(id, out var node)) return;
+
+        // Snap player Y to terrain — server doesn't know about altitude scaling
+        if (_state.HasTerrain && pos.Y < 0.1f)
+        {
+            float terrainY = TerrainGenerator.GetAltitudeAt(
+                _state.AltitudeGrid, _state.GridWidth, _state.GridHeight, pos.X, pos.Z);
+            pos = new Vector3(pos.X, terrainY, pos.Z);
+        }
+
         if (node is RemoteEntity re)
             re.UpdateFromServer(pos, vel, heading, tick);
         else
