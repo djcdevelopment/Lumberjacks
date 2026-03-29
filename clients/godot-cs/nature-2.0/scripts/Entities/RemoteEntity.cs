@@ -11,7 +11,7 @@ public partial class RemoteEntity : Node3D
 {
     [Export] public float InterpolationSpeed = 10.0f;
 
-    protected Vector3 _targetPosition;
+    public Vector3 _targetPosition;
     protected float _targetRotationY;
     private double _lastUpdateTime;
     private double _updateInterval = 0.05; // 20Hz default
@@ -25,6 +25,12 @@ public partial class RemoteEntity : Node3D
     }
 
     public bool DebugOverrideY { get; set; }
+
+    public void ForcePosition(Vector3 pos)
+    {
+        Position = pos;
+        _targetPosition = pos;
+    }
 
     public void UpdateFromServer(Vector3 position, Vector3 velocity, float headingRad, long tick)
     {
@@ -48,7 +54,7 @@ public partial class RemoteEntity : Node3D
         if (_updateInterval > 0.1)
             alpha *= (float)(0.05 / _updateInterval);
 
-        GlobalPosition = GlobalPosition.Lerp(_targetPosition, alpha);
+        Position = Position.Lerp(_targetPosition, alpha);
         Rotation = new Vector3(
             Rotation.X,
             Mathf.LerpAngle(Rotation.Y, _targetRotationY, alpha),

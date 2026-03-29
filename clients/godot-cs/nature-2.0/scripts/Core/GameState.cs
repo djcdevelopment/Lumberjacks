@@ -168,6 +168,25 @@ public partial class GameState : Node
     public int PlayerCount { get { int n = 0; foreach (var e in _entities.Values) if (e.Type == "player") n++; return n; } }
     public int EntityCount => _entities.Count;
 
+    private static readonly HashSet<string> _treeTypes = new()
+        { "tree", "natural_resource", "oak_tree", "pine_tree", "birch_tree" };
+
+    public Godot.Collections.Dictionary GetEntityMeta(string id) =>
+        _entities.TryGetValue(id, out var r) ? r.Meta : null;
+
+    public string FindNearestTree(Vector3 pos, float maxDist)
+    {
+        string nearest = null;
+        float bestDist = maxDist * maxDist;
+        foreach (var e in _entities.Values)
+        {
+            if (!_treeTypes.Contains(e.Type)) continue;
+            float d = (e.Pos - pos).LengthSquared();
+            if (d < bestDist) { bestDist = d; nearest = e.Id; }
+        }
+        return nearest;
+    }
+
     public void ReplayEntities()
     {
         foreach (var r in _entities.Values)

@@ -32,6 +32,12 @@ public partial class World : Node3D
         _state.EntityRemoved += OnRemoved;
         _state.TerrainReady += OnTerrainReady;
 
+        // Environment: sky + fog + ambient light
+        SetupEnvironment();
+
+        // Add tree inspector UI
+        AddChild(new UI.TreeInspector());
+
         GD.Print("World: ready");
         _treeCount = 0; _structCount = 0; _playerCount = 0;
         _state.ReplayEntities();
@@ -103,8 +109,8 @@ public partial class World : Node3D
         _entities[id] = instance;
         AddChild(instance);
 
-        // Snap to terrain height if available
-        if (_state.HasTerrain && pos.Y < 0.1f)
+        // Snap feet to terrain surface
+        if (_state.HasTerrain)
         {
             float terrainY = TerrainGenerator.GetAltitudeAt(
                 _state.AltitudeGrid, _state.GridWidth, _state.GridHeight, pos.X, pos.Z);
@@ -174,8 +180,8 @@ public partial class World : Node3D
     {
         if (!_entities.TryGetValue(id, out var node)) return;
 
-        // Snap player Y to terrain — server doesn't know about altitude scaling
-        if (_state.HasTerrain && pos.Y < 0.1f)
+        // Snap to terrain surface — feet on ground, not center-of-mass
+        if (_state.HasTerrain)
         {
             float terrainY = TerrainGenerator.GetAltitudeAt(
                 _state.AltitudeGrid, _state.GridWidth, _state.GridHeight, pos.X, pos.Z);
@@ -197,5 +203,39 @@ public partial class World : Node3D
     private void OnRemoved(string id)
     {
         if (_entities.Remove(id, out var node)) node.QueueFree();
+    }
+
+    private void SetupEnvironment()
+    {
+        var sky = new ProceduralSkyMaterial();
+        sky.SkyTopColor = new Color(0.35f, 0.55f, 0.85f);
+        sky.SkyHorizonColor = new Color(0.6f, 0.7f, 0.85f);
+        sky.GroundBottomColor = new Color(0.2f, 0.25f, 0.15f);
+        sky.GroundHorizonColor = new Color(0.5f, 0.55f, 0.45f);
+
+        var skyRes = new Sky();
+        skyRes.SkyMaterial = sky;
+
+        var env = new Godot.Environment();
+        env.BackgroundMode = Godot.Environment.BGMode.Sky;
+        env.Sky = skyRes;
+
+        // Ambient light so shadowed sides aren't pitch black
+        env.AmbientLightSource = Godot.Environment.AmbientSource.Color;
+        env.AmbientLightColor = new Color(0.45f, 0.5f, 0.55f);
+        env.AmbientLightEnergy = 0.4f;
+
+        // Fog — reinforces AoI, distant things fade
+        env.FogEnabled = true;
+        env.FogLightColor = new Color(0.6f, 0.7f, 0.8f);
+        env.FogDensity = 0.002f;
+        env.FogSkyAffect = 0.3f;
+
+        // Tonemap for richer colors
+        env.TonemapMode = Godot.Environment.ToneMapper.Aces;
+
+        var worldEnv = new WorldEnvironment();
+        worldEnv.Environment = env;
+        AddChild(worldEnv);
     }
 }

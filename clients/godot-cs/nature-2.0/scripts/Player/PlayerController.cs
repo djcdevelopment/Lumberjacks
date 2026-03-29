@@ -1,13 +1,13 @@
 using Godot;
 using CommunitySurvival.Networking;
 using CommunitySurvival.Core;
+using CommunitySurvival.Entities;
 
 namespace CommunitySurvival.Player;
 
 /// <summary>
 /// Local player input. WASD sends binary PlayerInput at 20Hz.
-/// F1 toggles debug fly mode (overrides server Y position).
-/// Space = up, Ctrl = down in fly mode.
+/// F1 toggles debug fly mode. Space = up, Ctrl = down.
 /// </summary>
 public partial class PlayerController : Node
 {
@@ -15,6 +15,7 @@ public partial class PlayerController : Node
     private GameState _state;
     private ushort _seq;
     private double _timer;
+    private double _debugTimer;
     private const double Interval = 0.05;
     private const float FlySpeed = 30f;
 
@@ -27,16 +28,12 @@ public partial class PlayerController : Node
         _state = GetNode<GameState>("/root/GameState");
 
         var parent = GetParent<Node3D>();
-        if (parent != null)
+        if (parent != null && _state.HasTerrain)
         {
-            _flyY = parent.Position.Y;
-            if (_state.HasTerrain)
-            {
-                float terrainY = TerrainGenerator.GetAltitudeAt(
-                    _state.AltitudeGrid, _state.GridWidth, _state.GridHeight,
-                    parent.Position.X, parent.Position.Z);
-                GD.Print($"PlayerController: pos={parent.Position}, terrainY={terrainY}");
-            }
+            float terrainY = TerrainGenerator.GetAltitudeAt(
+                _state.AltitudeGrid, _state.GridWidth, _state.GridHeight,
+                parent.Position.X, parent.Position.Z);
+            GD.Print($"PlayerController: pos={parent.Position}, terrainY={terrainY}, global={parent.GlobalPosition}");
         }
     }
 
@@ -46,11 +43,22 @@ public partial class PlayerController : Node
         {
             DebugFly = !DebugFly;
             var parent = GetParent<Node3D>();
-            if (DebugFly) _flyY = parent.Position.Y;
-            // Tell RemoteEntity to stop overriding Y from server
-            if (parent is Entities.RemoteEntity re)
-                re.DebugOverrideY = DebugFly;
-            GD.Print($"Debug fly: {(DebugFly ? "ON — Space=up, Ctrl=down, F1=off" : "OFF")}");
+            if (DebugFly)
+            {
+                _flyY = parent.Position.Y;
+            }
+            else if (_state.HasTerrain)
+            {
+                float terrainY = TerrainGenerator.GetAltitudeAt(
+                    _state.AltitudeGrid, _state.GridWidth, _state.GridHeight,
+                    parent.Position.X, parent.Position.Z);
+                parent.Position = new Vector3(parent.Position.X, terrainY, parent.Position.Z);
+                if (parent is RemoteEntity re)
+                    re.ForcePosition(parent.Position);
+            }
+            if (parent is RemoteEntity re2)
+                re2.DebugOverrideY = DebugFly;
+            GD.Print($"Debug fly: {(DebugFly ? "ON" : "OFF")} pos={parent.Position}");
         }
     }
 
@@ -58,12 +66,20 @@ public partial class PlayerController : Node
     {
         var parent = GetParent<Node3D>();
 
-        // Debug fly mode: Space=up, Ctrl=down, overrides server Y
         if (DebugFly && parent != null)
         {
             if (Input.IsKeyPressed(Key.Space)) _flyY += FlySpeed * (float)delta;
             if (Input.IsKeyPressed(Key.Ctrl)) _flyY -= FlySpeed * (float)delta;
             parent.Position = new Vector3(parent.Position.X, _flyY, parent.Position.Z);
+        }
+
+        // Print position every 2 seconds for debugging
+        _debugTimer += delta;
+        if (_debugTimer > 2.0 && parent != null)
+        {
+            _debugTimer = 0;
+            var re = parent as RemoteEntity;
+            GD.Print($"TICK: pos={parent.Position:F1} target={re?._targetPosition:F1}");
         }
 
         _timer += delta;
