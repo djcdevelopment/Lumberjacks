@@ -32,3 +32,9 @@ tools/GodotSharp/
 # Personal files
 Documents - Shortcut.lnk
 LI-coach.md
+CLAUDE.md
+
+# Legacy Godot client C# artifacts (non-functional, created with wrong editor)
+clients/godot/Community Survival.csproj
+clients/godot/Community Survival.sln
+clients/godot/Directory.Build.props
