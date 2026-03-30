@@ -23,7 +23,7 @@ public partial class LabWorld : Node3D
 {
     private const float WorldSize = 40f;
     private const int GridRes = 100;
-    private const float MaxAltitude = 5f;
+    private const float MaxAltitude = 6f;
     private const float PlayerRadius = 0.3f;
     private const float MoveSpeed = 5f;
 
@@ -69,6 +69,12 @@ public partial class LabWorld : Node3D
 
     // Tuning
     private bool _tuning;
+
+    // Tree inspect
+    private class TreeInfo { public Node3D Node; public int Age; public bool FireScars; public float Scale; }
+    private readonly System.Collections.Generic.List<TreeInfo> _trees = new();
+    private Label _inspectLabel;
+    private TreeInfo _nearestTree;
 
     public override void _Ready()
     {
@@ -138,6 +144,18 @@ public partial class LabWorld : Node3D
         _hud.AddThemeConstantOverride("shadow_offset_x", 1);
         _hud.AddThemeConstantOverride("shadow_offset_y", 1);
         canvas.AddChild(_hud);
+
+        _inspectLabel = new Label();
+        _inspectLabel.AnchorLeft = 0.6f; _inspectLabel.AnchorRight = 0.98f;
+        _inspectLabel.AnchorTop = 0.1f; _inspectLabel.AnchorBottom = 0.5f;
+        _inspectLabel.AddThemeFontSizeOverride("font_size", 14);
+        _inspectLabel.AddThemeColorOverride("font_color", new Color(0.85f, 0.9f, 0.75f));
+        _inspectLabel.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.8f));
+        _inspectLabel.AddThemeConstantOverride("shadow_offset_x", 1);
+        _inspectLabel.AddThemeConstantOverride("shadow_offset_y", 1);
+        _inspectLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _inspectLabel.Visible = false;
+        canvas.AddChild(_inspectLabel);
 
         _playerPos = new Vector3(0, GetTerrainY(0, 0) + PlayerRadius, 0);
         _player.Position = _playerPos;
@@ -259,15 +277,32 @@ public partial class LabWorld : Node3D
         _player.Rotation = new Vector3(0, _playerFacing, 0);
         _cameraPivot.Position = _playerPos;
 
-        // Nearest tree distance
+        // Nearest tree tracking
         float nearDist = 999f;
-        foreach (Node child in _treeCluster.GetChildren())
+        _nearestTree = null;
+        foreach (var ti in _trees)
         {
-            if (child is Node3D n)
-            {
-                float d = (_playerPos - n.GlobalPosition).Length();
-                if (d < nearDist) nearDist = d;
-            }
+            float d = (_playerPos - ti.Node.GlobalPosition).Length();
+            if (d < nearDist) { nearDist = d; _nearestTree = ti; }
+        }
+
+        // F key inspect
+        if (Input.IsKeyPressed(Key.F) && _nearestTree != null && nearDist < 5f)
+        {
+            var t = _nearestTree;
+            string ageDesc = t.Age > 150 ? $"Ancient — roughly {t.Age} years"
+                           : t.Age > 80 ? $"Mature — about {t.Age} years"
+                           : $"Young — perhaps {t.Age} years";
+            string fire = t.FireScars ? "\nHistory: Bark scarred from a past fire" : "";
+            string scaleDesc = t.Scale > 1.2f ? "\nGrowth: Towering, dominant canopy"
+                             : t.Scale < 0.6f ? "\nGrowth: Small understory tree"
+                             : "\nGrowth: Healthy mid-canopy";
+            _inspectLabel.Text = $"=== Oak Tree ===\n\nAge: {ageDesc}\n{scaleDesc}{fire}\n\nDist: {nearDist:F1}m";
+            _inspectLabel.Visible = true;
+        }
+        else if (nearDist > 6f)
+        {
+            _inspectLabel.Visible = false;
         }
 
         // HUD
@@ -285,7 +320,8 @@ public partial class LabWorld : Node3D
 
         _hud.Text =
             $"Player: ({_playerPos.X:F1}, {_playerPos.Y:F1}, {_playerPos.Z:F1})\n" +
-            $"Terrain: {terrainY:F2}  Nearest tree: {nearDist:F1}\n" +
+            $"Terrain: {terrainY:F2}  Nearest tree: {nearDist:F1}" +
+            (nearDist < 5f ? "  [F] Study" : "") + "\n" +
             $"Facing: {Mathf.RadToDeg(_playerFacing):F0}°  Cam: yaw={_camYaw:F0} pitch={_camPitch:F0}\n" +
             (bothMouse ? ">>> AUTO-RUN <<<\n" : "") +
             $"\n{tuneText}";
@@ -446,17 +482,19 @@ public partial class LabWorld : Node3D
         shader.Code = @"
 shader_type spatial;
 
-// Blend grass/rock based on slope and altitude, with noise variation
 uniform float slope_threshold : hint_range(0.0, 1.0) = 0.4;
 uniform float noise_scale : hint_range(1.0, 100.0) = 25.0;
-uniform float noise_strength : hint_range(0.0, 1.0) = 0.3;
-uniform vec3 grass_color_low : source_color = vec3(0.12, 0.28, 0.08);
-uniform vec3 grass_color_high : source_color = vec3(0.22, 0.38, 0.12);
-uniform vec3 rock_color : source_color = vec3(0.35, 0.32, 0.28);
-uniform vec3 dirt_color : source_color = vec3(0.3, 0.22, 0.12);
 uniform float altitude_max : hint_range(1.0, 50.0) = 5.0;
 
-// Simple hash noise
+// Grass palette — lush, varied
+const vec3 GRASS_DARK = vec3(0.08, 0.18, 0.04);
+const vec3 GRASS_MID = vec3(0.15, 0.32, 0.08);
+const vec3 GRASS_LIGHT = vec3(0.25, 0.42, 0.12);
+const vec3 MOSS = vec3(0.1, 0.22, 0.06);
+const vec3 DIRT = vec3(0.25, 0.18, 0.1);
+const vec3 ROCK = vec3(0.32, 0.3, 0.26);
+const vec3 ROCK_DARK = vec3(0.2, 0.18, 0.16);
+
 float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
@@ -473,36 +511,52 @@ float noise(vec2 p) {
 
 float fbm(vec2 p) {
     float v = 0.0;
-    v += noise(p) * 0.5;
-    v += noise(p * 2.0) * 0.25;
-    v += noise(p * 4.0) * 0.125;
+    float amp = 0.5;
+    for (int i = 0; i < 5; i++) {
+        v += noise(p) * amp;
+        p *= 2.1;
+        amp *= 0.45;
+    }
     return v;
 }
 
 void fragment() {
-    // Slope: 0 = flat (up-facing), 1 = vertical
     float slope = 1.0 - dot(NORMAL, vec3(0.0, 1.0, 0.0));
-    slope = clamp(slope * 2.0, 0.0, 1.0);
-
-    // Altitude normalized
+    slope = clamp(slope * 2.5, 0.0, 1.0);
     float alt = clamp(VERTEX.y / altitude_max, 0.0, 1.0);
 
-    // Noise for variation
-    float n = fbm(VERTEX.xz * (1.0 / noise_scale));
+    // Multi-scale noise
+    vec2 uv = VERTEX.xz;
+    float n_large = fbm(uv / noise_scale);           // Broad patches
+    float n_med = fbm(uv / (noise_scale * 0.3));     // Medium detail
+    float n_fine = fbm(uv / (noise_scale * 0.08));   // Fine grain (grass clumps)
 
-    // Grass: blend low→high by altitude
-    vec3 grass = mix(grass_color_low, grass_color_high, alt + n * noise_strength);
+    // Grass base: blend 3 greens by altitude + large noise
+    vec3 grass = mix(GRASS_DARK, GRASS_MID, smoothstep(0.0, 0.5, alt + n_large * 0.3));
+    grass = mix(grass, GRASS_LIGHT, smoothstep(0.4, 0.8, alt + n_large * 0.2));
 
-    // Add dirt patches via noise
-    float dirt_mask = smoothstep(0.55, 0.7, fbm(VERTEX.xz * (1.0 / noise_scale) * 1.7 + 5.0));
-    grass = mix(grass, dirt_color, dirt_mask * 0.4);
+    // Moss patches in low, damp areas
+    float moss_mask = smoothstep(0.3, 0.5, n_med) * smoothstep(0.4, 0.0, alt);
+    grass = mix(grass, MOSS, moss_mask * 0.6);
 
-    // Slope blend: grass → rock
-    float slope_mask = smoothstep(slope_threshold - 0.1, slope_threshold + 0.1, slope);
-    vec3 col = mix(grass, rock_color, slope_mask);
+    // Dirt patches — exposed earth
+    float dirt_mask = smoothstep(0.6, 0.75, fbm(uv / (noise_scale * 0.5) + 7.0));
+    grass = mix(grass, DIRT, dirt_mask * 0.5);
+
+    // Fine grain variation — subtle per-blade color shift
+    grass += (n_fine - 0.5) * 0.06;
+
+    // Rock on slopes
+    vec3 rock = mix(ROCK, ROCK_DARK, n_med);
+    float slope_mask = smoothstep(slope_threshold - 0.08, slope_threshold + 0.15, slope);
+    vec3 col = mix(grass, rock, slope_mask);
+
+    // Slight darkening in crevices (poor man's AO via slope)
+    col *= mix(1.0, 0.85, slope * 0.5);
 
     ALBEDO = col;
-    ROUGHNESS = mix(0.85, 0.95, slope_mask);
+    ROUGHNESS = mix(0.8, 0.95, slope_mask + n_fine * 0.1);
+    SPECULAR = 0.15;
 }
 ";
         var mat = new ShaderMaterial { Shader = shader };
@@ -592,6 +646,7 @@ void fragment() {
         }
 
         _treeCluster.AddChild(root);
+        _trees.Add(new TreeInfo { Node = root, Age = age, FireScars = fireScars, Scale = scale });
     }
 
     private void SpawnStump(Vector3 pos)
