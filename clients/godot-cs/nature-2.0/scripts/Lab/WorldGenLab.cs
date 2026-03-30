@@ -40,6 +40,11 @@ public partial class WorldGenLab : Node3D
     private float _windAngle = 45f; // degrees
     private float _windStrength = 1f;
 
+    // Slider references (for preset updates)
+    private TuningSlider _sliderEroRate, _sliderDeposition, _sliderEvaporation;
+    private TuningSlider _sliderInertia, _sliderCapacity, _sliderLife;
+    private int _presetErosionIters; // iterations to run when preset applied
+
     // Display
     private int _vizMode; // 0=shaded, 1=height, 2=moisture, 3=biome, 4=erosion
     private float _verticalExag = 1f;
@@ -175,13 +180,20 @@ public partial class WorldGenLab : Node3D
             RebuildMesh();
         });
 
+        var presets = _panel.AddSection("Biome Presets");
+        presets.AddButton("Alpine", () => ApplyPreset(0.04f, 0.79f, 0.0014f, 0.04f, 2.4f, 37, 10000));
+        presets.AddButton("Rainforest", () => ApplyPreset(0.18f, 0.10f, 0.040f, 0.32f, 4.7f, 41, 100000));
+        presets.AddButton("Desert", () => ApplyPreset(0.04f, 0.69f, 0.033f, 0.05f, 1.1f, 50, 10000));
+        presets.AddButton("Rolling Hills", () => ApplyPreset(0.27f, 0.68f, 0.011f, 0.31f, 7.8f, 75, 50000));
+        presets.AddButton("Wetlands", () => ApplyPreset(0.22f, 0.23f, 0.040f, 0.14f, 2.7f, 57, 100000));
+
         var ero = _panel.AddSection("Erosion");
-        ero.AddSlider("Erosion Rate", 0f, 1f, _erosionRate, v => _erosionRate = v);
-        ero.AddSlider("Deposition", 0f, 1f, _depositionRate, v => _depositionRate = v);
-        ero.AddSlider("Evaporation", 0f, 0.1f, _evaporation, v => _evaporation = v);
-        ero.AddSlider("Inertia", 0f, 0.5f, _inertia, v => _inertia = v);
-        ero.AddSlider("Capacity", 0.5f, 10f, _sedimentCapacity, v => _sedimentCapacity = v);
-        ero.AddSlider("Droplet Life", 10, 100, _dropletLifetime, v => _dropletLifetime = (int)v);
+        _sliderEroRate = ero.AddSlider("Erosion Rate", 0f, 1f, _erosionRate, v => _erosionRate = v);
+        _sliderDeposition = ero.AddSlider("Deposition", 0f, 1f, _depositionRate, v => _depositionRate = v);
+        _sliderEvaporation = ero.AddSlider("Evaporation", 0f, 0.1f, _evaporation, v => _evaporation = v);
+        _sliderInertia = ero.AddSlider("Inertia", 0f, 0.5f, _inertia, v => _inertia = v);
+        _sliderCapacity = ero.AddSlider("Capacity", 0.5f, 10f, _sedimentCapacity, v => _sedimentCapacity = v);
+        _sliderLife = ero.AddSlider("Droplet Life", 10, 100, _dropletLifetime, v => _dropletLifetime = (int)v);
 
         var climate = _panel.AddSection("Climate");
         climate.AddSlider("Wind Angle", 0, 360, _windAngle, v => { _windAngle = v; ComputeMoisture(); RebuildMesh(); });
@@ -196,6 +208,32 @@ public partial class WorldGenLab : Node3D
             _waterPlane.Position = new Vector3(0, _seaLevel * HeightScale * _verticalExag, 0);
             RebuildMesh();
         });
+    }
+
+    private void ApplyPreset(float eroRate, float deposit, float evap, float inertia, float cap, int life, int iters)
+    {
+        _erosionRate = eroRate;
+        _depositionRate = deposit;
+        _evaporation = evap;
+        _inertia = inertia;
+        _sedimentCapacity = cap;
+        _dropletLifetime = life;
+        _presetErosionIters = iters;
+
+        // Update sliders to reflect new values
+        _sliderEroRate?.SetValue(eroRate);
+        _sliderDeposition?.SetValue(deposit);
+        _sliderEvaporation?.SetValue(evap);
+        _sliderInertia?.SetValue(inertia);
+        _sliderCapacity?.SetValue(cap);
+        _sliderLife?.SetValue(life);
+
+        // Regenerate and erode with preset
+        GenerateNoise();
+        Array.Copy(_heightmap, _originalHeight, _heightmap.Length);
+        _erosionIterations = 0;
+        RunErosion(iters);
+        GD.Print($"Preset applied: ero={eroRate} dep={deposit} evap={evap} inertia={inertia} cap={cap} life={life} iters={iters}");
     }
 
     // ——— Generation ———

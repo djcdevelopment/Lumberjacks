@@ -105,6 +105,7 @@ public partial class TuningSection : VBoxContainer
     private Button _header;
     private bool _collapsed;
     private readonly List<TuningSlider> _sliders = new();
+    private readonly List<Control> _pendingChildren = new();
 
     public TuningSection(string title)
     {
@@ -129,12 +130,11 @@ public partial class TuningSection : VBoxContainer
         _content.AddThemeConstantOverride("separation", 1);
         AddChild(_content);
 
-        // Replay any sliders that were added before _Ready
+        // Replay children added before _Ready
         foreach (var s in _sliders)
-        {
-            if (s.GetParent() == null)
-                _content.AddChild(s);
-        }
+            if (s.GetParent() == null) _content.AddChild(s);
+        foreach (var c in _pendingChildren)
+            if (c.GetParent() == null) _content.AddChild(c);
     }
 
     private void OnToggle()
@@ -151,6 +151,18 @@ public partial class TuningSection : VBoxContainer
         if (_content != null)
             _content.AddChild(slider);
         return slider;
+    }
+
+    public void AddButton(string label, Action onClick)
+    {
+        var btn = new Button();
+        btn.Text = label;
+        btn.AddThemeFontSizeOverride("font_size", 12);
+        btn.Pressed += () => onClick?.Invoke();
+        if (_content != null)
+            _content.AddChild(btn);
+        else
+            _pendingChildren.Add(btn);
     }
 }
 
