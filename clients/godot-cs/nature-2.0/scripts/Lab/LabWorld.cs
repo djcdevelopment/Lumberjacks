@@ -67,8 +67,8 @@ public partial class LabWorld : Node3D
     private Vector3 _playerPos;
     private float _playerFacing;
 
-    // Tuning
-    private bool _tuning;
+    // Tuning panel
+    private TuningPanel _tuningPanel;
 
     // Tree inspect
     private class TreeInfo { public Node3D Node; public int Age; public bool FireScars; public float Scale; }
@@ -137,7 +137,10 @@ public partial class LabWorld : Node3D
         // HUD
         var canvas = new CanvasLayer();
         AddChild(canvas);
-        _hud = new Label { Position = new Vector2(10, 10) };
+        _hud = new Label();
+        _hud.AnchorLeft = 1.0f; _hud.AnchorRight = 1.0f;
+        _hud.OffsetLeft = -350; _hud.OffsetTop = 10; _hud.OffsetRight = -10;
+        _hud.HorizontalAlignment = HorizontalAlignment.Right;
         _hud.AddThemeFontSizeOverride("font_size", 13);
         _hud.AddThemeColorOverride("font_color", Colors.White);
         _hud.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.7f));
@@ -156,6 +159,11 @@ public partial class LabWorld : Node3D
         _inspectLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _inspectLabel.Visible = false;
         canvas.AddChild(_inspectLabel);
+
+        // Tuning panel with sliders
+        _tuningPanel = new TuningPanel();
+        AddChild(_tuningPanel);
+        BuildTuningPanel();
 
         _playerPos = new Vector3(0, GetTerrainY(0, 0) + PlayerRadius, 0);
         _player.Position = _playerPos;
@@ -229,16 +237,14 @@ public partial class LabWorld : Node3D
             UpdateCamera();
         }
 
-        if (ev is InputEventKey k && k.Pressed && k.Keycode == Key.Tab)
-            _tuning = !_tuning;
+        // Tab handled by TuningPanel directly
     }
 
     public override void _Process(double delta)
     {
         float dt = (float)delta;
 
-        // Atmosphere tuning (hold Tab + number keys)
-        if (_tuning) ProcessTuning(dt);
+        // Tuning handled by slider panel callbacks
 
         // Movement
         float yawRad = Mathf.DegToRad(_camYaw);
@@ -306,61 +312,42 @@ public partial class LabWorld : Node3D
         }
 
         // HUD
-        string tuneText = _tuning ?
-            $"=== TUNING (Tab to close) ===\n" +
-            $"[1/2] Fog density: {_fogDensity:F3}\n" +
-            $"[3/4] God ray (sun energy): {_sun.LightEnergy:F1}\n" +
-            $"[5/6] Sun pitch: {_sunAngle:F0}°\n" +
-            $"[7/8] Ambient energy: {_ambientEnergy:F2}\n" +
-            $"[9/0] Tree scale: {_treeScale:F1}x\n" +
-            $"[-/=] Sun rotation: {_sunRotation:F0}°\n" +
-            $"[F1/F2] Slope threshold: {_slopeThreshold:F2}\n" +
-            $"[F3/F4] Noise scale: {_noiseScale:F1}\n"
-            : "[Tab] Tuning";
-
         _hud.Text =
-            $"Player: ({_playerPos.X:F1}, {_playerPos.Y:F1}, {_playerPos.Z:F1})\n" +
-            $"Terrain: {terrainY:F2}  Nearest tree: {nearDist:F1}" +
-            (nearDist < 5f ? "  [F] Study" : "") + "\n" +
-            $"Facing: {Mathf.RadToDeg(_playerFacing):F0}°  Cam: yaw={_camYaw:F0} pitch={_camPitch:F0}\n" +
-            (bothMouse ? ">>> AUTO-RUN <<<\n" : "") +
-            $"\n{tuneText}";
+            $"({_playerPos.X:F1}, {_playerPos.Y:F1}, {_playerPos.Z:F1})" +
+            $"  Terrain: {terrainY:F2}" +
+            (nearDist < 5f ? $"  Tree: {nearDist:F1}m [F]" : "") +
+            (bothMouse ? "  AUTO-RUN" : "");
     }
 
-    private void ProcessTuning(float dt)
+    private void BuildTuningPanel()
     {
-        float rate = dt * 2f;
-        bool changed = false;
+        // Atmosphere
+        var atmo = _tuningPanel.AddSection("Atmosphere");
+        atmo.AddSlider("Fog Density", 0f, 0.15f, _fogDensity, v => { _fogDensity = v; _env.VolumetricFogDensity = v; });
+        atmo.AddSlider("Ambient Energy", 0f, 2f, _ambientEnergy, v => { _ambientEnergy = v; _env.AmbientLightEnergy = v; });
 
-        if (Input.IsKeyPressed(Key.Key1)) { _fogDensity = Mathf.Min(0.2f, _fogDensity + rate * 0.01f); changed = true; }
-        if (Input.IsKeyPressed(Key.Key2)) { _fogDensity = Mathf.Max(0f, _fogDensity - rate * 0.01f); changed = true; }
-        if (Input.IsKeyPressed(Key.Key3)) { _sun.LightEnergy = Mathf.Min(5f, _sun.LightEnergy + rate); changed = true; }
-        if (Input.IsKeyPressed(Key.Key4)) { _sun.LightEnergy = Mathf.Max(0f, _sun.LightEnergy - rate); changed = true; }
-        if (Input.IsKeyPressed(Key.Key5)) { _sunAngle = Mathf.Clamp(_sunAngle - rate * 20f, -89f, -5f); UpdateSunAngle(); }
-        if (Input.IsKeyPressed(Key.Key6)) { _sunAngle = Mathf.Clamp(_sunAngle + rate * 20f, -89f, -5f); UpdateSunAngle(); }
-        if (Input.IsKeyPressed(Key.Key7)) { _ambientEnergy = Mathf.Min(2f, _ambientEnergy + rate * 0.2f); changed = true; }
-        if (Input.IsKeyPressed(Key.Key8)) { _ambientEnergy = Mathf.Max(0f, _ambientEnergy - rate * 0.2f); changed = true; }
-        if (Input.IsKeyPressed(Key.Key9)) { _treeScale = Mathf.Min(5f, _treeScale + rate * 0.5f); UpdateTreeScale(); }
-        if (Input.IsKeyPressed(Key.Key0)) { _treeScale = Mathf.Max(0.3f, _treeScale - rate * 0.5f); UpdateTreeScale(); }
-        if (Input.IsKeyPressed(Key.Minus)) { _sunRotation -= rate * 30f; UpdateSunAngle(); }
-        if (Input.IsKeyPressed(Key.Equal)) { _sunRotation += rate * 30f; UpdateSunAngle(); }
+        // Lighting
+        var light = _tuningPanel.AddSection("Lighting");
+        light.AddSlider("Sun Energy", 0f, 5f, _sun.LightEnergy, v => _sun.LightEnergy = v);
+        light.AddSlider("Sun Pitch", -89f, -5f, _sunAngle, v => { _sunAngle = v; UpdateSunAngle(); });
+        light.AddSlider("Sun Rotation", -180f, 180f, _sunRotation, v => { _sunRotation = v; UpdateSunAngle(); });
 
-        // Terrain shader tuning: F1/F2 = slope threshold, F3/F4 = noise scale
-        if (Input.IsKeyPressed(Key.F1)) { _slopeThreshold = Mathf.Min(1f, _slopeThreshold + rate * 0.1f); changed = true; }
-        if (Input.IsKeyPressed(Key.F2)) { _slopeThreshold = Mathf.Max(0f, _slopeThreshold - rate * 0.1f); changed = true; }
-        if (Input.IsKeyPressed(Key.F3)) { _noiseScale = Mathf.Min(100f, _noiseScale + rate * 5f); changed = true; }
-        if (Input.IsKeyPressed(Key.F4)) { _noiseScale = Mathf.Max(1f, _noiseScale - rate * 5f); changed = true; }
-
-        if (changed)
+        // Terrain
+        var terrain = _tuningPanel.AddSection("Terrain");
+        terrain.AddSlider("Slope Threshold", 0f, 1f, _slopeThreshold, v =>
         {
-            _env.VolumetricFogDensity = _fogDensity;
-            _env.AmbientLightEnergy = _ambientEnergy;
-            if (_terrainMat != null)
-            {
-                _terrainMat.SetShaderParameter("slope_threshold", _slopeThreshold);
-                _terrainMat.SetShaderParameter("noise_scale", _noiseScale);
-            }
-        }
+            _slopeThreshold = v;
+            _terrainMat?.SetShaderParameter("slope_threshold", v);
+        });
+        terrain.AddSlider("Noise Scale", 1f, 100f, _noiseScale, v =>
+        {
+            _noiseScale = v;
+            _terrainMat?.SetShaderParameter("noise_scale", v);
+        });
+
+        // Trees
+        var trees = _tuningPanel.AddSection("Trees");
+        trees.AddSlider("Scale", 0.3f, 5f, _treeScale, v => { _treeScale = v; UpdateTreeScale(); });
     }
 
     private void UpdateSunAngle()
@@ -473,6 +460,7 @@ public partial class LabWorld : Node3D
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
         _terrainMat = BuildTerrainShader();
         mesh.SurfaceSetMaterial(0, _terrainMat);
+        GD.Print($"Terrain: shader applied, material type={_terrainMat.GetType().Name}, has shader={_terrainMat.Shader != null}");
         return mesh;
     }
 
@@ -481,15 +469,16 @@ public partial class LabWorld : Node3D
         var shader = new Shader();
         shader.Code = @"
 shader_type spatial;
+render_mode world_vertex_coords;
 
 uniform float slope_threshold : hint_range(0.0, 1.0) = 0.4;
 uniform float noise_scale : hint_range(1.0, 100.0) = 25.0;
-uniform float altitude_max : hint_range(1.0, 50.0) = 5.0;
+uniform float altitude_max : hint_range(1.0, 50.0) = 6.0;
 
-// Grass palette — lush, varied
-const vec3 GRASS_DARK = vec3(0.08, 0.18, 0.04);
-const vec3 GRASS_MID = vec3(0.15, 0.32, 0.08);
-const vec3 GRASS_LIGHT = vec3(0.25, 0.42, 0.12);
+// Grass palette — lush greens
+const vec3 GRASS_DARK = vec3(0.1, 0.22, 0.05);
+const vec3 GRASS_MID = vec3(0.18, 0.38, 0.1);
+const vec3 GRASS_LIGHT = vec3(0.3, 0.5, 0.15);
 const vec3 MOSS = vec3(0.1, 0.22, 0.06);
 const vec3 DIRT = vec3(0.25, 0.18, 0.1);
 const vec3 ROCK = vec3(0.32, 0.3, 0.26);
@@ -560,6 +549,9 @@ void fragment() {
 }
 ";
         var mat = new ShaderMaterial { Shader = shader };
+        mat.SetShaderParameter("slope_threshold", _slopeThreshold);
+        mat.SetShaderParameter("noise_scale", _noiseScale);
+        mat.SetShaderParameter("altitude_max", MaxAltitude);
         return mat;
     }
 
