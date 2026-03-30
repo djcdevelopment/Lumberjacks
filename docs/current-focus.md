@@ -12,57 +12,60 @@ server-authoritative .NET services with PostgreSQL persistence and canonical eve
 
 ## Network Refactor Status: ALL 5 PHASES COMPLETE (2026-03-26)
 
-All phases of the network infrastructure refactoring plan (`implementation_plan.md`) are done:
-
-- **Phase 1 (Binary Serialization):** BitWriter/BitReader, CompactVec3, BinaryEnvelope
-- **Phase 2 (Input-Driven Simulation):** InputQueue, SimulationStep (physics), StateHasher, TickBroadcaster, PlayerHandler extraction, MessageRouter converted from HTTP to direct handler calls
-- **Phase 3 (Spatial Interest Management):** SpatialGrid, InterestManager (near/mid/far AoI bands), TickBroadcaster rewritten for per-player AoI filtering
-- **Phase 4 (Client Prediction — server-side):** Binary payload serializers (EntityUpdate ~33B, PlayerInput 5B), outbound binary framing, inbound binary fast-path — JSON payloads fully replaced for hot-path messages
-- **Phase 5 (Dual-Channel Transport):** UdpTransport BackgroundService (port 4005), session UDP binding via token, TickBroadcaster sends datagram-lane via UDP when available, WebSocket fallback. (Validated 2026-03-27 with high-load script).
+(See previous version of this file for full phase details.)
 
 ## Completed: Azure Deployment (2026-03-27)
 
-Backend deployed to Azure Container Apps (eastus2). 4 services: Gateway (external), OperatorApi (external), EventLog (internal), Progression (internal). PostgreSQL Flexible Server. All smoke tests passing including multiplayer (10 players) and resume. See `docs/azure-deployment-runbook.md` for deploy/update workflow.
+Backend deployed to Azure Container Apps (eastus2). All smoke tests passing.
 
 - Gateway: `wss://gateway.wittyplant-6c0ca715.eastus2.azurecontainerapps.io`
 - OperatorApi: `https://operatorapi.wittyplant-6c0ca715.eastus2.azurecontainerapps.io`
 
-## Active Workstream: Godot C# Client — "Nature 2.0" (2026-03-29)
+## Active Workstream: Nature 2.0 Client (2026-03-29 → 2026-03-30)
 
 **Location:** `clients/godot-cs/nature-2.0/`
 
-**Status:** Slices 1-4 complete, primitive Slice 5. Full E2E pipeline proven.
+**Status:** All 6 slices complete. Lab tooling built. World generation R&D active.
 
 **What works today:**
-- Fresh Godot 4.6.1 mono project with C# builds (Alt+B)
-- `Game.Contracts` referenced via ProjectReference (multi-targeted net8.0+net9.0)
-- Connect screen UI with URL input
-- SimulationClient autoload: WebSocket + binary protocol + thread-safe message queue
-- GameState autoload: entity parsing from world_snapshot, coordinate mapping (ADR 0018), RegionProfile terrain data parsing
-- Main scene switching: connect screen → world → ESC back
-- World scene: placeholder entity spawning from server snapshot (trees visible as boxes)
-- Server change: MessageRouter includes `region_profile` in world_snapshot
-
-**What's next (Slices 5-6):**
-- Player capsule mesh + camera + WASD binary input (PlayerController)
+- Godot 4.6.1 mono, C# builds, `Game.Contracts` referenced (net8.0+net9.0)
+- Full E2E pipeline: connect → WebSocket → session → join → world_snapshot → entities
+- Proven against both local and Azure (`wss://`) deployments
+- Player capsule with WASD movement (server-authoritative, 20Hz binary input)
+- Camera: WoW-style orbit (RMB), zoom (scroll), auto-run (LMB+RMB)
 - Remote entity interpolation (ADR 0017)
-- Tree entity scenes with growth_history visual variation
-- Terrain heightmap mesh from RegionProfile altitude grid
-- Structure placement (build mode)
+- Trees: trunk+canopy meshes with visual variation from growth_history
+- Terrain: heightmap from RegionProfile, smooth normals, slope/altitude shader
+- Tree inspection: [F] Study mechanic shows age, wind, fire history
+- Environment: volumetric fog, procedural sky, SSAO, ACES tonemap, fill light
+- Reconnect overlay, ESC to disconnect
 
-**Previous client (`clients/godot/`) is archived** — created with non-mono Godot editor, GDScript/C# hybrid, never compiled C#. See `docs/retrospective-godot-cs-migration-2026-03-29.md`.
+**Lab Tooling (local, no server):**
+- **Atmosphere Lab** (`scenes/Lab.tscn`): 40x40 world, tree grove, campfire with smoke, tuning panel with collapsible slider sections for fog/lighting/terrain/trees
+- **World Gen Lab** (`scenes/WorldGenLab.tscn`): 512x512 heightmap, hydraulic erosion (Sebastian Lague algorithm), flow accumulation rivers, orographic moisture, biome coloring. 5 visualization modes. Data-driven biome presets (Alpine, Rainforest, Desert, Rolling Hills, Wetlands) from 500-run parameter sweep
+- **Parameter Sweep** (`scripts/Lab/ParameterSweep.cs`): batch terrain generation with randomized params → CSV output for analysis
+- **TerrainSim** (`scripts/Lab/TerrainSim.cs`): standalone erosion library, no Godot dependency — portable to server
 
-## Server-Side Changes (2026-03-29)
-
+**Server-Side Changes (2026-03-29):**
 - `Game.Contracts.csproj`: Multi-targeted `net8.0;net9.0` for Godot compatibility
-- `MessageRouter.cs`: Added `BuildRegionProfilePayload()` — includes altitude grid + trade winds in world_snapshot for client terrain generation
+- `MessageRouter.cs`: `region_profile` in world_snapshot (altitude grid + trade winds)
+- Nature 2.0 systems: NaturalResource, RegionProfile, tree felling with lean vectors
+
+## What's Next
+
+1. **Port world gen to server** — TerrainSim algorithm → RegionProfileLoader with erosion
+2. **Port camera/movement controls** back to main World scene
+3. **Terrain shader** in main World (smooth normals + slope/altitude)
+4. **Multi-region stitching** — 25x25 grid of regions with river continuity
+5. **Character model** — replace capsule with low-poly humanoid
+6. **Weather system** — wind visualization, rain particles, seasonal color shift
 
 ## Parked
 
 - Community edge node alpha
 - Advanced economy systems
 - Combat zones and high-tick simulation
-- Phase 4: Client prediction / reconciliation (server-side complete, client-side needs Godot)
+- Client prediction / reconciliation (server-side complete)
 - Content registry service
 - Discord bridge service
 - Auth / player identity

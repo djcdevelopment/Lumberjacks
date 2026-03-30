@@ -11,9 +11,9 @@ namespace CommunitySurvival.Lab;
 /// </summary>
 public partial class WorldGenLab : Node3D
 {
-    private const int GridSize = 128;
-    private const float WorldScale = 100f; // 100x100 units
-    private const float HeightScale = 25f; // Max mountain height in units
+    private const int GridSize = 512;
+    private const float WorldScale = 500f; // 500x500 units
+    private const float HeightScale = 80f; // Tall mountains
 
     // Terrain data
     private float[] _heightmap;
@@ -61,7 +61,7 @@ public partial class WorldGenLab : Node3D
     private float[] _originalHeight; // for erosion delta viz
 
     // Camera
-    private float _camYaw, _camPitch = -45f, _camDist = 80f;
+    private float _camYaw, _camPitch = -45f, _camDist = 250f;
     private bool _rmbHeld, _lmbHeld;
     private Vector3 _playerPos;
 
@@ -130,15 +130,16 @@ public partial class WorldGenLab : Node3D
         env.AmbientLightColor = new Color(0.45f, 0.5f, 0.55f);
         env.AmbientLightEnergy = 0.5f;
         env.VolumetricFogEnabled = true;
-        env.VolumetricFogDensity = 0.005f;
+        env.VolumetricFogDensity = 0.001f;
         env.VolumetricFogAlbedo = new Color(0.8f, 0.85f, 0.9f);
+        env.VolumetricFogLength = 400f;
         env.TonemapMode = Godot.Environment.ToneMapper.Aces;
         AddChild(new WorldEnvironment { Environment = env });
 
         // Camera
         _cameraPivot = new Node3D();
         AddChild(_cameraPivot);
-        _camera = new Camera3D { Fov = 55, Current = true };
+        _camera = new Camera3D { Fov = 55, Current = true, Far = 1500f };
         _cameraPivot.AddChild(_camera);
         UpdateCamera();
 
@@ -181,11 +182,11 @@ public partial class WorldGenLab : Node3D
         });
 
         var presets = _panel.AddSection("Biome Presets");
-        presets.AddButton("Alpine", () => ApplyPreset(0.04f, 0.79f, 0.0014f, 0.04f, 2.4f, 37, 10000));
-        presets.AddButton("Rainforest", () => ApplyPreset(0.18f, 0.10f, 0.040f, 0.32f, 4.7f, 41, 100000));
-        presets.AddButton("Desert", () => ApplyPreset(0.04f, 0.69f, 0.033f, 0.05f, 1.1f, 50, 10000));
-        presets.AddButton("Rolling Hills", () => ApplyPreset(0.27f, 0.68f, 0.011f, 0.31f, 7.8f, 75, 50000));
-        presets.AddButton("Wetlands", () => ApplyPreset(0.22f, 0.23f, 0.040f, 0.14f, 2.7f, 57, 100000));
+        presets.AddButton("Alpine", () => ApplyPreset(0.04f, 0.79f, 0.0014f, 0.04f, 2.4f, 37, 150000));
+        presets.AddButton("Rainforest", () => ApplyPreset(0.18f, 0.10f, 0.040f, 0.32f, 4.7f, 41, 500000));
+        presets.AddButton("Desert", () => ApplyPreset(0.04f, 0.69f, 0.033f, 0.05f, 1.1f, 50, 150000));
+        presets.AddButton("Rolling Hills", () => ApplyPreset(0.27f, 0.68f, 0.011f, 0.31f, 7.8f, 75, 300000));
+        presets.AddButton("Wetlands", () => ApplyPreset(0.22f, 0.23f, 0.040f, 0.14f, 2.7f, 57, 500000));
 
         var ero = _panel.AddSection("Erosion");
         _sliderEroRate = ero.AddSlider("Erosion Rate", 0f, 1f, _erosionRate, v => _erosionRate = v);
@@ -292,14 +293,21 @@ public partial class WorldGenLab : Node3D
 
     public void RunErosion(int iterations)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var rng = new Random(_erosionIterations + _seed * 1000);
         for (int i = 0; i < iterations; i++)
+        {
             SimulateDroplet(rng);
+            if (i > 0 && i % 100000 == 0)
+                GD.Print($"  Erosion: {i / 1000}K / {iterations / 1000}K ...");
+        }
         _erosionIterations += iterations;
+        sw.Stop();
+        GD.Print($"Erosion: {_erosionIterations / 1000}K total in {sw.ElapsedMilliseconds}ms");
+
         ComputeFlow();
         ComputeMoisture();
         RebuildMesh();
-        GD.Print($"Erosion: {_erosionIterations} total iterations");
     }
 
     private void SimulateDroplet(Random rng)
@@ -597,8 +605,8 @@ public partial class WorldGenLab : Node3D
             if (mb.ButtonIndex == MouseButton.Left) _lmbHeld = mb.Pressed;
             if (mb.ButtonIndex == MouseButton.Right) _rmbHeld = mb.Pressed;
             Input.MouseMode = _rmbHeld ? Input.MouseModeEnum.Captured : Input.MouseModeEnum.Visible;
-            if (mb.ButtonIndex == MouseButton.WheelUp) _camDist = Mathf.Max(5f, _camDist - 3f);
-            else if (mb.ButtonIndex == MouseButton.WheelDown) _camDist = Mathf.Min(200f, _camDist + 3f);
+            if (mb.ButtonIndex == MouseButton.WheelUp) _camDist = Mathf.Max(5f, _camDist - _camDist * 0.1f);
+            else if (mb.ButtonIndex == MouseButton.WheelDown) _camDist = Mathf.Min(800f, _camDist + _camDist * 0.1f);
             UpdateCamera();
         }
         else if (ev is InputEventMouseMotion mm && _rmbHeld)
@@ -623,7 +631,7 @@ public partial class WorldGenLab : Node3D
         float yawRad = Mathf.DegToRad(_camYaw);
         var camFwd = new Vector3(-Mathf.Sin(yawRad), 0, -Mathf.Cos(yawRad));
         var camRight = new Vector3(camFwd.Z, 0, -camFwd.X);
-        float speed = 15f;
+        float speed = 40f + _camDist * 0.3f; // Faster when zoomed out
 
         var move = Vector3.Zero;
         bool bothMouse = _lmbHeld && _rmbHeld;
