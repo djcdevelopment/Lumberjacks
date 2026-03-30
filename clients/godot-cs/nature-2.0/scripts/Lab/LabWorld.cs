@@ -54,6 +54,11 @@ public partial class LabWorld : Node3D
     // Smoke
     private GpuParticles3D _smoke;
 
+    // Terrain shader params
+    private ShaderMaterial _terrainMat;
+    private float _slopeThreshold = 0.4f;
+    private float _noiseScale = 25f;
+
     // Camera
     private float _camYaw, _camPitch = -20f, _camDist = 10f;
     private bool _lmbHeld, _rmbHeld;
@@ -273,7 +278,9 @@ public partial class LabWorld : Node3D
             $"[5/6] Sun pitch: {_sunAngle:F0}°\n" +
             $"[7/8] Ambient energy: {_ambientEnergy:F2}\n" +
             $"[9/0] Tree scale: {_treeScale:F1}x\n" +
-            $"[-/=] Sun rotation: {_sunRotation:F0}°\n"
+            $"[-/=] Sun rotation: {_sunRotation:F0}°\n" +
+            $"[F1/F2] Slope threshold: {_slopeThreshold:F2}\n" +
+            $"[F3/F4] Noise scale: {_noiseScale:F1}\n"
             : "[Tab] Tuning";
 
         _hud.Text =
@@ -302,10 +309,21 @@ public partial class LabWorld : Node3D
         if (Input.IsKeyPressed(Key.Minus)) { _sunRotation -= rate * 30f; UpdateSunAngle(); }
         if (Input.IsKeyPressed(Key.Equal)) { _sunRotation += rate * 30f; UpdateSunAngle(); }
 
+        // Terrain shader tuning: F1/F2 = slope threshold, F3/F4 = noise scale
+        if (Input.IsKeyPressed(Key.F1)) { _slopeThreshold = Mathf.Min(1f, _slopeThreshold + rate * 0.1f); changed = true; }
+        if (Input.IsKeyPressed(Key.F2)) { _slopeThreshold = Mathf.Max(0f, _slopeThreshold - rate * 0.1f); changed = true; }
+        if (Input.IsKeyPressed(Key.F3)) { _noiseScale = Mathf.Min(100f, _noiseScale + rate * 5f); changed = true; }
+        if (Input.IsKeyPressed(Key.F4)) { _noiseScale = Mathf.Max(1f, _noiseScale - rate * 5f); changed = true; }
+
         if (changed)
         {
             _env.VolumetricFogDensity = _fogDensity;
             _env.AmbientLightEnergy = _ambientEnergy;
+            if (_terrainMat != null)
+            {
+                _terrainMat.SetShaderParameter("slope_threshold", _slopeThreshold);
+                _terrainMat.SetShaderParameter("noise_scale", _noiseScale);
+            }
         }
     }
 
@@ -362,41 +380,139 @@ public partial class LabWorld : Node3D
 
     private ArrayMesh BuildTerrainMesh()
     {
-        var st = new SurfaceTool();
-        st.Begin(Mesh.PrimitiveType.Triangles);
-        float half = WorldSize / 2, cell = WorldSize / GridRes;
+        // Indexed mesh: shared vertices → smooth normals across triangles
         int w = GridRes + 1;
+        float half = WorldSize / 2, cell = WorldSize / GridRes;
 
+        var vertices = new Vector3[w * w];
+        var colors = new Color[w * w];
+
+        for (int z = 0; z < w; z++)
+            for (int x = 0; x < w; x++)
+            {
+                int i = z * w + x;
+                float y = (float)_altGrid[i];
+                vertices[i] = new Vector3(-half + x * cell, y, -half + z * cell);
+                colors[i] = HColor(y);
+            }
+
+        // Build index buffer: 2 triangles per grid cell
+        var indices = new int[GridRes * GridRes * 6];
+        int idx = 0;
         for (int z = 0; z < GridRes; z++)
             for (int x = 0; x < GridRes; x++)
             {
-                float x0 = -half + x * cell, x1 = x0 + cell;
-                float z0 = -half + z * cell, z1 = z0 + cell;
-                float y00 = (float)_altGrid[z * w + x], y10 = (float)_altGrid[z * w + x + 1];
-                float y01 = (float)_altGrid[(z + 1) * w + x], y11 = (float)_altGrid[(z + 1) * w + x + 1];
-
-                var v00 = new Vector3(x0, y00, z0); var v10 = new Vector3(x1, y10, z0);
-                var v01 = new Vector3(x0, y01, z1); var v11 = new Vector3(x1, y11, z1);
-                var c00 = HColor(y00); var c10 = HColor(y10); var c01 = HColor(y01); var c11 = HColor(y11);
-
-                st.SetColor(c00); st.AddVertex(v00);
-                st.SetColor(c01); st.AddVertex(v01);
-                st.SetColor(c10); st.AddVertex(v10);
-                st.SetColor(c10); st.AddVertex(v10);
-                st.SetColor(c01); st.AddVertex(v01);
-                st.SetColor(c11); st.AddVertex(v11);
+                int tl = z * w + x;
+                int tr = tl + 1;
+                int bl = (z + 1) * w + x;
+                int br = bl + 1;
+                indices[idx++] = tl; indices[idx++] = tr; indices[idx++] = bl;
+                indices[idx++] = tr; indices[idx++] = br; indices[idx++] = bl;
             }
 
-        st.GenerateNormals();
-        var mesh = st.Commit();
-        mesh.SurfaceSetMaterial(0, new StandardMaterial3D { VertexColorUseAsAlbedo = true, Roughness = 0.9f });
+        // Compute smooth normals by averaging face normals per vertex
+        var normals = new Vector3[w * w];
+        for (int i = 0; i < indices.Length; i += 3)
+        {
+            var a = vertices[indices[i]];
+            var b = vertices[indices[i + 1]];
+            var c = vertices[indices[i + 2]];
+            var faceNormal = (b - a).Cross(c - a).Normalized();
+            normals[indices[i]] += faceNormal;
+            normals[indices[i + 1]] += faceNormal;
+            normals[indices[i + 2]] += faceNormal;
+        }
+        for (int i = 0; i < normals.Length; i++)
+            normals[i] = normals[i].Normalized();
+
+        // Build ArrayMesh
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = vertices;
+        arrays[(int)Mesh.ArrayType.Normal] = normals;
+        arrays[(int)Mesh.ArrayType.Color] = colors;
+        arrays[(int)Mesh.ArrayType.Index] = indices;
+
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        _terrainMat = BuildTerrainShader();
+        mesh.SurfaceSetMaterial(0, _terrainMat);
         return mesh;
+    }
+
+    private ShaderMaterial BuildTerrainShader()
+    {
+        var shader = new Shader();
+        shader.Code = @"
+shader_type spatial;
+
+// Blend grass/rock based on slope and altitude, with noise variation
+uniform float slope_threshold : hint_range(0.0, 1.0) = 0.4;
+uniform float noise_scale : hint_range(1.0, 100.0) = 25.0;
+uniform float noise_strength : hint_range(0.0, 1.0) = 0.3;
+uniform vec3 grass_color_low : source_color = vec3(0.12, 0.28, 0.08);
+uniform vec3 grass_color_high : source_color = vec3(0.22, 0.38, 0.12);
+uniform vec3 rock_color : source_color = vec3(0.35, 0.32, 0.28);
+uniform vec3 dirt_color : source_color = vec3(0.3, 0.22, 0.12);
+uniform float altitude_max : hint_range(1.0, 50.0) = 5.0;
+
+// Simple hash noise
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+        mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+        mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+        f.y);
+}
+
+float fbm(vec2 p) {
+    float v = 0.0;
+    v += noise(p) * 0.5;
+    v += noise(p * 2.0) * 0.25;
+    v += noise(p * 4.0) * 0.125;
+    return v;
+}
+
+void fragment() {
+    // Slope: 0 = flat (up-facing), 1 = vertical
+    float slope = 1.0 - dot(NORMAL, vec3(0.0, 1.0, 0.0));
+    slope = clamp(slope * 2.0, 0.0, 1.0);
+
+    // Altitude normalized
+    float alt = clamp(VERTEX.y / altitude_max, 0.0, 1.0);
+
+    // Noise for variation
+    float n = fbm(VERTEX.xz * (1.0 / noise_scale));
+
+    // Grass: blend low→high by altitude
+    vec3 grass = mix(grass_color_low, grass_color_high, alt + n * noise_strength);
+
+    // Add dirt patches via noise
+    float dirt_mask = smoothstep(0.55, 0.7, fbm(VERTEX.xz * (1.0 / noise_scale) * 1.7 + 5.0));
+    grass = mix(grass, dirt_color, dirt_mask * 0.4);
+
+    // Slope blend: grass → rock
+    float slope_mask = smoothstep(slope_threshold - 0.1, slope_threshold + 0.1, slope);
+    vec3 col = mix(grass, rock_color, slope_mask);
+
+    ALBEDO = col;
+    ROUGHNESS = mix(0.85, 0.95, slope_mask);
+}
+";
+        var mat = new ShaderMaterial { Shader = shader };
+        return mat;
     }
 
     private static Color HColor(float y)
     {
+        // Vertex colors as fallback / data channel — shader overrides visual
         float n = Mathf.Clamp(y / 5f, 0f, 1f);
-        // Forest floor green → mossy → earthy
         return new Color(
             Mathf.Lerp(0.12f, 0.28f, n),
             Mathf.Lerp(0.28f, 0.38f, n),
