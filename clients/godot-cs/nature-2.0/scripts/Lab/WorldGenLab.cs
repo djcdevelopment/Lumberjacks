@@ -156,7 +156,10 @@ public partial class WorldGenLab : Node3D
         AddChild(_panel);
         BuildPanel();
 
-        GD.Print("WorldGenLab: ready. Tab=tuning, WASD=move, RMB=orbit");
+        // Parameter sweep tool (press P to run 500 randomized generation passes)
+        AddChild(new ParameterSweep());
+
+        GD.Print("WorldGenLab: ready. Tab=tuning, WASD=move, RMB=orbit, E=erode, R=regen, P=sweep");
     }
 
     private void BuildPanel()
