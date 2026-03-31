@@ -43,6 +43,8 @@ Backend deployed to Azure Container Apps (eastus2). All smoke tests passing.
 **Lab Tooling (local, no server):**
 - **Atmosphere Lab** (`scenes/Lab.tscn`): 40x40 world, tree grove, campfire with smoke, tuning panel with collapsible slider sections for fog/lighting/terrain/trees
 - **World Gen Lab** (`scenes/WorldGenLab.tscn`): 512x512 heightmap, hydraulic erosion (Sebastian Lague algorithm), flow accumulation rivers, orographic moisture, biome coloring. 5 visualization modes. Data-driven biome presets (Alpine, Rainforest, Desert, Rolling Hills, Wetlands) from 500-run parameter sweep
+- **Tree Felling Lab** (`scenes/TreeFellingLab.tscn`): Realistic felling physics from USDA forestry manuals + Rod Cross swing dynamics. Polar cross-section trunk model (36 sectors × N slices), 5 cut types, hinge analysis, barber chair detection, 5 fall phases. Player orb with axe for walk-and-chop. Physics proven to compress into 24 bytes (CompactTreeState) for ADR 0012 compliance. [See plan](plan-tree-felling-lab.md), [ADR 0019](adrs/0019-tree-felling-physics-lab-validated.md)
+- **TreeFellingSim** (`scripts/Lab/TreeFellingSim.cs`): standalone felling physics library, no Godot dependency — portable to server. Cross-model swing physics, Janka hardness penetration, SI units throughout.
 - **Parameter Sweep** (`scripts/Lab/ParameterSweep.cs`): batch terrain generation with randomized params → CSV output for analysis
 - **TerrainSim** (`scripts/Lab/TerrainSim.cs`): standalone erosion library, no Godot dependency — portable to server
 
@@ -53,12 +55,13 @@ Backend deployed to Azure Container Apps (eastus2). All smoke tests passing.
 
 ## What's Next
 
-1. **Port world gen to server** — TerrainSim algorithm → RegionProfileLoader with erosion
-2. **Port camera/movement controls** back to main World scene
-3. **Terrain shader** in main World (smooth normals + slope/altitude)
-4. **Multi-region stitching** — 25x25 grid of regions with river continuity
-5. **Character model** — replace capsule with low-poly humanoid
-6. **Weather system** — wind visualization, rain particles, seasonal color shift
+1. **Fix axe swing pivot** — proper Node3D hierarchy for grip-pivot animation (see [tech debt](tech-debt-tree-felling-2026-03-31.md))
+2. **Wire CompactTreeState to binary serializer** — tree felling over the network
+3. **Tree inspection progressive loading** — cruise → inspect → plan → fell loop exercising AoI tiers
+4. **Community cruising logs** — shareable route heat maps of inspected/felled trees
+5. **Port world gen to server** — TerrainSim algorithm → RegionProfileLoader with erosion
+6. **Multi-region stitching** — 25x25 grid of regions with river continuity
+7. **Weather system** — wind visualization, rain particles, seasonal color shift
 
 ## Parked
 

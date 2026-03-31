@@ -60,6 +60,7 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
 - [0016: JSON Protocol Debt](docs/adrs/0016-json-protocol-debt.md)
 - [0017: Basic Linear Interpolation Debt](docs/adrs/0017-interpolation-debt.md)
 - [0018: Coordinate Mapping](docs/adrs/0018-coordinate-mapping.md)
+- [0019: Tree Felling Physics — Lab-Validated](docs/adrs/0019-tree-felling-physics-lab-validated.md)
 
 ## What We've Built So Far
 - **Vertical Slice:** Proven end-to-end. Players can connect, join a region, place structures, trigger guild challenges, and update progression through server-authoritative .NET 9 services.
@@ -72,6 +73,7 @@ We document our core architecture decisions in `docs/adrs/`. Key ones include:
 - **Azure Deployment:** 4 services deployed to Azure Container Apps (eastus2). Gateway and OperatorApi are external; EventLog and Progression are internal. PostgreSQL Flexible Server. All smoke tests passing.
 - **Godot C# Client (Nature 2.0):** Full C# client at `clients/godot-cs/nature-2.0/`. Connects via WebSocket with binary protocol, WASD movement (server-authoritative), procedural heightmap terrain with slope/altitude shader, 297 trees with visual variation from growth_history, WoW-style orbit camera, tree inspection mechanic. Proven against both local and Azure. See [retrospective](docs/retrospective-godot-cs-migration-2026-03-29.md).
 - **World Generation R&D:** Hydraulic erosion simulation (Sebastian Lague algorithm) with 5 data-driven biome presets discovered from 500-run parameter sweep. 512x512 world-scale generation in ~30 seconds. Lab tooling with real-time tuning panels. See [worldgen plan](docs/plan-worldgen-lab.md) and [parameter sweep](docs/plan-worldgen-parameter-sweep.md).
+- **Tree Felling Physics Lab:** Realistic felling simulation from USDA forestry manuals, academic cutting dynamics (Pluta & Hryniewicz), and Rod Cross swing physics. Polar cross-section trunk model, 5 cut types, hinge analysis, barber chair detection, 5 fall phases. Physics compress to 24-byte `CompactTreeState` for network transmission. Player orb with walk-and-chop. See [felling lab plan](docs/plan-tree-felling-lab.md), [ADR 0019](docs/adrs/0019-tree-felling-physics-lab-validated.md), [physics article](docs/article-tree-felling-physics.md).
 
 ## Retro Results
 *(See [docs/simulation-retrospective-2026-03-26.md](docs/simulation-retrospective-2026-03-26.md) and [docs/retrospective-2026-03-27.md](docs/retrospective-2026-03-27.md) for full details)*
