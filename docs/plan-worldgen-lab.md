@@ -13,7 +13,7 @@ Results inform the server-side RegionProfile generation pipeline.
 
 ## Implementation
 
-### Core: Heightmap + Erosion (128x128 grid)
+### Core: Heightmap + Erosion (512x512 grid)
 
 **Noise generation:**
 - Multi-octave simplex noise for base continental shape
@@ -101,19 +101,49 @@ Results inform the server-side RegionProfile generation pipeline.
 - "Regenerate" button → new random seed
 - "Erode More" button → add N erosion iterations to current terrain
 
+### Biome Presets (Data-Driven)
+
+Five presets discovered from a 500-run parameter sweep (`scripts/Lab/ParameterSweep.cs`). Each preset applies optimized erosion/deposition/evaporation/inertia/capacity/lifetime values and runs erosion for the corresponding iteration count.
+
+| Preset | Erosion Rate | Deposition | Evaporation | Inertia | Capacity | Lifetime | Iterations |
+|--------|-------------|-----------|-------------|---------|----------|----------|-----------|
+| **Alpine** | 0.04 | 0.79 | 0.0014 | 0.04 | 2.4 | 37 | 150K |
+| **Rainforest** | 0.18 | 0.10 | 0.040 | 0.32 | 4.7 | 41 | 500K |
+| **Desert** | 0.04 | 0.69 | 0.033 | 0.05 | 1.1 | 50 | 150K |
+| **Rolling Hills** | 0.27 | 0.68 | 0.011 | 0.31 | 7.8 | 75 | 300K |
+| **Wetlands** | 0.22 | 0.23 | 0.040 | 0.14 | 2.7 | 57 | 500K |
+
+See [parameter sweep plan](plan-worldgen-parameter-sweep.md) for methodology.
+
+## How to Test
+
+1. Open `clients/godot-cs/nature-2.0/` in Godot 4.6.1 Mono
+2. Load `scenes/WorldGenLab.tscn`, run the scene (F6)
+3. **Navigate:** WASD to move, RMB drag to orbit camera, scroll to zoom
+4. **Generate terrain:** Press R to regenerate with a new random seed
+5. **Run erosion:** Press E to run 10K erosion iterations (repeat for more detail)
+6. **Try biome presets:** Open the tuning panel (Tab), go to "Biome Presets" section, click Alpine / Rainforest / Desert / Rolling Hills / Wetlands. Each regenerates terrain and runs erosion automatically.
+7. **Switch visualization:** In the Display section, change Mode (0-4):
+   - 0 = Shaded terrain (grass/rock/snow by slope + altitude)
+   - 1 = Height (grayscale altitude)
+   - 2 = Moisture (blue gradient showing rainfall distribution)
+   - 3 = Biome (colored by biome type)
+   - 4 = Erosion delta (red/blue showing where material was removed/deposited)
+8. **Tune parameters:** Adjust erosion rate, deposition, wind angle/strength, sea level, etc. in the tuning panel. Most changes rebuild the mesh in real-time.
+9. **Verify:** Rivers should follow valleys, moisture accumulates on windward slopes, biomes match climate expectations (hot+wet = forest, hot+dry = desert, cold = tundra/snow).
+
 ## Build Order
 
-1. **Heightmap + 3D mesh** — noise terrain on 128x128 grid, tunable octaves/frequency
-2. **Hydraulic erosion** — droplet simulation with tunable params, see results in real-time
-3. **Visualization modes** — height/shaded/moisture toggle
-4. **River generation** — flow accumulation + threshold + blue overlay
-5. **Biome coloring** — moisture × temperature → biome colors
-6. **Season slider** — shifts vegetation colors, adds snow at altitude
+1. ~~**Heightmap + 3D mesh** — noise terrain on 128x128 grid, tunable octaves/frequency~~ ✅ Done (512x512)
+2. ~~**Hydraulic erosion** — droplet simulation with tunable params~~ ✅ Done (up to 500K iterations)
+3. ~~**Visualization modes** — height/shaded/moisture toggle~~ ✅ Done (5 modes)
+4. ~~**River generation** — flow accumulation + threshold + blue overlay~~ ✅ Done
+5. ~~**Biome coloring** — moisture × temperature → biome colors~~ ✅ Done
+6. **Season slider** — shifts vegetation colors, adds snow at altitude (not yet implemented)
 
 ## Performance Budget
-- 128x128 grid = 16K cells
-- Mesh generation: ~1ms
-- 10K erosion droplets: ~50-100ms (can run async)
-- River accumulation: ~5ms
+- 512x512 grid = 262K cells
+- Mesh generation: builds in real-time for slider changes
+- Erosion: 150K-500K iterations depending on preset (~seconds, runs synchronously with progress logging)
+- River accumulation: steepest-descent flow direction + accumulation
 - All runs on client CPU, no GPU compute needed at this scale
-- Slider changes regenerate in real-time (except erosion which needs a button)

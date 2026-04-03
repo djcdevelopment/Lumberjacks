@@ -113,13 +113,27 @@ All physics internally in SI (meters, kg, seconds, newtons, joules). Display in 
 - **No tree-on-tree collision:** Multi-tree interaction (hung-up trees, domino) not implemented.
 - **No limbing/bucking:** Post-fell processing not implemented.
 
-## Verification
+## How to Test
 
-1. Open Godot editor, load `TreeFellingLab.tscn`, run scene (F6)
-2. Tune tree properties → trunk mesh rebuilds
-3. Cut notch → material visibly removed, hinge highlighted orange
-4. Make back cut → HUD shows hinge dimensions, barber chair warning if applicable
-5. Press Space → tree falls toward notch face
-6. HUD shows: head velocity 8-20 m/s, KE 50-300J, FC 50-500N (Cross range)
-7. "Wire: 24 bytes" confirms compact state fits ADR 0012 budget
-8. Try presets: each produces distinct, physically plausible behavior
+1. Open `clients/godot-cs/nature-2.0/` in Godot 4.6.1 Mono
+2. Load `scenes/TreeFellingLab.tscn`, run the scene (F6)
+3. **Move around:** WASD to move player orb, RMB drag to orbit camera, scroll to zoom
+4. **Try presets first:** Open the tuning panel → Presets section → click through each:
+   - **Textbook Fell** — standard notch + back cut, clean fall toward notch face
+   - **Barber Chair** — narrow hinge + prone species, trunk splits vertically (dangerous)
+   - **Hillside** — slope affects fall direction
+   - **Against Lean** — demonstrates difficulty of felling opposite to natural lean
+   - **Big Oak** — large diameter, high Janka hardness, requires more energy
+5. **Watch the HUD:** Phase (Standing/HingeBending/FreeFall/Ground/BarberChair), hinge dimensions, torque values, Cross physics values (head velocity, KE, centripetal force), wire cost
+6. **Verify Cross physics ranges:** Head velocity 8-20 m/s, KE 50-300J, FC 50-500N
+7. **Check network budget:** "Wire: 24 bytes" confirms CompactTreeState fits ADR 0012 envelope
+8. **Tune parameters:** Adjust tree species, DBH, lean, notch type/depth, back cut height, axe mass, swing radius, slope, wind in the tuning panel. Each change affects the physics simulation.
+9. **Switch visualization modes:** Shaded, Cross-section, Force diagram, Stress map, Fall trajectory, Side profile
+10. **Manual felling:** Set up your own tree properties, make a notch cut, then a back cut, then press Space to initiate the fall
+
+**What to look for:**
+- Notch material visibly removed from trunk mesh, hinge highlighted in orange
+- Barber chair triggers when conditions align (narrow hinge + low back cut + prone species + lean)
+- Different species respond differently (Oak is harder to cut than Pine)
+- Fall direction follows notch face orientation, modified by lean and slope
+- Each preset produces distinct, physically plausible behavior
