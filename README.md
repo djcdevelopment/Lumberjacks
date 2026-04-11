@@ -370,4 +370,10 @@ The platform is scored against a formal compliance matrix evaluating input-drive
 
 ---
 
+## License
+
+Licensed under the [Lumberjacks Community Source License v1.0](LICENSE.md) — free for non-commercial community servers (up to 100 active members). Commercial use requires a separate agreement. Copyright © 2026 DJC Development.
+
+---
+
 *Built with .NET 9, Godot 4.6, Azure Container Apps, PostgreSQL, and AI agents. Every architectural decision documented. Every physics model sourced from real research. Every claim backed by tests and load test results.*
