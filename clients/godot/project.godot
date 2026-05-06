@@ -24,6 +24,7 @@ config/icon="res://icon.svg"
 
 SimulationClient="*res://scripts/Networking/SimulationClient.cs"
 GameState="*res://scripts/Core/GameState.cs"
+SelectionManager="*res://scripts/Replay/SelectionManager.cs"
 
 [display]
 

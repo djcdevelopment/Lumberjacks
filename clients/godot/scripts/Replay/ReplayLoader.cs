@@ -32,8 +32,10 @@ public partial class ReplayLoader : Node
     private ReplayData _replay;
     private Timer _tickTimer;
     private int _frameIndex = 0;
+    private bool _isPaused = false;
+    private float _speedMultiplier = 1.0f;
 
-    // Public read-only accessors for DebugHud.
+    // Public read-only accessors for DebugHud + ScrubberHud.
     public string PullId => _replay?.PullId;
     public string SchemaVersion => _replay?.SchemaVersion;
     public string BossName => _replay?.BossName;
@@ -41,6 +43,8 @@ public partial class ReplayLoader : Node
     public int DurationMs => Math.Max(0, ((_replay?.Frames?.Count ?? 1) - 1) * (_replay?.FrameStepMs ?? 0));
     public bool LoadFailed { get; private set; }
     public string LoadError { get; private set; }
+    public bool IsPaused => _isPaused;
+    public float SpeedMultiplier => _speedMultiplier;
 
     [Signal] public delegate void ReplayLoadedEventHandler();
     [Signal] public delegate void ReplayFailedEventHandler(string error);
@@ -56,6 +60,7 @@ public partial class ReplayLoader : Node
 
             // Position the scene's Camera3D to frame this arena.
             FrameCameraToArena();
+            HideLegacyHud();
 
             SpawnEntities();
             StartPlayback();
@@ -267,7 +272,7 @@ public partial class ReplayLoader : Node
     {
         _tickTimer = new Timer
         {
-            WaitTime = _replay.FrameStepMs / 1000.0,
+            WaitTime = (_replay.FrameStepMs / 1000.0) / _speedMultiplier,
             Autostart = false,
             OneShot = false,
         };
@@ -301,6 +306,56 @@ public partial class ReplayLoader : Node
         var x = (nx - 0.5f) * _replay.ArenaWidth * YardToMeter;
         var z = (ny - 0.5f) * _replay.ArenaHeight * YardToMeter;
         return new Vector3(x, 0f, z);
+    }
+
+    // ---- playback control (slice 1) ---------------------------------------
+
+    public void TogglePaused() => SetPaused(!_isPaused);
+
+    public void SetPaused(bool paused)
+    {
+        _isPaused = paused;
+        if (_tickTimer == null) return;
+        if (paused) _tickTimer.Stop();
+        else _tickTimer.Start();
+    }
+
+    public void SetSpeed(float multiplier)
+    {
+        if (multiplier <= 0) return;
+        _speedMultiplier = multiplier;
+        if (_tickTimer != null && _replay != null)
+        {
+            _tickTimer.WaitTime = (_replay.FrameStepMs / 1000.0) / _speedMultiplier;
+        }
+    }
+
+    public void SeekToMs(int ms)
+    {
+        if (_replay == null) return;
+        var newIndex = Mathf.Clamp(ms / _replay.FrameStepMs, 0, _replay.Frames.Count - 1);
+        _frameIndex = newIndex;
+        var frame = _replay.Frames[_frameIndex];
+        for (int i = 0; i < _replay.Entities.Count; i++)
+        {
+            var pos = NormalizedToWorld(frame.EntityPositions[i * 2], frame.EntityPositions[i * 2 + 1]);
+            _gameState.IngestReplayPosition(_replay.Entities[i].EntityId, pos, frame.T);
+        }
+    }
+
+    // ---- legacy HUD hide (slice 0.5 cleanup) ------------------------------
+
+    private void HideLegacyHud()
+    {
+        // world.tscn carries a CanvasLayer named "HUD" with a "disconnected"
+        // status dot and "Players: N | Tick: 0" labels — useful for live
+        // game, noise in replay mode. Hide it once the replay is driving.
+        var world = GetParent()?.GetNodeOrNull<Node>("World");
+        if (world != null && world.HasNode("HUD"))
+        {
+            var hud = world.GetNodeOrNull<CanvasLayer>("HUD");
+            if (hud != null) hud.Visible = false;
+        }
     }
 
     // ---- internal data ----------------------------------------------------

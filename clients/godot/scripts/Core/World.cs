@@ -18,6 +18,10 @@ public partial class World : Node3D
     private readonly Dictionary<string, Node3D> _entities = new();
     private MeshInstance3D _ground;
 
+    // Read-only entity registry — slice 1 raycast helpers iterate this to
+    // resolve cursor → entityId without needing physics colliders on orbs.
+    public IReadOnlyDictionary<string, Node3D> Entities => _entities;
+
     // Tree entity types the server may send
     private static readonly HashSet<string> TreeTypes = new()
     {
@@ -92,6 +96,15 @@ public partial class World : Node3D
             instance = PlayerScene.Instantiate<Node3D>();
             AddChild(instance);
             _entities[entityId] = instance;
+
+            // Slice 1 metadata for raycast resolvers (HoverTooltip, SelectionInput).
+            // The class_color Variant doesn't survive GetMeta cleanly, so we duplicate
+            // the metadata that's safe to round-trip as primitives.
+            instance.SetMeta("entity_id", entityId);
+            if (metadata.ContainsKey("name")) instance.SetMeta("display_name", (string)metadata["name"]);
+            if (metadata.ContainsKey("wow_class")) instance.SetMeta("wow_class", (string)metadata["wow_class"]);
+            if (metadata.ContainsKey("wow_role")) instance.SetMeta("wow_role", (string)metadata["wow_role"]);
+            if (metadata.ContainsKey("kind")) instance.SetMeta("kind", (string)metadata["kind"]);
 
             if (instance is RemoteEntity re)
             {
