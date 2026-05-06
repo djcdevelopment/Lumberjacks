@@ -352,6 +352,43 @@ public partial class GameState : Node
         AltitudeGrid = null;
     }
 
+    // ---- Replay ingest API (slice 0) -------------------------------------
+    //
+    // Additive surface for the ReplayLoader. Bypasses SimulationClient
+    // (no live network in replay mode) and emits the same EntityAdded/
+    // EntityChanged/EntityRemoved signals World.cs already subscribes to.
+    // Coordinate mapping is the loader's responsibility — replay coords
+    // (WoW yards, normalized then denormalized) are not the same space as
+    // CoordinateMapper's server↔Godot mapping.
+
+    public void IngestReplayEntity(string entityId, string entityType, Vector3 position, float heading,
+        Godot.Collections.Dictionary metadata)
+    {
+        var record = new EntityRecord
+        {
+            EntityId = entityId,
+            EntityType = entityType,
+            Position = position,
+            Heading = heading,
+            Metadata = metadata,
+        };
+        _entities[entityId] = record;
+        EmitSignal(SignalName.EntityAdded, entityId, entityType, position, heading, metadata);
+    }
+
+    public void IngestReplayPosition(string entityId, Vector3 position, long tickMs)
+    {
+        if (!_entities.TryGetValue(entityId, out var rec)) return;
+        rec.Position = position;
+        EmitSignal(SignalName.EntityChanged, entityId, position, Vector3.Zero, rec.Heading, tickMs);
+    }
+
+    public void IngestReplayRemove(string entityId)
+    {
+        if (_entities.Remove(entityId))
+            EmitSignal(SignalName.EntityRemoved, entityId);
+    }
+
     private class EntityRecord
     {
         public string EntityId;

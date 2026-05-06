@@ -98,6 +98,25 @@ public partial class World : Node3D
                 re.Initialize(position, heading);
             }
 
+            // Replay mode (slice 0): metadata["class_color"] takes over orb
+            // coloring; no PlayerController, no camera attachment (replay
+            // scene owns the camera). Nametag still uses metadata["name"]
+            // like live mode. Returning early skips the live-mode local/
+            // remote branches below, which assume a connected SimulationClient.
+            if (metadata.ContainsKey("class_color"))
+            {
+                if (instance.HasNode("MeshInstance3D") && instance.GetNode<MeshInstance3D>("MeshInstance3D") is MeshInstance3D replayMesh)
+                {
+                    replayMesh.MaterialOverride = new StandardMaterial3D { AlbedoColor = (Color)metadata["class_color"] };
+                }
+                if (instance.HasNode("Nametag") && instance.GetNode<Label3D>("Nametag") is Label3D replayLabel)
+                {
+                    var replayName = metadata.ContainsKey("name") ? (string)metadata["name"] : entityId[..System.Math.Min(8, entityId.Length)];
+                    replayLabel.Text = replayName;
+                }
+                return;
+            }
+
             // Set nametag
             if (instance.HasNode("Nametag") && instance.GetNode<Label3D>("Nametag") is Label3D label)
             {
