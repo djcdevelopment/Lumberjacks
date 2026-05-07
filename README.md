@@ -241,6 +241,23 @@ C# Godot 4.6.1 client — thin rendering shell, no client-side physics.
 
 ---
 
+## RaidUI Replay Viewer
+
+**Location:** `clients/godot/scripts/Replay/` and `clients/godot/scenes/replay_main.tscn`
+
+A 3D replay viewer for World of Warcraft combat logs, sharing this repo's Godot client codebase. Reads a contract-stable JSON file produced by the [RaidUI](https://github.com/) parser (sister project) and renders raid pulls as class-colored orbs with operator controls: free-cam, scrubbable timeline, click-to-select, profile cards with per-entity visualization toggles.
+
+The architecture treats the replay as a deterministic event source rather than a visualization layer. Bypasses the live-game `SimulationClient` and writes directly into `GameState`'s signal layer through additive `IngestReplay*` methods — the live-game flow stays untouched. Slice 0 (validation + boring discipline) and slice 1 (operator surface, six features in two parallel batches) shipped over two days.
+
+**Run it:** Generate a replay file via the RaidUI parser (`npm run parse-latest`), open `clients/godot/project.godot` in Godot 4.6.1 Mono, set `ReplayLoader.ReplayPath` on the `replay_main.tscn` scene's `ReplayLoader` node, F6 to run.
+
+**Reference:**
+- [Replay Overview](docs/replay-overview.md) — architecture, JSON contract, controls, slice timeline
+- [Slice 0 + 1 Retrospective](docs/retro/2026-05-06-godot-replay-slices-0-1.md) — what shipped, what got lucky, friction surfaces, slice 2 inheritance
+- [The Tight Loop](https://steppeintegrations.com/articles/the-tight-loop/) — public field-test write-up of the build (Mech Suit Methodology in practice)
+
+---
+
 ## Architecture Decision Records
 
 19 ADRs documenting every core decision, written before implementation:
