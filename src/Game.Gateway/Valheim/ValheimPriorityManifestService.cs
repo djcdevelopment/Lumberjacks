@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Collections.Concurrent;
 using Game.Contracts.Entities;
 using Game.Contracts.Protocol;
 using Game.Contracts.Valheim;
@@ -13,6 +14,13 @@ public sealed record ValheimPriorityManifestResult(
     int MatchedEventCount,
     ValheimPriorityDeliveryPlan Plan);
 
+public sealed record ValheimPriorityManifestActivation(
+    string ManifestId,
+    DateTimeOffset ActivatedAt,
+    int SourceEventCount,
+    int MatchedEventCount,
+    ValheimPriorityDeliveryPlan Plan);
+
 public sealed class ValheimPriorityManifestService
 {
     private const string ObjectEventType = "valheim.priority_manifest.objects";
@@ -20,6 +28,7 @@ public sealed class ValheimPriorityManifestService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ValheimPriorityManifestService> _logger;
+    private readonly ConcurrentDictionary<string, ValheimPriorityManifestActivation> _activePlans = new(StringComparer.OrdinalIgnoreCase);
 
     public ValheimPriorityManifestService(
         IHttpClientFactory httpClientFactory,
@@ -77,6 +86,36 @@ public sealed class ValheimPriorityManifestService
             matchedEvents,
             plan);
     }
+
+    public async Task<ValheimPriorityManifestActivation> ActivateDeliveryPlanAsync(
+        string manifestId,
+        int reliableBudget,
+        int datagramBudget,
+        int eventLimit,
+        CancellationToken cancellationToken)
+    {
+        var result = await LoadDeliveryPlanAsync(
+            manifestId,
+            reliableBudget,
+            datagramBudget,
+            eventLimit,
+            cancellationToken);
+
+        var activation = new ValheimPriorityManifestActivation(
+            result.ManifestId,
+            DateTimeOffset.UtcNow,
+            result.SourceEventCount,
+            result.MatchedEventCount,
+            result.Plan);
+
+        _activePlans[result.ManifestId] = activation;
+        return activation;
+    }
+
+    public IReadOnlyCollection<ValheimPriorityManifestActivation> GetActivePlans() =>
+        _activePlans.Values
+            .OrderByDescending(p => p.ActivatedAt)
+            .ToList();
 
     private async Task<EventLogResponse> QueryObjectEventsAsync(
         string eventLogUrl,

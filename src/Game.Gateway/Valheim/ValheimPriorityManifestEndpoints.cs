@@ -1,4 +1,8 @@
 using Game.Contracts.Valheim;
+using Game.Gateway.WebSocket;
+using Game.Contracts.Protocol;
+using System.Net.WebSockets;
+using System.Text;
 
 namespace Game.Gateway.Valheim;
 
@@ -36,6 +40,84 @@ public static class ValheimPriorityManifestEndpoints
 
             return Results.Ok(ToResponse(result));
         });
+
+        group.MapPost("/{manifestId}/activate", async (
+            string manifestId,
+            int? reliableBudget,
+            int? datagramBudget,
+            int? eventLimit,
+            ValheimPriorityManifestService manifests,
+            CancellationToken cancellationToken) =>
+        {
+            var activation = await manifests.ActivateDeliveryPlanAsync(
+                manifestId,
+                reliableBudget ?? 256,
+                datagramBudget ?? 768,
+                eventLimit ?? 500,
+                cancellationToken);
+
+            if (activation.MatchedEventCount == 0)
+            {
+                return Results.NotFound(new
+                {
+                    manifest_id = manifestId,
+                    message = "No valheim.priority_manifest.objects events matched the manifest id.",
+                    source_event_count = activation.SourceEventCount,
+                });
+            }
+
+            return Results.Ok(ToActivationResponse(activation));
+        });
+
+        group.MapGet("/active", (ValheimPriorityManifestService manifests) =>
+        {
+            return Results.Ok(new
+            {
+                active = manifests.GetActivePlans().Select(ToActivationResponse),
+            });
+        });
+
+        group.MapPost("/{manifestId}/broadcast", async (
+            string manifestId,
+            string? regionId,
+            int? reliableBudget,
+            int? datagramBudget,
+            int? eventLimit,
+            ValheimPriorityManifestService manifests,
+            SessionManager sessions,
+            CancellationToken cancellationToken) =>
+        {
+            var activation = await manifests.ActivateDeliveryPlanAsync(
+                manifestId,
+                reliableBudget ?? 256,
+                datagramBudget ?? 768,
+                eventLimit ?? 500,
+                cancellationToken);
+
+            if (activation.MatchedEventCount == 0)
+            {
+                return Results.NotFound(new
+                {
+                    manifest_id = manifestId,
+                    message = "No valheim.priority_manifest.objects events matched the manifest id.",
+                    source_event_count = activation.SourceEventCount,
+                });
+            }
+
+            var targets = string.IsNullOrWhiteSpace(regionId)
+                ? sessions.GetAll()
+                : sessions.GetByRegion(regionId);
+            var sent = await BroadcastPriorityManifestAsync(activation, targets, cancellationToken);
+
+            return Results.Ok(new
+            {
+                manifest_id = activation.ManifestId,
+                region_id = regionId,
+                target_sessions = targets.Count,
+                sent_sessions = sent,
+                activation = ToActivationResponse(activation),
+            });
+        });
     }
 
     private static object ToResponse(ValheimPriorityManifestResult result) => new
@@ -52,6 +134,22 @@ public static class ValheimPriorityManifestEndpoints
         reliable = result.Plan.Reliable.Select(ToResponseItem),
         datagram = result.Plan.Datagram.Select(ToResponseItem),
         deferred = result.Plan.Deferred.Select(ToResponseItem),
+    };
+
+    private static object ToActivationResponse(ValheimPriorityManifestActivation activation) => new
+    {
+        manifest_id = activation.ManifestId,
+        activated_at = activation.ActivatedAt,
+        source_event_count = activation.SourceEventCount,
+        matched_event_count = activation.MatchedEventCount,
+        total_input_objects = activation.Plan.TotalInputObjects,
+        unique_objects = activation.Plan.UniqueObjects,
+        duplicates_removed = activation.Plan.DuplicatesRemoved,
+        reliable_count = activation.Plan.Reliable.Count,
+        datagram_count = activation.Plan.Datagram.Count,
+        deferred_count = activation.Plan.Deferred.Count,
+        reliable_budget = activation.Plan.ReliableBudget,
+        datagram_budget = activation.Plan.DatagramBudget,
     };
 
     private static object ToResponseItem(ValheimPriorityDeliveryItem item) => new
@@ -73,5 +171,56 @@ public static class ValheimPriorityManifestEndpoints
             y = item.Position.Y,
             z = item.Position.Z,
         },
+    };
+
+    private static async Task<int> BroadcastPriorityManifestAsync(
+        ValheimPriorityManifestActivation activation,
+        IReadOnlyCollection<GameSession> targets,
+        CancellationToken cancellationToken)
+    {
+        var envelope = EnvelopeFactory.Create(MessageType.PriorityManifest, new
+        {
+            manifest_id = activation.ManifestId,
+            activated_at = activation.ActivatedAt,
+            total_input_objects = activation.Plan.TotalInputObjects,
+            unique_objects = activation.Plan.UniqueObjects,
+            reliable_count = activation.Plan.Reliable.Count,
+            datagram_count = activation.Plan.Datagram.Count,
+            deferred_count = activation.Plan.Deferred.Count,
+            reliable = activation.Plan.Reliable.Select(ToResponseItem),
+            datagram_manifest = activation.Plan.Datagram.Select(ToManifestItem),
+            deferred_count_by_tier = activation.Plan.Deferred
+                .GroupBy(i => i.PriorityTier)
+                .OrderBy(g => g.Key)
+                .Select(g => new { priority_tier = g.Key, count = g.Count() }),
+        });
+
+        var bytes = Encoding.UTF8.GetBytes(EnvelopeFactory.Serialize(envelope));
+        var sent = 0;
+
+        foreach (var session in targets)
+        {
+            if (session.Socket.State != WebSocketState.Open)
+                continue;
+
+            await session.Socket.SendAsync(
+                bytes,
+                WebSocketMessageType.Text,
+                true,
+                cancellationToken);
+            sent++;
+        }
+
+        return sent;
+    }
+
+    private static object ToManifestItem(ValheimPriorityDeliveryItem item) => new
+    {
+        stable_key = item.StableKey,
+        priority_tier = item.PriorityTier,
+        priority_rank = item.PriorityRank,
+        delivery_order = item.DeliveryOrder,
+        route_stop_id = item.RouteStopId,
+        sample_id = item.SampleId,
     };
 }
