@@ -24,6 +24,7 @@ public enum MessageTypeId : byte
     EventEmitted = 14,
     Error = 15,
     PriorityManifest = 16,
+    PriorityManifestObject = 17,
 }
 
 /// <summary>
@@ -44,6 +45,7 @@ public static class MessageTypeMapping
         [MessageType.EntityUpdate] = MessageTypeId.EntityUpdate,
         [MessageType.EntityRemoved] = MessageTypeId.EntityRemoved,
         [MessageType.PriorityManifest] = MessageTypeId.PriorityManifest,
+        [MessageType.PriorityManifestObject] = MessageTypeId.PriorityManifestObject,
         [MessageType.EventEmitted] = MessageTypeId.EventEmitted,
         [MessageType.Error] = MessageTypeId.Error,
     };
@@ -61,6 +63,7 @@ public static class MessageTypeMapping
         [MessageTypeId.EntityUpdate] = MessageType.EntityUpdate,
         [MessageTypeId.EntityRemoved] = MessageType.EntityRemoved,
         [MessageTypeId.PriorityManifest] = MessageType.PriorityManifest,
+        [MessageTypeId.PriorityManifestObject] = MessageType.PriorityManifestObject,
         [MessageTypeId.EventEmitted] = MessageType.EventEmitted,
         [MessageTypeId.Error] = MessageType.Error,
     };

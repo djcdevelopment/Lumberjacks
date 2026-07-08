@@ -1,8 +1,10 @@
 using Game.Contracts.Valheim;
 using Game.Gateway.WebSocket;
 using Game.Contracts.Protocol;
+using Game.Contracts.Protocol.Binary;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 
 namespace Game.Gateway.Valheim;
 
@@ -85,6 +87,7 @@ public static class ValheimPriorityManifestEndpoints
             int? eventLimit,
             ValheimPriorityManifestService manifests,
             SessionManager sessions,
+            UdpTransport udpTransport,
             CancellationToken cancellationToken) =>
         {
             var activation = await manifests.ActivateDeliveryPlanAsync(
@@ -108,6 +111,7 @@ public static class ValheimPriorityManifestEndpoints
                 ? sessions.GetAll()
                 : sessions.GetByRegion(regionId);
             var sent = await BroadcastPriorityManifestAsync(activation, targets, cancellationToken);
+            var datagramResult = SendDatagramObjects(activation, targets, udpTransport);
 
             return Results.Ok(new
             {
@@ -115,6 +119,8 @@ public static class ValheimPriorityManifestEndpoints
                 region_id = regionId,
                 target_sessions = targets.Count,
                 sent_sessions = sent,
+                datagram_objects_sent = datagramResult.Sent,
+                datagram_sessions_without_udp = datagramResult.SessionsWithoutUdp,
                 activation = ToActivationResponse(activation),
             });
         });
@@ -212,6 +218,43 @@ public static class ValheimPriorityManifestEndpoints
         }
 
         return sent;
+    }
+
+    private static (int Sent, int SessionsWithoutUdp) SendDatagramObjects(
+        ValheimPriorityManifestActivation activation,
+        IReadOnlyCollection<GameSession> targets,
+        UdpTransport udpTransport)
+    {
+        var sent = 0;
+        var sessionsWithoutUdp = 0;
+
+        foreach (var session in targets)
+        {
+            if (session.UdpEndpoint == null)
+            {
+                sessionsWithoutUdp++;
+                continue;
+            }
+
+            foreach (var item in activation.Plan.Datagram)
+            {
+                var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(ToResponseItem(item), JsonOptions.Default);
+
+                Span<byte> frame = new byte[BinaryEnvelope.HeaderBytes + payloadBytes.Length];
+                var frameLen = BinaryEnvelope.Write(
+                    frame,
+                    version: 1,
+                    MessageTypeId.PriorityManifestObject,
+                    DeliveryLane.Datagram,
+                    seq: 0,
+                    payloadBytes);
+
+                if (udpTransport.TrySend(session, frame[..frameLen]))
+                    sent++;
+            }
+        }
+
+        return (sent, sessionsWithoutUdp);
     }
 
     private static object ToManifestItem(ValheimPriorityDeliveryItem item) => new

@@ -16,6 +16,7 @@ public static class MessageType
     public const string EntityUpdate = "entity_update";
     public const string EntityRemoved = "entity_removed";
     public const string PriorityManifest = "priority_manifest";
+    public const string PriorityManifestObject = "priority_manifest_object";
     public const string EventEmitted = "event_emitted";
     public const string Error = "error";
 }

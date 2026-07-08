@@ -26,6 +26,7 @@ public static class MessageClassification
         [MessageType.PlayerInput] = DeliveryLane.Datagram,
         [MessageType.EntityUpdate] = DeliveryLane.Datagram,
         [MessageType.EntityRemoved] = DeliveryLane.Datagram,
+        [MessageType.PriorityManifestObject] = DeliveryLane.Datagram,
     };
 
     public static DeliveryLane GetLane(string messageType)
