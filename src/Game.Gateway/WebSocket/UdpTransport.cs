@@ -42,9 +42,23 @@ public class UdpTransport : BackgroundService
         _port = config.GetValue("Udp:Port", 4005);
     }
 
+    // SIO_UDP_CONNRESET: suppress the Windows-only quirk where a prior send that
+    // provoked an ICMP Port Unreachable poisons the *next* receive on this socket
+    // with SocketException 10054, even though UDP has no real "connection" to reset.
+    private const int SioUdpConnReset = -1744830452;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _client = new UdpClient(_port);
+        try
+        {
+            _client.Client.IOControl(SioUdpConnReset, new byte[] { 0 }, null);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // Non-Windows: this ioctl doesn't exist and isn't needed there.
+        }
+
         _logger.LogInformation("UDP transport listening on port {Port}", _port);
 
         try
@@ -59,6 +73,13 @@ public class UdpTransport : BackgroundService
                 catch (OperationCanceledException)
                 {
                     break;
+                }
+                catch (SocketException ex)
+                {
+                    // Defense in depth alongside SIO_UDP_CONNRESET above — a bad
+                    // peer should never be able to take down the whole transport.
+                    _logger.LogDebug(ex, "UDP receive socket error — continuing");
+                    continue;
                 }
 
                 if (result.Buffer.Length < MinPacketSize)
@@ -132,8 +153,9 @@ public class UdpTransport : BackgroundService
             _client.Send(packet, packet.Length, session.UdpEndpoint);
             return true;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "UdpTransport.TrySend failed for session {SessionId}", session.SessionId);
             return false;
         }
     }
