@@ -16,6 +16,7 @@ public class MessageTypeMappingTests
     [InlineData(MessageType.WorldSnapshot, MessageTypeId.WorldSnapshot)]
     [InlineData(MessageType.EntityUpdate, MessageTypeId.EntityUpdate)]
     [InlineData(MessageType.EntityRemoved, MessageTypeId.EntityRemoved)]
+    [InlineData(MessageType.PriorityManifest, MessageTypeId.PriorityManifest)]
     [InlineData(MessageType.EventEmitted, MessageTypeId.EventEmitted)]
     [InlineData(MessageType.Error, MessageTypeId.Error)]
     public void String_to_id_and_back_roundtrip(string name, MessageTypeId expectedId)

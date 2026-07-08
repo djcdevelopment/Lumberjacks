@@ -15,6 +15,7 @@ public static class MessageType
     public const string WorldSnapshot = "world_snapshot";
     public const string EntityUpdate = "entity_update";
     public const string EntityRemoved = "entity_removed";
+    public const string PriorityManifest = "priority_manifest";
     public const string EventEmitted = "event_emitted";
     public const string Error = "error";
 }

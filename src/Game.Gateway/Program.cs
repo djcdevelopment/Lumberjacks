@@ -1,6 +1,7 @@
 using Game.Contracts.Protocol;
 using Game.Persistence;
 using Game.ServiceDefaults;
+using Game.Gateway.Valheim;
 using Game.Gateway.WebSocket;
 using Game.Simulation.Tick;
 using Game.Simulation.World;
@@ -13,6 +14,8 @@ builder.AddServiceDefaults();
 // Gateway services
 builder.Services.AddSingleton<SessionManager>();
 builder.Services.AddSingleton<MessageRouter>();
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<ValheimPriorityManifestService>();
 
 // Simulation services (in-process — eliminates HTTP-per-move hop)
 builder.Services.AddSingleton<WorldState>();
@@ -68,5 +71,6 @@ Game.Simulation.Endpoints.PlayerEndpoints.Map(app);
 Game.Simulation.Endpoints.StructureEndpoints.Map(app);
 Game.Simulation.Endpoints.InventoryEndpoints.Map(app);
 Game.Simulation.Endpoints.TickEndpoints.Map(app);
+ValheimPriorityManifestEndpoints.Map(app);
 
 app.Run();

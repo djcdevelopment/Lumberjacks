@@ -19,6 +19,7 @@ public static class MessageClassification
 
         // Reliable: world_snapshot is full state transfer — must arrive
         [MessageType.WorldSnapshot] = DeliveryLane.Reliable,
+        [MessageType.PriorityManifest] = DeliveryLane.Reliable,
 
         // Datagram: transient, supersedable, safely discardable
         [MessageType.PlayerMove] = DeliveryLane.Datagram,

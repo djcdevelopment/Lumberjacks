@@ -10,6 +10,7 @@ public class MessageClassificationTests
     [InlineData(MessageType.LeaveRegion, DeliveryLane.Reliable)]
     [InlineData(MessageType.SessionStarted, DeliveryLane.Reliable)]
     [InlineData(MessageType.Error, DeliveryLane.Reliable)]
+    [InlineData(MessageType.PriorityManifest, DeliveryLane.Reliable)]
     [InlineData(MessageType.PlayerMove, DeliveryLane.Datagram)]
     [InlineData(MessageType.EntityUpdate, DeliveryLane.Datagram)]
     public void Known_messages_have_correct_lane(string messageType, DeliveryLane expected)
