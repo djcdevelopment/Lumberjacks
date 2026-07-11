@@ -1,0 +1,11 @@
+project_id = "lumberjacks-experiment"
+region     = "us-west1"
+zone       = "us-west1-b"
+
+# Restrict to tester egress addresses when possible.
+gameplay_source_ranges = ["203.0.113.10/32"]
+
+# Optional. Omit to manage the budget outside this Terraform root.
+# billing_account_id = "000000-000000-000000"
+# monthly_budget_usd = 25
+# alert_email = "operator@example.com"

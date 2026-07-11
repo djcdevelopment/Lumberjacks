@@ -14,9 +14,10 @@ The first experiment answers one question:
 > Can the proven Lumberjacks stack operate correctly on a remote Linux machine over
 > the public internet?
 
-Database hosting, secrets delivery, image distribution, DNS, TLS, centralized
-telemetry, and deployment automation are separate experiments. Introducing all of
-them at once would make a failed deployment difficult to diagnose.
+Database hosting, secrets delivery, image distribution, DNS, TLS, and deployment
+automation are separate experiments. Centralized telemetry is the exception: the
+trial environment establishes production-grade logging, metrics, and tracing before
+the first application deployment so every parity run is diagnosable.
 
 ## 2. What has already been proven locally
 
@@ -53,6 +54,9 @@ routing have been designed and tested.
    scale, or operator need.
 8. Promote immutable application versions and retain a documented rollback path at
    every gate.
+9. Treat observability as foundational infrastructure. Collect correlated structured
+   logs, distributed traces, host/runtime/gameplay metrics, uptime results, and alerts
+   from the first external run.
 
 Cloud Run is not a target for the current gateway. WebSocket requests have bounded
 duration, session affinity is best-effort, and Cloud Run service ingress does not
@@ -102,9 +106,9 @@ Godot client / test clients
 ```
 
 For the first proof, firewall rules expose only the ports required by the current
-test. Internal service and database ports remain private. Logs may be retained
-container logs or collected by Cloud Logging; centralized logging is not a prerequisite
-for proving gameplay connectivity.
+test. Internal service and database ports remain private. The Ops Agent centrally
+ingests structured container logs and host metrics and receives application OTLP
+metrics and traces before gameplay testing begins.
 
 The same versioned scenario definition must run against both environments and produce
 comparable behavioral evidence:
@@ -145,6 +149,9 @@ verification, backup, restore, and rollback tests pass.
 
 ## 5. Stage 1: same stack on Compute Engine
 
+The executable provisioning, deployment, validation, and teardown procedure is in the
+[Google Cloud Stage 1 runbook](google-cloud-stage1-runbook.md).
+
 ### Scope
 
 - Create a dedicated GCP experiment project using available trial credits.
@@ -159,6 +166,9 @@ verification, backup, restore, and rollback tests pass.
 - Create narrowly scoped VPC firewall rules for SSH administration, WebSocket testing,
   and UDP 4005. Do not expose PostgreSQL or internal HTTP services.
 - Retain enough host and container logs to diagnose the experiment.
+- Install the Ops Agent with OTLP ingestion for metrics and traces, structured Docker
+  log parsing, a unified operations dashboard, public uptime checks, and actionable
+  alerts for availability, agent silence, application errors, CPU, memory, and disk.
 
 The initial WebSocket endpoint may use the reserved public IP. This is a test endpoint,
 not the production address. Validate in sequence:
@@ -171,7 +181,8 @@ public-IP reachability
 ```
 
 Do not add DNS, TLS, Artifact Registry, Secret Manager, Cloud SQL, or automated
-deployment merely to satisfy this gate.
+deployment merely to satisfy this gate. Observability is deliberately present from
+the outset and does not change application service boundaries.
 
 ### Exit evidence
 
@@ -183,6 +194,8 @@ deployment merely to satisfy this gate.
 - PostgreSQL data survives container and VM restart.
 - The existing automated movement scenario completes.
 - Logs, scenario results, timing telemetry, and artifacts are recovered from the run.
+- Structured logs correlate to Cloud Trace spans, custom gameplay metrics reach Cloud
+  Monitoring, the dashboard is populated, and alert delivery is verified.
 
 ## 6. Stage 2: public DNS, TLS, and secrets
 
@@ -309,7 +322,7 @@ Private IP keeps database traffic off public addressing; see
 | Secret Manager | Stores runtime secrets without placing credentials in source or images. | Stage 2 |
 | Artifact Registry | Stores versioned, immutable container images used by automated deployment. | Stage 3 |
 | GitHub Actions | Orchestrates continuous integration, release approval, deployment, and verification. | Stage 3 |
-| Cloud Logging / Monitoring | Centralizes operational telemetry and actionable alerts after basic external parity works. | Stage 3-5 |
+| Cloud Logging / Monitoring / Trace | Centralizes correlated logs, host/runtime/gameplay metrics, traces, dashboards, uptime checks, and actionable alerts. | Stage 1-5 |
 | Cloud SQL | Provides managed PostgreSQL, automated backups, and a testable recovery path. | Stage 4 |
 
 ## 11. Deferred services

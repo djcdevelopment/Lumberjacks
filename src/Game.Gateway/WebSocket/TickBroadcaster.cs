@@ -3,6 +3,7 @@ using System.Text;
 using Game.Contracts.Entities;
 using Game.Contracts.Protocol;
 using Game.Contracts.Protocol.Binary;
+using Game.ServiceDefaults;
 using Game.Simulation.World;
 
 namespace Game.Gateway.WebSocket;
@@ -126,7 +127,10 @@ public class TickBroadcaster : ITickBroadcaster
         GameSession session, string entityId, Player player, long tick, uint stateHash)
     {
         if (_udpTransport == null || session.UdpEndpoint == null)
+        {
+            LumberjacksTelemetry.RecordDelivery("websocket_fallback");
             return false;
+        }
 
         Span<byte> payloadBuf = stackalloc byte[128];
         var payloadLen = PayloadSerializers.WriteEntityUpdate(
@@ -144,7 +148,10 @@ public class TickBroadcaster : ITickBroadcaster
             seq: 0,
             payloadBuf[..payloadLen]);
 
-        return _udpTransport.TrySend(session, frameBuf);
+        var sent = _udpTransport.TrySend(session, frameBuf);
+        if (!sent)
+            LumberjacksTelemetry.RecordDelivery("websocket_fallback");
+        return sent;
     }
 
     private static async Task SendBinaryEntityUpdate(

@@ -3,6 +3,11 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace Game.ServiceDefaults;
 
@@ -10,6 +15,34 @@ public static class ServiceDefaultsExtensions
 {
     public static WebApplicationBuilder AddServiceDefaults(this WebApplicationBuilder builder)
     {
+        var serviceName = builder.Environment.ApplicationName;
+        var serviceVersion = typeof(ServiceDefaultsExtensions).Assembly.GetName().Version?.ToString();
+
+        builder.Logging.ClearProviders();
+        builder.Logging.AddConsoleFormatter<GoogleCloudJsonConsoleFormatter, ConsoleFormatterOptions>();
+        builder.Logging.AddConsole(options => options.FormatterName = GoogleCloudJsonConsoleFormatter.FormatterName);
+
+        builder.Services
+            .AddOpenTelemetry()
+            .ConfigureResource(resource => resource.AddService(
+                serviceName: serviceName,
+                serviceVersion: serviceVersion,
+                serviceInstanceId: Environment.MachineName))
+            .WithTracing(tracing => tracing
+                .AddSource(LumberjacksTelemetry.ActivitySourceName)
+                .AddSource("Npgsql")
+                .AddAspNetCoreInstrumentation(options =>
+                    options.Filter = context => !context.Request.Path.StartsWithSegments("/health"))
+                .AddHttpClientInstrumentation()
+                .AddOtlpExporter())
+            .WithMetrics(metrics => metrics
+                .AddMeter(LumberjacksTelemetry.MeterName)
+                .AddMeter("Npgsql")
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddRuntimeInstrumentation()
+                .AddOtlpExporter());
+
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.PropertyNamingPolicy =

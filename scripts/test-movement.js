@@ -2,13 +2,18 @@
 // Two players connect, join region, move, see each other, one disconnects
 const WebSocket = require('ws');
 
+const GATEWAY_WS = process.argv[2] || 'ws://localhost:4000';
+const gatewayHttpUrl = new URL(GATEWAY_WS);
+gatewayHttpUrl.protocol = gatewayHttpUrl.protocol === 'wss:' ? 'https:' : 'http:';
+const GATEWAY_HTTP = gatewayHttpUrl.toString().replace(/\/$/, '');
+
 function createEnvelope(type, payload) {
     return JSON.stringify({ version: 1, type, seq: 1, timestamp: new Date().toISOString(), payload });
 }
 
 function connect(label) {
     return new Promise((resolve, reject) => {
-        const ws = new WebSocket('ws://localhost:4000');
+        const ws = new WebSocket(GATEWAY_WS);
         const received = [];
         let playerId, sessionId;
 
@@ -34,6 +39,7 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function main() {
     console.log('=== Multi-Client Movement Test ===\n');
+    console.log(`Gateway: ${GATEWAY_WS}\n`);
 
     // Wait for services
     await sleep(5000);
@@ -118,7 +124,7 @@ async function main() {
 
     // Step 6: Check simulation state
     console.log('[7] Checking simulation state...');
-    const playersRes = await fetch('http://localhost:4000/players');
+    const playersRes = await fetch(`${GATEWAY_HTTP}/players`);
     const players = await playersRes.json();
     console.log(`    Players in world: ${players.length}`);
     for (const p of players) {
@@ -126,7 +132,7 @@ async function main() {
     }
 
     // Step 7: Check region player count
-    const regionsRes = await fetch('http://localhost:4000/regions');
+    const regionsRes = await fetch(`${GATEWAY_HTTP}/regions`);
     const regions = await regionsRes.json();
     console.log(`    ${regions[0].name} player count: ${regions[0].player_count}\n`);
 
@@ -140,10 +146,10 @@ async function main() {
     console.log(`    Player B saw A leave: ${bGotRemove ? 'YES' : 'NO'}`);
 
     // Check simulation cleaned up
-    const playersAfter = await (await fetch('http://localhost:4000/players')).json();
+    const playersAfter = await (await fetch(`${GATEWAY_HTTP}/players`)).json();
     console.log(`    Players remaining: ${playersAfter.length}`);
 
-    const regionsAfter = await (await fetch('http://localhost:4000/regions')).json();
+    const regionsAfter = await (await fetch(`${GATEWAY_HTTP}/regions`)).json();
     console.log(`    Region player count: ${regionsAfter[0].player_count}`);
 
     // Step 9: Check events

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Game.Contracts.Protocol;
 using Game.Contracts.Protocol.Binary;
+using Game.ServiceDefaults;
 using Game.Simulation.Handlers;
 using Game.Simulation.Tick;
 using Game.Simulation.World;
@@ -58,6 +59,9 @@ public class MessageRouter
 
     public async Task RouteAsync(GameSession session, Envelope envelope)
     {
+        LumberjacksTelemetry.RecordMessage(envelope.Type, "websocket");
+        using var activity = LumberjacksTelemetry.StartMessageActivity(envelope.Type, "websocket");
+
         switch (envelope.Type)
         {
             case MessageType.JoinRegion:
@@ -237,8 +241,9 @@ public class MessageRouter
     /// Binary input path: called directly from middleware when a binary player_input frame arrives.
     /// Skips JSON deserialization entirely.
     /// </summary>
-    public void HandlePlayerInputBinary(GameSession session, PlayerInputBinary input)
+    public void HandlePlayerInputBinary(GameSession session, PlayerInputBinary input, string transport = "websocket-binary")
     {
+        LumberjacksTelemetry.RecordMessage(MessageType.PlayerInput, transport);
         EnqueueInput(session.PlayerId, input.Direction, input.SpeedPercent, input.ActionFlags, input.InputSeq);
     }
 

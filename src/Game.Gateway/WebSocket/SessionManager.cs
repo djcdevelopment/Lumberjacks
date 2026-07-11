@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.WebSockets;
+using Game.ServiceDefaults;
 
 namespace Game.Gateway.WebSocket;
 
@@ -58,6 +59,7 @@ public class SessionManager
             Socket: socket);
 
         _sessions[session.SessionId] = session;
+        LumberjacksTelemetry.SessionCreated(resumed: false);
         return session;
     }
 
@@ -91,6 +93,7 @@ public class SessionManager
         };
 
         _sessions[session.SessionId] = session;
+        LumberjacksTelemetry.SessionCreated(resumed: true);
         return session;
     }
 
@@ -101,6 +104,7 @@ public class SessionManager
     public void Detach(GameSession session)
     {
         _sessions.TryRemove(session.SessionId, out _);
+        LumberjacksTelemetry.SessionDetached();
         _detached[session.ResumeToken] = new DetachedSession(
             session.PlayerId,
             session.GuildId,

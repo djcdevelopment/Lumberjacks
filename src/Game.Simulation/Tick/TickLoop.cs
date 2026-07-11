@@ -1,5 +1,7 @@
 using Game.Contracts.Protocol;
+using Game.ServiceDefaults;
 using Game.Simulation.World;
+using System.Diagnostics;
 
 namespace Game.Simulation.Tick;
 
@@ -32,6 +34,7 @@ public class TickLoop : BackgroundService
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            var tickStarted = Stopwatch.GetTimestamp();
             var tick = Interlocked.Increment(ref _tickBacking);
             _world.CurrentTick = tick;
 
@@ -70,6 +73,11 @@ public class TickLoop : BackgroundService
             {
                 _inputQueue.PurgeStale(tick);
             }
+
+            LumberjacksTelemetry.RecordTick(
+                Stopwatch.GetElapsedTime(tickStarted),
+                changedPlayers.Count,
+                changedResources.Count);
         }
 
         _logger.LogInformation("Tick loop stopped at tick {Tick}", _world.CurrentTick);
