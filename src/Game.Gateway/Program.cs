@@ -17,6 +17,8 @@ builder.Services.AddSingleton<MessageRouter>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<ValheimPriorityManifestService>();
 builder.Services.AddSingleton<ValheimZdoRedirectService>();
+builder.Services.AddSingleton<ValheimZdoInjectionService>();
+builder.Services.AddSingleton<ValheimHandshakeService>();
 
 // Simulation services (in-process — eliminates HTTP-per-move hop)
 builder.Services.AddSingleton<WorldState>();
@@ -74,5 +76,7 @@ Game.Simulation.Endpoints.InventoryEndpoints.Map(app);
 Game.Simulation.Endpoints.TickEndpoints.Map(app);
 ValheimPriorityManifestEndpoints.Map(app);
 ValheimZdoRedirectEndpoints.Map(app);
+ValheimZdoInjectionEndpoints.Map(app);
+ValheimHandshakeEndpoints.Map(app);
 
 app.Run();
