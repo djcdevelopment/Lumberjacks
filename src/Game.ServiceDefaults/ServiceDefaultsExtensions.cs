@@ -15,8 +15,10 @@ public static class ServiceDefaultsExtensions
 {
     public static WebApplicationBuilder AddServiceDefaults(this WebApplicationBuilder builder)
     {
-        var serviceName = builder.Environment.ApplicationName;
-        var serviceVersion = typeof(ServiceDefaultsExtensions).Assembly.GetName().Version?.ToString();
+        var serviceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME")
+            ?? builder.Environment.ApplicationName;
+        var serviceVersion = Environment.GetEnvironmentVariable("OTEL_SERVICE_VERSION")
+            ?? typeof(ServiceDefaultsExtensions).Assembly.GetName().Version?.ToString();
 
         builder.Logging.ClearProviders();
         builder.Logging.AddConsoleFormatter<GoogleCloudJsonConsoleFormatter, ConsoleFormatterOptions>();

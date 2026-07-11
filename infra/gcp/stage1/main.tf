@@ -71,6 +71,30 @@ resource "google_compute_firewall" "gameplay" {
   }
 }
 
+data "google_monitoring_uptime_check_ips" "public" {
+  depends_on = [google_project_service.required]
+}
+
+resource "google_compute_firewall" "uptime_check" {
+  name      = "${local.name}-uptime-check"
+  network   = google_compute_network.stage1.name
+  direction = "INGRESS"
+
+  # Public uptime checks originate from a changing set of individual addresses.
+  # Read the authoritative list during each plan instead of widening the gameplay
+  # rule or copying addresses into configuration that can silently become stale.
+  source_ranges = [
+    for checker in data.google_monitoring_uptime_check_ips.public.uptime_check_ips :
+    "${checker.ip_address}/32" if !strcontains(checker.ip_address, ":")
+  ]
+  target_tags = [local.name]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["4000"]
+  }
+}
+
 resource "google_compute_address" "stage1" {
   name   = local.name
   region = var.region

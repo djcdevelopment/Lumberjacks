@@ -3,7 +3,9 @@ Description=Lumberjacks Gate 1 Docker Compose stack
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
+RequiresMountsFor=/mnt/lumberjacks
 ConditionPathExists=/opt/lumberjacks/infra/docker/docker-compose.yml
+ConditionPathExists=/etc/lumberjacks/environment
 
 [Service]
 Type=oneshot

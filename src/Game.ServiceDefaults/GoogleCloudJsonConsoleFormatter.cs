@@ -42,7 +42,10 @@ public sealed class GoogleCloudJsonConsoleFormatter : ConsoleFormatter
         var payload = new Dictionary<string, object?>
         {
             ["timestamp"] = DateTimeOffset.UtcNow,
-            ["severity"] = ToCloudSeverity(logEntry.LogLevel),
+            // The Ops Agent promotes this reserved field to LogEntry.severity.
+            // A plain "severity" property remains in jsonPayload and leaves the
+            // actual LogEntry severity at DEFAULT, breaking severity-based alerts.
+            ["logging.googleapis.com/severity"] = ToCloudSeverity(logEntry.LogLevel),
             ["message"] = message,
             ["service"] = _serviceName,
             ["category"] = logEntry.Category,

@@ -58,8 +58,11 @@ variable "monthly_budget_usd" {
 }
 
 variable "alert_email" {
-  description = "Email address for operational alert notifications."
+  description = "Email address for required Stage 1 operational alert notifications."
   type        = string
-  default     = null
-  nullable    = true
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
+    error_message = "alert_email must be a valid email address."
+  }
 }

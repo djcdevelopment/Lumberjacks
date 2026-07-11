@@ -1,6 +1,6 @@
 # Google Cloud Migration Strategy
 
-Status: proposed
+Status: Stage 1 implementation complete; Gate 1 evidence pending
 
 Last reviewed: 2026-07-11
 
@@ -13,6 +13,15 @@ The first experiment answers one question:
 
 > Can the proven Lumberjacks stack operate correctly on a remote Linux machine over
 > the public internet?
+
+The repository now contains the Stage 1 Terraform, Compose override, VM bootstrap,
+service recovery unit, application telemetry, dashboard, uptime check, and alerting
+configuration. That makes the experiment executable; it does **not** make Gate 1
+complete. Gate 1 is complete only after the external gameplay, UDP, persistence,
+reboot, telemetry-correlation, and alert-delivery evidence listed in Section 5 has
+been captured from one pinned revision. The
+[Stage 1 runbook](google-cloud-stage1-runbook.md) is the completion plan and evidence
+checklist.
 
 Database hosting, secrets delivery, image distribution, DNS, TLS, and deployment
 automation are separate experiments. Centralized telemetry is the exception: the

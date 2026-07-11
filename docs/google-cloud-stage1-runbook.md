@@ -9,6 +9,18 @@ application is deployed.
 
 Do not use real player data or production credentials in this environment.
 
+## Completion status
+
+The Stage 1 implementation is checked in. The migration gate is **not yet complete**:
+the repository does not contain a Gate 1 evidence bundle proving an external native
+client session, UDP delivery, restart persistence, trace-correlated logs, populated
+metrics, and delivered alerts from the same pinned revision.
+
+Use this runbook as the completion plan. Sections 1-4 prepare and deploy one immutable
+revision, Sections 5-7 execute the live proof, Section 8 records the evidence, and
+Section 9 controls cost after the result. Do not mark Gate 1 complete unless every
+row in the Section 8 checklist has an artifact or an explicit failing result.
+
 ## 1. Prerequisites
 
 Install and authenticate the following on the operator workstation:
@@ -77,9 +89,15 @@ cd infra/gcp/stage1
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Set `project_id`, select a region and zone, and replace the example tester address in
-`gameplay_source_ranges`. Use the public egress CIDR of the Godot/test workstation
-when practical. Set `billing_account_id` to create the optional monthly budget.
+Set `project_id`, select a region and zone, replace the example tester address in
+`gameplay_source_ranges`, and set `alert_email` to the operator who will acknowledge
+the channel and receive the controlled alert. Use the public egress CIDR of the
+Godot/test workstation when practical. Set `billing_account_id` to create the
+optional monthly budget.
+
+Terraform reads the current public uptime-checker addresses from the Monitoring API
+and permits those addresses to reach TCP 4000 in a separate firewall rule. Do not add
+them to `gameplay_source_ranges`, and do not widen UDP 4005 for the uptime check.
 
 Initialize, review, and apply:
 
@@ -130,6 +148,7 @@ REVISION="<full-commit-sha>"
 PROJECT_ID="lumberjacks-experiment"
 sudo git clone https://github.com/djcdevelopment/Lumberjacks.git /opt/lumberjacks
 sudo git -C /opt/lumberjacks checkout --detach "$REVISION"
+test "$(sudo git -C /opt/lumberjacks rev-parse HEAD)" = "$REVISION"
 cd /opt/lumberjacks
 sudo install -d -m 0755 /etc/lumberjacks
 printf 'GOOGLE_CLOUD_PROJECT=%s\nLUMBERJACKS_VERSION=%s\n' "$PROJECT_ID" "$REVISION" | sudo tee /etc/lumberjacks/environment
@@ -153,6 +172,8 @@ curl --fail http://127.0.0.1:4004/health
 
 The effective model must show only TCP 4000 and UDP 4005 bound to all interfaces.
 PostgreSQL and ports 4002-4004 must bind only to `127.0.0.1`.
+`systemctl show lumberjacks-compose.service -p RequiresMountsFor` must include
+`/mnt/lumberjacks`, preventing the stack from starting against an unmounted path.
 
 ## 5. Validate external gameplay
 
@@ -212,7 +233,8 @@ In Google Cloud Observability, confirm all of the following:
 
 - the **Lumberjacks — Gate 1 Operations** dashboard contains host and application
   time series;
-- application logs have `service`, `severity`, `trace_id`, and `span_id` fields;
+- application logs have a promoted Cloud Logging `severity` and a `service` field;
+- request- or message-scoped logs have `trace_id` and `span_id` fields;
 - a structured log trace link opens the corresponding Cloud Trace waterfall;
 - `workload.googleapis.com/lumberjacks.tick.duration` and session/UDP/delivery metrics
   are present;
@@ -246,6 +268,24 @@ Gate 1 passes only when all criteria in the
 [migration strategy](google-cloud-migration-strategy.md#12-gated-success-criteria)
 have evidence attached. Record failures as failures; do not alter multiple platform
 layers to make the first experiment pass.
+
+Use this checklist before recording the gate decision:
+
+| Required proof | Minimum evidence |
+|---|---|
+| Pinned deployment | `revision.txt`, effective Compose model, and healthy service list |
+| External native client | Client/server versions, endpoint, players, world/scenario identifier, and result |
+| WebSocket behavior | Movement and two-player scenario logs showing binary WebSocket success |
+| UDP behavior | Dual-channel log with nonzero UDP inputs and UDP entity updates |
+| Full vertical slice | Passing `test-vertical-slice.js` output from the deployed revision |
+| Durable persistence | Before/after structure JSON, successful diff, and post-reboot scenario result |
+| Centralized logs and traces | Structured log sample plus a trace link or trace identifier from the same operation |
+| Metrics and dashboard | Timestamped capture or exported query results for host, tick, session, UDP, and delivery signals |
+| Availability and alerts | Healthy multi-region uptime result and proof the controlled alert reached `alert_email` |
+| Gate decision | Date, operator, revision, pass/fail, known failures, and artifact location |
+
+The local ignored Terraform state and plan files are not Gate evidence. Export the
+artifacts above to durable storage before stopping or destroying the experiment.
 
 ## 9. Stop or remove the experiment
 
