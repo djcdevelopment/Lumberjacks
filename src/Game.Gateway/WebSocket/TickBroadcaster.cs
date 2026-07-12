@@ -13,10 +13,12 @@ namespace Game.Gateway.WebSocket;
 /// Broadcasts authoritative tick state to connected clients.
 /// Called by TickLoop (via ITickBroadcaster) after each simulation step for changed entities only.
 ///
-/// Uses InterestManager for per-player AoI filtering:
-///   Near (0–100u)  → every tick
-///   Mid  (100–300u) → every 4th tick
-///   Far  (300+u)    → skipped for position updates
+/// Uses InterestManager for per-player AoI filtering, per the active ReplicationPolicy
+/// (env Replication__Policy, default "tiered" — see ReplicationOptions):
+///   Tiered (default) — Near (0–NearRadius) every tick, Mid (NearRadius–MidRadius) every
+///                       MidTickInterval-th tick, Far dropped. 100/300/4 by default.
+///   Full              — no filtering; every observer gets every changed entity every tick.
+///   Radius            — hard cutoff at NearRadius; inside every tick, outside dropped.
 ///
 /// Sends binary frames to binary-mode sessions, JSON to JSON-mode sessions.
 /// </summary>
@@ -28,13 +30,25 @@ public class TickBroadcaster : ITickBroadcaster
     private readonly ILogger<TickBroadcaster> _logger;
     private readonly TickMetrics? _metrics;
 
-    public TickBroadcaster(SessionManager sessions, WorldState world, ILogger<TickBroadcaster> logger, UdpTransport? udpTransport = null, TickMetrics? metrics = null)
+    public TickBroadcaster(
+        SessionManager sessions,
+        WorldState world,
+        IConfiguration config,
+        ILogger<TickBroadcaster> logger,
+        UdpTransport? udpTransport = null,
+        TickMetrics? metrics = null)
     {
         _sessions = sessions;
-        _interest = new InterestManager(world.SpatialGrid);
+        var replicationOptions = ReplicationOptions.FromConfiguration(config);
+        _interest = new InterestManager(world.SpatialGrid, replicationOptions);
         _udpTransport = udpTransport;
         _logger = logger;
         _metrics = metrics;
+        _metrics?.SetReplicationPolicy(replicationOptions.PolicyName);
+
+        _logger.LogInformation(
+            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval}",
+            replicationOptions.PolicyName, replicationOptions.NearRadius, replicationOptions.MidRadius, replicationOptions.MidTickInterval);
     }
 
     public async Task BroadcastTickAsync(
@@ -73,6 +87,11 @@ public class TickBroadcaster : ITickBroadcaster
         // "send" includes per-entity serialization (stackalloc/JSON) — socket writes dominate.
         long interestElapsed = 0, sendElapsed = 0;
 
+        // Replication counters: how many player-update candidates InterestManager evaluated
+        // per observer (regionPlayerChanges.Count) vs. how many it let through. Resource
+        // broadcasts are out of policy scope (region-wide, always sent) and excluded here.
+        long entitiesSent = 0, entitiesCulled = 0;
+
         foreach (var regionId in regionIds)
         {
             var sessions = _sessions.GetByRegion(regionId);
@@ -96,6 +115,9 @@ public class TickBroadcaster : ITickBroadcaster
                 var tInterest = Stopwatch.GetTimestamp();
                 var visiblePlayers = _interest.FilterForObserver(session.PlayerId, regionPlayerChanges, players, tick);
                 interestElapsed += Stopwatch.GetTimestamp() - tInterest;
+
+                entitiesSent += visiblePlayers.Count;
+                entitiesCulled += regionPlayerChanges.Count - visiblePlayers.Count;
 
                 var tSend = Stopwatch.GetTimestamp();
                 foreach (var playerId in visiblePlayers)
@@ -137,6 +159,7 @@ public class TickBroadcaster : ITickBroadcaster
         _metrics?.RecordBroadcastPhases(
             Stopwatch.GetElapsedTime(0, interestElapsed).TotalMilliseconds,
             Stopwatch.GetElapsedTime(0, sendElapsed).TotalMilliseconds);
+        _metrics?.RecordReplication(entitiesSent, entitiesCulled);
     }
 
     private bool TrySendUdpEntityUpdate(

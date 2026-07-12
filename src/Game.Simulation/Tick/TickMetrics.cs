@@ -53,6 +53,18 @@ public sealed class TickMetrics : IDisposable
     private double _pendingInterestMs;
     private double _pendingSendMs;
 
+    // Replication counters for the in-flight tick; folded into the next RecordTick.
+    private long _pendingSent;
+    private long _pendingCulled;
+
+    // Window totals (sums, not percentiles) for entity-updates sent vs. culled by the
+    // active InterestManager policy. Reset when the window closes.
+    private long _windowSent;
+    private long _windowCulled;
+
+    // Set once at startup by the broadcaster; "unknown" until then.
+    private string _replicationPolicy = "unknown";
+
     private volatile TickTimingSnapshot? _lastWindow;
 
     public TickMetrics(IMeterFactory meterFactory, ILogger<TickMetrics> logger)
@@ -86,6 +98,20 @@ public sealed class TickMetrics : IDisposable
         _pendingSendMs = sendMs;
     }
 
+    /// <summary>Called once at startup by the broadcaster to tag the active replication policy.</summary>
+    public void SetReplicationPolicy(string policyName) => _replicationPolicy = policyName;
+
+    /// <summary>
+    /// Called by the tick broadcaster (on ticks where it runs) with the total entity-updates
+    /// sent vs. culled by InterestManager, summed across every observer this tick. Ticks with
+    /// no broadcast report 0 for both.
+    /// </summary>
+    public void RecordReplication(long sent, long culled)
+    {
+        _pendingSent = sent;
+        _pendingCulled = culled;
+    }
+
     /// <summary>Called by TickLoop once per tick after all phases complete.</summary>
     public void RecordTick(
         long tick, double totalMs, double intervalMs,
@@ -95,6 +121,13 @@ public sealed class TickMetrics : IDisposable
         var sendMs = _pendingSendMs;
         _pendingInterestMs = 0;
         _pendingSendMs = 0;
+
+        var sent = _pendingSent;
+        var culled = _pendingCulled;
+        _pendingSent = 0;
+        _pendingCulled = 0;
+        _windowSent += sent;
+        _windowCulled += culled;
 
         _duration.Record(totalMs, _phaseTags[TotalIdx]);
         if (intervalMs > 0)
@@ -141,30 +174,36 @@ public sealed class TickMetrics : IDisposable
                 MaxMs: sorted[n - 1]);
         }
 
+        var replication = new ReplicationWindowStats(_replicationPolicy, _windowSent, _windowCulled);
+
         _lastWindow = new TickTimingSnapshot(
             WindowEndTick: tick,
             SampleCount: n,
             Overruns: _windowOverruns,
             BudgetMs: TickBudgetMs,
             Phases: phases,
+            Replication: replication,
             CapturedAt: DateTimeOffset.UtcNow);
 
         // Disable by setting logging category "Game.Simulation.Tick.TickMetrics" above Information.
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Tick timing (last {Count} ticks): total p50={TotalP50:F2}ms p99={TotalP99:F2}ms max={TotalMax:F2}ms overruns={Overruns} (budget {BudgetMs}ms) | interval p99={IntervalP99:F1}ms | sim p99={SimP99:F2}ms hash p99={HashP99:F2}ms broadcast p99={BroadcastP99:F2}ms (interest p99={InterestP99:F2}ms send p99={SendP99:F2}ms) housekeeping p99={HousekeepingP99:F2}ms",
+                "Tick timing (last {Count} ticks): total p50={TotalP50:F2}ms p99={TotalP99:F2}ms max={TotalMax:F2}ms overruns={Overruns} (budget {BudgetMs}ms) | interval p99={IntervalP99:F1}ms | sim p99={SimP99:F2}ms hash p99={HashP99:F2}ms broadcast p99={BroadcastP99:F2}ms (interest p99={InterestP99:F2}ms send p99={SendP99:F2}ms) housekeeping p99={HousekeepingP99:F2}ms | repl policy={Policy} sent={Sent} culled={Culled}",
                 n,
                 phases["total"].P50Ms, phases["total"].P99Ms, phases["total"].MaxMs,
                 _windowOverruns, TickBudgetMs,
                 phases["interval"].P99Ms,
                 phases["sim"].P99Ms, phases["hash"].P99Ms,
                 phases["broadcast"].P99Ms, phases["interest"].P99Ms, phases["send"].P99Ms,
-                phases["housekeeping"].P99Ms);
+                phases["housekeeping"].P99Ms,
+                replication.Policy, replication.Sent, replication.Culled);
         }
 
         _sampleCount = 0;
         _windowOverruns = 0;
+        _windowSent = 0;
+        _windowCulled = 0;
     }
 
     /// <summary>Nearest-rank percentile on an ascending-sorted array.</summary>
@@ -181,6 +220,13 @@ public sealed class TickMetrics : IDisposable
 /// <summary>p50/p99/max for one phase over one window, in milliseconds.</summary>
 public sealed record PhaseStats(double P50Ms, double P99Ms, double MaxMs);
 
+/// <summary>
+/// Entity-update replication totals for one window (~5s), summed (not percentiled) across
+/// every observer/tick in the window. Sent = updates actually dispatched; Culled = updates
+/// evaluated by InterestManager but dropped by the active policy.
+/// </summary>
+public sealed record ReplicationWindowStats(string Policy, long Sent, long Culled);
+
 /// <summary>Per-phase tick timing stats for the most recent completed window (~5s).</summary>
 public sealed record TickTimingSnapshot(
     long WindowEndTick,
@@ -188,4 +234,5 @@ public sealed record TickTimingSnapshot(
     int Overruns,
     double BudgetMs,
     IReadOnlyDictionary<string, PhaseStats> Phases,
+    ReplicationWindowStats Replication,
     DateTimeOffset CapturedAt);

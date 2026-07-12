@@ -118,6 +118,43 @@ public class TickMetricsTests
     }
 
     [Fact]
+    public void ReplicationCountersAccumulateAcrossWindowAndReset()
+    {
+        using var metrics = CreateMetrics();
+        metrics.SetReplicationPolicy("radius");
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+        {
+            metrics.RecordReplication(sent: 3, culled: 1);
+            RecordUniformTick(metrics, t, totalMs: 5);
+        }
+
+        var snapshot = metrics.LastWindow!;
+        Assert.Equal("radius", snapshot.Replication.Policy);
+        Assert.Equal(3 * TickMetrics.WindowTicks, snapshot.Replication.Sent);
+        Assert.Equal(1 * TickMetrics.WindowTicks, snapshot.Replication.Culled);
+
+        // Second window: no RecordReplication calls — totals must reset to 0, not carry over.
+        for (var t = TickMetrics.WindowTicks + 1; t <= 2 * TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        var snapshot2 = metrics.LastWindow!;
+        Assert.Equal(0, snapshot2.Replication.Sent);
+        Assert.Equal(0, snapshot2.Replication.Culled);
+    }
+
+    [Fact]
+    public void ReplicationPolicyDefaultsToUnknownUntilSet()
+    {
+        using var metrics = CreateMetrics();
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal("unknown", metrics.LastWindow!.Replication.Policy);
+    }
+
+    [Fact]
     public void HistogramReceivesPhaseTaggedDurations()
     {
         using var metrics = CreateMetrics();

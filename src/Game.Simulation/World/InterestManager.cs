@@ -4,33 +4,31 @@ namespace Game.Simulation.World;
 
 /// <summary>
 /// Per-player Area of Interest (AoI) filtering.
-/// Determines which entity updates each player should receive based on distance.
+/// Determines which entity updates each player should receive, per the active
+/// <see cref="ReplicationPolicy"/> (see <see cref="ReplicationOptions"/>):
 ///
-/// Bands:
-///   Near  (0–100 units)  → every tick
-///   Mid   (100–300 units) → every 4th tick
-///   Far   (300+ units)    → skipped for datagram-lane (position updates)
+///   Tiered (default) — Near (0–NearRadius) every tick, Mid (NearRadius–MidRadius)
+///     every MidTickInterval-th tick, Far dropped. Reproduces the original
+///     hardcoded 100/300/4 behavior when constructed with default options.
+///   Full   — no filtering; every observer gets every changed entity every tick.
+///   Radius — hard cutoff at NearRadius; inside every tick, outside dropped.
 ///
 /// Reliable-lane messages (structure placed, entity removed, etc.) always go to the full region.
 /// This class only filters datagram-lane tick broadcasts.
 /// </summary>
 public class InterestManager
 {
-    /// <summary>Near band radius — full-rate updates.</summary>
-    public const double NearRadius = 100.0;
-
-    /// <summary>Mid band radius — throttled updates.</summary>
-    public const double MidRadius = 300.0;
-
-    /// <summary>Tick interval for mid-band updates (every Nth tick).</summary>
-    public const int MidBandTickInterval = 4;
-
     private readonly SpatialGrid _grid;
+    private readonly ReplicationOptions _options;
 
-    public InterestManager(SpatialGrid grid)
+    public InterestManager(SpatialGrid grid, ReplicationOptions? options = null)
     {
         _grid = grid;
+        _options = options ?? new ReplicationOptions();
     }
+
+    /// <summary>The active replication policy for this manager.</summary>
+    public ReplicationPolicy Policy => _options.Policy;
 
     /// <summary>
     /// Determine which changed entities a given observer should receive on this tick.
@@ -46,14 +44,20 @@ public class InterestManager
         IReadOnlyDictionary<string, Player> players,
         long tick)
     {
+        // Full replication: no interest filtering at all — short-circuit before any
+        // grid lookup or distance math.
+        if (_options.Policy == ReplicationPolicy.Full)
+            return changedEntityIds;
+
         var observerPos = _grid.GetPosition(observerId);
         if (observerPos == null)
             return changedEntityIds; // Observer not in grid — fall back to sending everything
 
         var result = new HashSet<string>();
-        var nearRadiusSq = NearRadius * NearRadius;
-        var midRadiusSq = MidRadius * MidRadius;
-        var isMidTick = tick % MidBandTickInterval == 0;
+        var nearRadiusSq = _options.NearRadius * _options.NearRadius;
+        var midRadiusSq = _options.MidRadius * _options.MidRadius;
+        var useMidBand = _options.Policy == ReplicationPolicy.Tiered;
+        var isMidTick = useMidBand && _options.MidTickInterval > 0 && tick % _options.MidTickInterval == 0;
 
         foreach (var entityId in changedEntityIds)
         {
@@ -77,12 +81,12 @@ public class InterestManager
                 // Near band — every tick
                 result.Add(entityId);
             }
-            else if (distSq.Value <= midRadiusSq && isMidTick)
+            else if (useMidBand && distSq.Value <= midRadiusSq && isMidTick)
             {
-                // Mid band — every Nth tick
+                // Mid band (tiered policy only) — every Nth tick
                 result.Add(entityId);
             }
-            // Far band — skip (no position updates)
+            // Far band (tiered), or anything beyond NearRadius (radius policy) — skip
         }
 
         return result;
