@@ -191,6 +191,43 @@ public class TickMetricsTests
         Assert.Equal(8, metrics.LastWindow!.Replication.SendWorkers);
     }
 
+    // ── UdpSockets (phase 3a) ──
+
+    [Fact]
+    public void UdpSocketsDefaultsToOneUntilSet()
+    {
+        using var metrics = CreateMetrics();
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(1, metrics.LastWindow!.Replication.UdpSockets);
+    }
+
+    [Fact]
+    public void UdpSocketsReflectsTheEffectiveValueSetAtStartup()
+    {
+        using var metrics = CreateMetrics();
+        metrics.SetUdpSockets(4);
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(4, metrics.LastWindow!.Replication.UdpSockets);
+    }
+
+    [Fact]
+    public void UdpSocketsIsNotAWindowStat_SurvivesAcrossWindows()
+    {
+        using var metrics = CreateMetrics();
+        metrics.SetUdpSockets(8);
+
+        for (var t = 1; t <= 2 * TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(8, metrics.LastWindow!.Replication.UdpSockets);
+    }
+
     [Fact]
     public void DeadlineAbortsAccumulateAcrossWindowAndResetOnClose()
     {

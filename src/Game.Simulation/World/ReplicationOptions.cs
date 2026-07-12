@@ -26,7 +26,8 @@ public enum ReplicationPolicy
 ///
 /// Env vars: Replication__Policy, Replication__NearRadius, Replication__MidRadius,
 /// Replication__MidTickInterval, Replication__SendWorkers, Replication__BroadcastDeadlineMs,
-/// Replication__AdaptiveDegrade (send-loop rework, phase 2 — see TickBroadcaster).
+/// Replication__AdaptiveDegrade (send-loop rework, phase 2 — see TickBroadcaster),
+/// Replication__UdpSockets (phase 3a — see UdpTransport).
 /// </summary>
 public sealed record ReplicationOptions
 {
@@ -36,6 +37,7 @@ public sealed record ReplicationOptions
     public const int DefaultSendWorkers = 1;
     public const int DefaultBroadcastDeadlineMs = 0;
     public const bool DefaultAdaptiveDegrade = false;
+    public const int DefaultUdpSockets = 1;
 
     public ReplicationPolicy Policy { get; init; } = ReplicationPolicy.Tiered;
     public double NearRadius { get; init; } = DefaultNearRadius;
@@ -62,6 +64,19 @@ public sealed record ReplicationOptions
     /// updates (tiered) or every-other-session (radius/full) — see <see cref="Game.Simulation.Tick.AdaptiveDegrade"/>.
     /// </summary>
     public bool AdaptiveDegrade { get; init; } = DefaultAdaptiveDegrade;
+
+    /// <summary>
+    /// Phase-3a experiment knob: how many UDP send sockets <see cref="Game.Gateway.WebSocket.UdpTransport"/>
+    /// uses for outbound datagram-lane sends. 1 (default) = today's exact behavior — the single
+    /// bound socket that receives also sends every reply. 0 = auto — resolve to the effective
+    /// <see cref="SendWorkers"/> count (see <see cref="Game.Simulation.Tick.SendFanOut.ResolveUdpSocketCount"/>)
+    /// so each worker chunk gets its own socket. N&gt;1 = exactly N sockets. Tests the hypothesis
+    /// that a single shared <c>UdpClient</c> (synchronous <c>Send</c>, kernel-serialized) is why
+    /// parallel send workers showed zero overlap (Follow-up E). Extra sockets bind to ephemeral
+    /// ports — see UdpTransport for the NAT caveat that makes this experiment-only, not a
+    /// production default.
+    /// </summary>
+    public int UdpSockets { get; init; } = DefaultUdpSockets;
 
     /// <summary>Lowercase policy name, for logging and metrics tagging.</summary>
     public string PolicyName => Policy switch
@@ -90,6 +105,7 @@ public sealed record ReplicationOptions
             SendWorkers = config.GetValue("Replication:SendWorkers", DefaultSendWorkers),
             BroadcastDeadlineMs = config.GetValue("Replication:BroadcastDeadlineMs", DefaultBroadcastDeadlineMs),
             AdaptiveDegrade = config.GetValue("Replication:AdaptiveDegrade", DefaultAdaptiveDegrade),
+            UdpSockets = config.GetValue("Replication:UdpSockets", DefaultUdpSockets),
         };
     }
 }

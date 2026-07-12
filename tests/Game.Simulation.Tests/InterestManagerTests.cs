@@ -354,6 +354,67 @@ public class InterestManagerTests
         Assert.Contains("far", visible); // Full ignores suppressMidBand entirely — no mid band to suppress
     }
 
+    // ── IsBurstTick (phase 3a: adaptive-degrade v2's burst-alignment convention) ──
+
+    [Theory]
+    [InlineData(0, true)]     // 0 % 4 == 0
+    [InlineData(4, true)]
+    [InlineData(8, true)]
+    [InlineData(1, false)]
+    [InlineData(3, false)]
+    [InlineData(5, false)]
+    public void IsBurstTickMatchesDefaultMidTickInterval(long tick, bool expected)
+    {
+        var (manager, _) = CreateManager(); // default MidTickInterval = 4
+        Assert.Equal(expected, manager.IsBurstTick(tick));
+    }
+
+    [Fact]
+    public void IsBurstTickUsesCustomMidTickInterval()
+    {
+        var options = new ReplicationOptions { MidTickInterval = 3 };
+        var (manager, _) = CreateManager(options);
+
+        Assert.True(manager.IsBurstTick(0));
+        Assert.True(manager.IsBurstTick(3));
+        Assert.True(manager.IsBurstTick(6));
+        Assert.False(manager.IsBurstTick(1));
+        Assert.False(manager.IsBurstTick(2));
+        Assert.False(manager.IsBurstTick(4));
+    }
+
+    [Fact]
+    public void IsBurstTickAgreesWithFilterForObserversIsMidTickDecision()
+    {
+        // IsBurstTick must reflect the SAME convention FilterForObserver uses internally to
+        // gate the mid band (tick % MidTickInterval == 0) — this test pins that agreement so
+        // the two can never silently drift apart.
+        var (manager, grid) = CreateManager();
+        grid.Update("observer", new Vec3(0, 0, 0));
+        grid.Update("mid", new Vec3(200, 0, 0)); // mid band (100-300)
+        var changed = new HashSet<string> { "mid" };
+        var players = new Dictionary<string, Player>();
+
+        for (long tick = 0; tick < 12; tick++)
+        {
+            var visible = manager.FilterForObserver("observer", changed, players, tick);
+            Assert.Equal(manager.IsBurstTick(tick), visible.Contains("mid"));
+        }
+    }
+
+    [Fact]
+    public void IsBurstTickIsFalseWhenMidTickIntervalIsZero()
+    {
+        // Guards the same MidTickInterval > 0 check FilterForObserver uses — a misconfigured
+        // 0 interval must never crash with a divide-by-zero, and must never claim every tick
+        // is a burst tick.
+        var options = new ReplicationOptions { MidTickInterval = 0 };
+        var (manager, _) = CreateManager(options);
+
+        Assert.False(manager.IsBurstTick(0));
+        Assert.False(manager.IsBurstTick(4));
+    }
+
     // ── ReplicationOptions.FromConfiguration ──
 
     [Fact]
@@ -480,5 +541,41 @@ public class InterestManagerTests
         var options = ReplicationOptions.FromConfiguration(config);
 
         Assert.True(options.AdaptiveDegrade);
+    }
+
+    [Fact]
+    public void ConfigurationDefaultsUdpSocketsToTodaysSingleSocketBehavior()
+    {
+        // UdpSockets=1 — the single bound receive socket also sends, exactly as before
+        // Replication:UdpSockets existed. See also SendWorkers/BroadcastDeadlineMs/
+        // AdaptiveDegrade above for the same "default preserves current behavior" contract.
+        var config = new ConfigurationBuilder().Build();
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(1, options.UdpSockets);
+    }
+
+    [Fact]
+    public void ConfigurationReadsUdpSockets()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:UdpSockets"] = "4" })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(4, options.UdpSockets);
+    }
+
+    [Fact]
+    public void ConfigurationReadsUdpSocketsZeroAsAuto()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:UdpSockets"] = "0" })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(0, options.UdpSockets); // resolved to an effective count by SendFanOut.ResolveUdpSocketCount
     }
 }

@@ -40,12 +40,16 @@ namespace Game.Gateway.WebSocket;
 /// per-send try/catch + SessionManager's stale-session cleanup reaps the aborted sessions.
 ///
 /// Adaptive degrade (Replication:AdaptiveDegrade, default false — ADR-0011 "reduce
-/// frequency before dropping"): stateless beyond the PREVIOUS broadcast's wall-clock time
-/// (tracked here, self-measured — the same interval TickLoop measures around this whole
-/// call, since nothing else runs between them). If that exceeded the 50ms tick budget, this
-/// tick suppresses the mid band (tiered policy, via InterestManager) or every other
-/// session in rotated order (radius/full, which have no mid band) — a one-tick halving
-/// that lifts the instant a broadcast fits again.
+/// frequency before dropping"), v2 (burst-aligned, see AdaptiveDegrade class doc for why v1
+/// mistimed tiered): for the tiered policy, suppression is decided from the LAST BURST
+/// TICK's broadcast wall time (<see cref="_lastBurstBroadcastWallMs"/>, updated only on
+/// ticks where InterestManager.IsBurstTick is true) and only ever applies on the CURRENT
+/// tick if it is itself a burst tick — see AdaptiveDegrade.ShouldSuppressMidBand. Radius/full
+/// (no mid band) keep the v1 next-tick-aligned alternating-skip rule, driven by
+/// <see cref="_lastBroadcastWallMs"/> (every tick's own wall time, as before). Both trackers
+/// are self-measured — the same interval TickLoop measures around this whole call, since
+/// nothing else runs between them — and both lift the instant the relevant broadcast fits
+/// inside budget again: no cooldown, no hysteresis.
 /// </summary>
 public class TickBroadcaster : ITickBroadcaster
 {
@@ -60,7 +64,15 @@ public class TickBroadcaster : ITickBroadcaster
 
     // Mutable, but only ever touched from the tick loop's sequential flow — BroadcastTickAsync
     // calls never overlap (TickLoop awaits each one before starting the next), so no locking.
+    // v1 tracker: every tick's own broadcast wall time — still drives radius/full's alternating
+    // skip (see AdaptiveDegrade.ShouldDegrade / ShouldSkipAlternating).
     private double _lastBroadcastWallMs;
+
+    // v2 tracker (phase 3a): the wall time of the LAST tick that was itself a burst tick (see
+    // InterestManager.IsBurstTick) — updated ONLY on burst ticks, so an overrun on an
+    // intervening non-burst tick can never leak into the next burst tick's suppress decision.
+    // Drives the tiered policy's mid-band suppression (see AdaptiveDegrade.ShouldSuppressMidBand).
+    private double _lastBurstBroadcastWallMs;
 
     public TickBroadcaster(
         SessionManager sessions,
@@ -83,10 +95,17 @@ public class TickBroadcaster : ITickBroadcaster
         _adaptiveDegrade = replicationOptions.AdaptiveDegrade;
         _metrics?.SetSendWorkers(_sendWorkers);
 
+        // Phase 3a: UdpTransport resolves its own effective socket count at construction time
+        // (pure config + processor-count math — see UdpTransport.SocketCount), independent of
+        // whether its BackgroundService has started yet, so it's safe to read here. No UDP
+        // transport (e.g. standalone Simulation service) reports 1 — the single-socket default.
+        var udpSockets = _udpTransport?.SocketCount ?? 1;
+        _metrics?.SetUdpSockets(udpSockets);
+
         _logger.LogInformation(
-            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval} sendWorkers={SendWorkers} deadlineMs={DeadlineMs} adaptive={Adaptive}",
+            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval} sendWorkers={SendWorkers} udpSockets={UdpSockets} deadlineMs={DeadlineMs} adaptive={Adaptive}",
             replicationOptions.PolicyName, replicationOptions.NearRadius, replicationOptions.MidRadius, replicationOptions.MidTickInterval,
-            _sendWorkers, _deadlineMs, _adaptiveDegrade);
+            _sendWorkers, udpSockets, _deadlineMs, _adaptiveDegrade);
     }
 
     public async Task BroadcastTickAsync(
@@ -146,13 +165,21 @@ public class TickBroadcaster : ITickBroadcaster
         deadlineCts?.CancelAfter(_deadlineMs);
         var deadlineToken = deadlineCts?.Token ?? CancellationToken.None;
 
-        // Adaptive degrade: decided ONCE for the whole tick, from the PREVIOUS broadcast's
-        // wall time — stateless beyond that one number (see class doc). Off (the default)
-        // is always false here, so suppressMidBand/suppressAlternating below are never true
+        // Adaptive degrade: decided ONCE for the whole tick. Off (the default) leaves both
+        // enabled checks false, so suppressMidBand/suppressAlternating below are never true
         // and every session gets its normal update — zero behavior change.
-        var degraded = AdaptiveDegrade.ShouldDegrade(_adaptiveDegrade, _lastBroadcastWallMs);
-        var suppressMidBand = degraded && _interest.Policy == ReplicationPolicy.Tiered;
-        var suppressAlternating = degraded && _interest.Policy != ReplicationPolicy.Tiered;
+        //
+        // v1 (radius/full, no mid band): stateless beyond the PREVIOUS tick's own wall time.
+        var isTiered = _interest.Policy == ReplicationPolicy.Tiered;
+        var suppressAlternating = !isTiered && AdaptiveDegrade.ShouldDegrade(_adaptiveDegrade, _lastBroadcastWallMs);
+
+        // v2 (tiered, burst-aligned): stateless beyond the LAST BURST TICK's wall time —
+        // suppression only ever applies when THIS tick is itself a burst tick (see
+        // AdaptiveDegrade class doc for why v1's next-tick alignment mistimed tiered).
+        var isBurstTick = _interest.IsBurstTick(tick);
+        var suppressMidBand = isTiered && AdaptiveDegrade.ShouldSuppressMidBand(_adaptiveDegrade, isBurstTick, _lastBurstBroadcastWallMs);
+
+        var degraded = suppressMidBand || suppressAlternating;
 
         foreach (var regionId in regionIds)
         {
@@ -177,11 +204,13 @@ public class TickBroadcaster : ITickBroadcaster
 
             if (_sendWorkers <= 1)
             {
-                // Default: exactly today's serial behavior, no Task/array overhead.
+                // Default: exactly today's serial behavior, no Task/array overhead. Chunk
+                // index 0 — with UdpSockets resolving to 1 (its own default), this always
+                // picks the one bound socket, same as before phase 3a existed.
                 var acc = new SendAccumulator();
                 var (start, length) = chunks[0];
                 await SendChunkAsync(
-                    sessions, offset, start, length,
+                    sessions, offset, start, length, chunkIndex: 0,
                     regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
                     tick, stateHash, deadlineToken, suppressMidBand, suppressAlternating, acc);
                 interestElapsed += acc.InterestTicks;
@@ -199,7 +228,7 @@ public class TickBroadcaster : ITickBroadcaster
                     var (start, length) = chunks[i];
                     accumulators[i] = new SendAccumulator();
                     tasks[i] = SendChunkAsync(
-                        sessions, offset, start, length,
+                        sessions, offset, start, length, chunkIndex: i,
                         regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
                         tick, stateHash, deadlineToken, suppressMidBand, suppressAlternating, accumulators[i]);
                 }
@@ -218,11 +247,13 @@ public class TickBroadcaster : ITickBroadcaster
         }
 
         // Broadcast WALL time — measured here around the whole call, NOT summed across worker
-        // chunks — is the tick-budget truth (the same interval TickLoop measures) and feeds
-        // the NEXT tick's adaptive-degrade decision. Deliberately recorded even when
-        // AdaptiveDegrade is off, so flipping it on mid-run has a real previous value to work
-        // from immediately rather than a cold-start 0.
-        _lastBroadcastWallMs = Stopwatch.GetElapsedTime(wallStart).TotalMilliseconds;
+        // chunks — is the tick-budget truth (the same interval TickLoop measures). Deliberately
+        // recorded even when AdaptiveDegrade is off, so flipping it on mid-run has a real
+        // previous value to work from immediately rather than a cold-start 0.
+        var wallMs = Stopwatch.GetElapsedTime(wallStart).TotalMilliseconds;
+        _lastBroadcastWallMs = wallMs; // v1 tracker — feeds radius/full's NEXT-tick decision.
+        if (isBurstTick)
+            _lastBurstBroadcastWallMs = wallMs; // v2 tracker — updated ONLY on burst ticks.
 
         _metrics?.RecordBroadcastPhases(
             Stopwatch.GetElapsedTime(0, interestElapsed).TotalMilliseconds,
@@ -259,12 +290,16 @@ public class TickBroadcaster : ITickBroadcaster
     /// against other chunks of the SAME sessions list because rotation+chunking guarantees a
     /// session appears in exactly one chunk per tick — WebSocket.SendAsync allows only one
     /// outstanding send per socket, but concurrent sends to DIFFERENT sockets are safe.
+    /// <paramref name="chunkIndex"/> is this chunk's position among the tick's chunks (0 for
+    /// the serial SendWorkers&lt;=1 path) — passed through to UdpTransport.TrySend so phase 3a's
+    /// UdpSockets experiment can pick a per-chunk send socket deterministically.
     /// </summary>
     private async Task SendChunkAsync(
         IReadOnlyList<GameSession> sessions,
         int rotationOffset,
         int chunkStart,
         int chunkLength,
+        int chunkIndex,
         HashSet<string> regionPlayerChanges,
         HashSet<string> regionResourceChanges,
         Dictionary<string, (string RegionId, Player Player)> playerData,
@@ -310,7 +345,7 @@ public class TickBroadcaster : ITickBroadcaster
                 {
                     if (isBinary)
                     {
-                        if (!TrySendUdpEntityUpdate(session, playerId, data.Player, tick, stateHash))
+                        if (!TrySendUdpEntityUpdate(session, playerId, data.Player, tick, stateHash, chunkIndex))
                             await SendBinaryEntityUpdate(session, playerId, data.Player, tick, stateHash, deadlineToken);
                     }
                     else
@@ -371,7 +406,7 @@ public class TickBroadcaster : ITickBroadcaster
     }
 
     private bool TrySendUdpEntityUpdate(
-        GameSession session, string entityId, Player player, long tick, uint stateHash)
+        GameSession session, string entityId, Player player, long tick, uint stateHash, int chunkIndex)
     {
         if (_udpTransport == null || session.UdpEndpoint == null)
         {
@@ -397,8 +432,10 @@ public class TickBroadcaster : ITickBroadcaster
             payloadBuf[..payloadLen]);
 
         // On success TrySend records RecordDelivery("udp"); on failure the caller
-        // falls back to a WebSocket send which records its own delivery path.
-        return _udpTransport.TrySend(session, frameBuf);
+        // falls back to a WebSocket send which records its own delivery path. chunkIndex
+        // picks this tick's deterministic send socket under the UdpSockets experiment
+        // (see UdpTransport.TrySend) — a no-op selector when UdpSockets resolves to 1.
+        return _udpTransport.TrySend(session, frameBuf, chunkIndex);
     }
 
     private static async Task SendBinaryEntityUpdate(
