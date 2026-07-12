@@ -30,6 +30,14 @@ namespace Game.Gateway.WebSocket;
 /// session appears in exactly one chunk per tick, so per-socket send serialization
 /// (WebSocket.SendAsync allows only one outstanding send per socket) is preserved even
 /// though chunks run concurrently.
+///
+/// Deadline shedding (Replication:BroadcastDeadlineMs, default 0/off): one
+/// CancellationTokenSource per broadcast call, shared by every send this tick. A session
+/// whose send is still in flight (or hasn't started) when the deadline fires gets
+/// OperationCanceledException, its socket is Abort()'d (a mid-frame cancel corrupts the WS
+/// stream — never keep using it) and counted, and the loop moves on: the tick must end
+/// within budget even if that means shedding the slowest sessions this tick. The existing
+/// per-send try/catch + SessionManager's stale-session cleanup reaps the aborted sessions.
 /// </summary>
 public class TickBroadcaster : ITickBroadcaster
 {
@@ -39,6 +47,7 @@ public class TickBroadcaster : ITickBroadcaster
     private readonly ILogger<TickBroadcaster> _logger;
     private readonly TickMetrics? _metrics;
     private readonly int _sendWorkers;
+    private readonly int _deadlineMs;
 
     public TickBroadcaster(
         SessionManager sessions,
@@ -57,11 +66,12 @@ public class TickBroadcaster : ITickBroadcaster
         _metrics?.SetReplicationPolicy(replicationOptions.PolicyName);
 
         _sendWorkers = SendFanOut.ResolveWorkerCount(replicationOptions.SendWorkers, Environment.ProcessorCount);
+        _deadlineMs = replicationOptions.BroadcastDeadlineMs;
 
         _logger.LogInformation(
-            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval} sendWorkers={SendWorkers}",
+            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval} sendWorkers={SendWorkers} deadlineMs={DeadlineMs}",
             replicationOptions.PolicyName, replicationOptions.NearRadius, replicationOptions.MidRadius, replicationOptions.MidTickInterval,
-            _sendWorkers);
+            _sendWorkers, _deadlineMs);
     }
 
     public async Task BroadcastTickAsync(
@@ -111,6 +121,14 @@ public class TickBroadcaster : ITickBroadcaster
         // broadcasts are out of policy scope (region-wide, always sent) and excluded here.
         long entitiesSent = 0, entitiesCulled = 0;
 
+        // Deadline shedding: off (the default) means no CTS at all, so every send below runs
+        // with CancellationToken.None — zero behavior change from before this feature. UDP
+        // sends are sync (TrySendUdpEntityUpdate) and unaffected either way.
+        var deadlineAborts = 0;
+        using var deadlineCts = BroadcastDeadline.IsEnabled(_deadlineMs) ? new CancellationTokenSource() : null;
+        deadlineCts?.CancelAfter(_deadlineMs);
+        var deadlineToken = deadlineCts?.Token ?? CancellationToken.None;
+
         foreach (var regionId in regionIds)
         {
             var sessions = _sessions.GetByRegion(regionId).ToList();
@@ -140,11 +158,12 @@ public class TickBroadcaster : ITickBroadcaster
                 await SendChunkAsync(
                     sessions, offset, start, length,
                     regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
-                    tick, stateHash, acc);
+                    tick, stateHash, deadlineToken, acc);
                 interestElapsed += acc.InterestTicks;
                 sendElapsed += acc.SendTicks;
                 entitiesSent += acc.Sent;
                 entitiesCulled += acc.Culled;
+                deadlineAborts += acc.Aborts;
             }
             else
             {
@@ -157,7 +176,7 @@ public class TickBroadcaster : ITickBroadcaster
                     tasks[i] = SendChunkAsync(
                         sessions, offset, start, length,
                         regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
-                        tick, stateHash, accumulators[i]);
+                        tick, stateHash, deadlineToken, accumulators[i]);
                 }
 
                 await Task.WhenAll(tasks);
@@ -168,6 +187,7 @@ public class TickBroadcaster : ITickBroadcaster
                     sendElapsed += acc.SendTicks;
                     entitiesSent += acc.Sent;
                     entitiesCulled += acc.Culled;
+                    deadlineAborts += acc.Aborts;
                 }
             }
         }
@@ -176,6 +196,9 @@ public class TickBroadcaster : ITickBroadcaster
             Stopwatch.GetElapsedTime(0, interestElapsed).TotalMilliseconds,
             Stopwatch.GetElapsedTime(0, sendElapsed).TotalMilliseconds);
         _metrics?.RecordReplication(entitiesSent, entitiesCulled);
+        // deadlineAborts is folded into TickMetrics' replication window (see RecordDeadlineAborts).
+        if (deadlineAborts > 0)
+            _logger.LogDebug("Broadcast deadline shed {Aborts} session(s) this tick (tick {Tick})", deadlineAborts, tick);
     }
 
     /// <summary>
@@ -189,6 +212,7 @@ public class TickBroadcaster : ITickBroadcaster
         public long SendTicks;
         public long Sent;
         public long Culled;
+        public int Aborts;
     }
 
     /// <summary>
@@ -210,6 +234,7 @@ public class TickBroadcaster : ITickBroadcaster
         IReadOnlyDictionary<string, Player> players,
         long tick,
         uint stateHash,
+        CancellationToken deadlineToken,
         SendAccumulator acc)
     {
         for (var i = 0; i < chunkLength; i++)
@@ -230,6 +255,7 @@ public class TickBroadcaster : ITickBroadcaster
             acc.Culled += regionPlayerChanges.Count - visiblePlayers.Count;
 
             var tSend = Stopwatch.GetTimestamp();
+            var aborted = false;
             foreach (var playerId in visiblePlayers)
             {
                 if (!playerData.TryGetValue(playerId, out var data)) continue;
@@ -238,32 +264,63 @@ public class TickBroadcaster : ITickBroadcaster
                     if (isBinary)
                     {
                         if (!TrySendUdpEntityUpdate(session, playerId, data.Player, tick, stateHash))
-                            await SendBinaryEntityUpdate(session, playerId, data.Player, tick, stateHash);
+                            await SendBinaryEntityUpdate(session, playerId, data.Player, tick, stateHash, deadlineToken);
                     }
                     else
                     {
-                        await SendJsonEntityUpdate(session, playerId, data.Player, tick, stateHash);
+                        await SendJsonEntityUpdate(session, playerId, data.Player, tick, stateHash, deadlineToken);
                     }
+                }
+                catch (OperationCanceledException) when (deadlineToken.IsCancellationRequested)
+                {
+                    // Broadcast deadline fired mid-send — a canceled WS send corrupts the
+                    // stream, so this socket can never be used again this tick (or ever).
+                    // Abort it, count it, and move on: the tick must end.
+                    AbortSession(session, acc);
+                    aborted = true;
+                    break;
                 }
                 catch (Exception ex) { _logger.LogWarning(ex, "Failed to send player update"); }
             }
 
             // --- Resource Updates (Nature 2.0) ---
             // For now, simpler AoI for resources: everyone in region gets them if they change (trees are big)
-            foreach (var resourceId in regionResourceChanges)
+            if (!aborted)
             {
-                if (!resourceData.TryGetValue(resourceId, out var data)) continue;
-                try
+                foreach (var resourceId in regionResourceChanges)
                 {
-                    if (!isBinary) // Binary path for resources can be added later if needed
+                    if (!resourceData.TryGetValue(resourceId, out var data)) continue;
+                    try
                     {
-                        await SendJsonNaturalResourceUpdate(session, resourceId, data.Resource, tick, stateHash);
+                        if (!isBinary) // Binary path for resources can be added later if needed
+                        {
+                            await SendJsonNaturalResourceUpdate(session, resourceId, data.Resource, tick, stateHash, deadlineToken);
+                        }
                     }
+                    catch (OperationCanceledException) when (deadlineToken.IsCancellationRequested)
+                    {
+                        AbortSession(session, acc);
+                        break;
+                    }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to send resource update"); }
                 }
-                catch (Exception ex) { _logger.LogWarning(ex, "Failed to send resource update"); }
             }
             acc.SendTicks += Stopwatch.GetTimestamp() - tSend;
         }
+    }
+
+    /// <summary>
+    /// Broadcast deadline exceeded mid-send for this session: the WS stream is corrupted
+    /// (SendAsync doesn't support a clean retry after cancellation), so abort the socket
+    /// outright rather than try to keep using it. The existing session cleanup path (stale
+    /// socket state checks) reaps it; the client reconnects.
+    /// </summary>
+    private void AbortSession(GameSession session, SendAccumulator acc)
+    {
+        try { session.Socket.Abort(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Abort() on an already-faulted socket — ignoring"); }
+        acc.Aborts++;
+        _logger.LogDebug("Aborted session {SessionId} — broadcast deadline exceeded mid-send", session.SessionId);
     }
 
     private bool TrySendUdpEntityUpdate(
@@ -298,7 +355,7 @@ public class TickBroadcaster : ITickBroadcaster
     }
 
     private static async Task SendBinaryEntityUpdate(
-        GameSession session, string entityId, Player player, long tick, uint stateHash)
+        GameSession session, string entityId, Player player, long tick, uint stateHash, CancellationToken ct)
     {
         // Serialize payload
         Span<byte> payloadBuf = stackalloc byte[128];
@@ -322,13 +379,13 @@ public class TickBroadcaster : ITickBroadcaster
             frameBuf[..frameLen].ToArray(),
             WebSocketMessageType.Binary,
             true,
-            CancellationToken.None);
+            ct);
 
         LumberjacksTelemetry.RecordDelivery("binary_ws");
     }
 
     private static async Task SendJsonEntityUpdate(
-        GameSession session, string entityId, Player player, long tick, uint stateHash)
+        GameSession session, string entityId, Player player, long tick, uint stateHash, CancellationToken ct)
     {
         var updateData = new
         {
@@ -352,13 +409,13 @@ public class TickBroadcaster : ITickBroadcaster
             Encoding.UTF8.GetBytes(json),
             WebSocketMessageType.Text,
             true,
-            CancellationToken.None);
+            ct);
 
         LumberjacksTelemetry.RecordDelivery("json_ws");
     }
 
     private static async Task SendJsonNaturalResourceUpdate(
-        GameSession session, string resourceId, NaturalResource resource, long tick, uint stateHash)
+        GameSession session, string resourceId, NaturalResource resource, long tick, uint stateHash, CancellationToken ct)
     {
         var updateData = new
         {
@@ -384,6 +441,6 @@ public class TickBroadcaster : ITickBroadcaster
             Encoding.UTF8.GetBytes(json),
             WebSocketMessageType.Text,
             true,
-            CancellationToken.None);
+            ct);
     }
 }

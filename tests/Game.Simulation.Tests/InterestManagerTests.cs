@@ -380,4 +380,25 @@ public class InterestManagerTests
         Assert.Equal(150.0, options.MidRadius);
         Assert.Equal(8, options.MidTickInterval);
     }
+
+    [Fact]
+    public void ConfigurationDefaultsBroadcastDeadlineToOff()
+    {
+        var config = new ConfigurationBuilder().Build();
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(0, options.BroadcastDeadlineMs);
+    }
+
+    [Fact]
+    public void ConfigurationReadsBroadcastDeadlineMs()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:BroadcastDeadlineMs"] = "100" })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(100, options.BroadcastDeadlineMs);
+    }
 }

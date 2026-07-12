@@ -25,8 +25,8 @@ public enum ReplicationPolicy
 /// (matching the <c>Udp:Port</c> / <c>Udp__Port</c> pattern used by <c>UdpTransport</c>).
 ///
 /// Env vars: Replication__Policy, Replication__NearRadius, Replication__MidRadius,
-/// Replication__MidTickInterval, Replication__SendWorkers (send-loop rework, phase 2 —
-/// see TickBroadcaster).
+/// Replication__MidTickInterval, Replication__SendWorkers, Replication__BroadcastDeadlineMs
+/// (send-loop rework, phase 2 — see TickBroadcaster).
 /// </summary>
 public sealed record ReplicationOptions
 {
@@ -34,6 +34,7 @@ public sealed record ReplicationOptions
     public const double DefaultMidRadius = 300.0;
     public const int DefaultMidTickInterval = 4;
     public const int DefaultSendWorkers = 1;
+    public const int DefaultBroadcastDeadlineMs = 0;
 
     public ReplicationPolicy Policy { get; init; } = ReplicationPolicy.Tiered;
     public double NearRadius { get; init; } = DefaultNearRadius;
@@ -46,6 +47,13 @@ public sealed record ReplicationOptions
     /// session snapshot into N contiguous chunks and fan them out as concurrent tasks.
     /// </summary>
     public int SendWorkers { get; init; } = DefaultSendWorkers;
+
+    /// <summary>
+    /// Per-broadcast deadline in milliseconds. 0 (default) = off — no CancellationTokenSource,
+    /// no behavior change. &gt;0 = sessions whose send hasn't completed by the deadline are
+    /// aborted so the tick can end (see <see cref="Game.Simulation.Tick.BroadcastDeadline"/>).
+    /// </summary>
+    public int BroadcastDeadlineMs { get; init; } = DefaultBroadcastDeadlineMs;
 
     /// <summary>Lowercase policy name, for logging and metrics tagging.</summary>
     public string PolicyName => Policy switch
@@ -72,6 +80,7 @@ public sealed record ReplicationOptions
             MidRadius = config.GetValue("Replication:MidRadius", DefaultMidRadius),
             MidTickInterval = config.GetValue("Replication:MidTickInterval", DefaultMidTickInterval),
             SendWorkers = config.GetValue("Replication:SendWorkers", DefaultSendWorkers),
+            BroadcastDeadlineMs = config.GetValue("Replication:BroadcastDeadlineMs", DefaultBroadcastDeadlineMs),
         };
     }
 }
