@@ -46,6 +46,7 @@ public class UdpTransport : BackgroundService
     private readonly ILogger<UdpTransport> _logger;
     private readonly int _port;
     private readonly int _socketCount;
+    private readonly object[] _sendLocks;
     private UdpClient? _client;
     private UdpClient[]? _sendClients;
 
@@ -74,6 +75,14 @@ public class UdpTransport : BackgroundService
         var replicationOptions = ReplicationOptions.FromConfiguration(config);
         var resolvedSendWorkers = SendFanOut.ResolveWorkerCount(replicationOptions.SendWorkers, Environment.ProcessorCount);
         _socketCount = SendFanOut.ResolveUdpSocketCount(replicationOptions.UdpSockets, resolvedSendWorkers);
+
+        // Phase 3a′: one lock per resolved socket, built here (pure config math, same as
+        // _socketCount) rather than in ExecuteAsync, so TrySend can rely on it even if called
+        // before the BackgroundService has started (it already no-ops safely in that case via
+        // the _client == null check below). See TrySend for why this lock exists.
+        _sendLocks = new object[_socketCount];
+        for (var i = 0; i < _sendLocks.Length; i++)
+            _sendLocks[i] = new object();
     }
 
     // SIO_UDP_CONNRESET: suppress the Windows-only quirk where a prior send that
@@ -200,9 +209,13 @@ public class UdpTransport : BackgroundService
     /// <param name="chunkIndex">
     /// Phase 3a: the caller's (TickBroadcaster's) worker-chunk index for this tick. Maps
     /// deterministically to a send socket via <see cref="SendFanOut.SocketForChunk"/> — every
-    /// call for the same chunk within a tick lands on the same socket, and different chunks
-    /// never share a socket concurrently. Ignored (always socket 0 — this bound socket) when
-    /// UdpSockets resolves to 1, the default, so serial callers can omit it entirely.
+    /// call for the same chunk within a tick lands on the same socket, and by construction
+    /// (UdpSockets auto-resolving to at least SendWorkers) different concurrently-running
+    /// chunks land on different sockets. Phase 3a′ adds a per-socket lock in the body below as
+    /// a defensive backstop for the case where UdpSockets is explicitly pinned below
+    /// SendWorkers, so this guarantee no longer needs to hold for correctness — see the lock's
+    /// comment. Ignored (always socket 0 — this bound socket) when UdpSockets resolves to 1,
+    /// the default, so serial callers can omit it entirely.
     /// </param>
     public bool TrySend(GameSession session, ReadOnlySpan<byte> binaryFrame, int chunkIndex = 0)
     {
@@ -216,10 +229,28 @@ public class UdpTransport : BackgroundService
             BitConverter.TryWriteBytes(packet.AsSpan(0, TokenBytes), session.UdpToken);
             binaryFrame.CopyTo(packet.AsSpan(TokenBytes));
 
-            var client = _sendClients is { Length: > 0 } clients
-                ? clients[SendFanOut.SocketForChunk(chunkIndex, clients.Length)]
-                : _client;
-            client.Send(packet, packet.Length, session.UdpEndpoint);
+            var socketIndex = _sendClients is { Length: > 0 } clients0
+                ? SendFanOut.SocketForChunk(chunkIndex, clients0.Length)
+                : 0;
+            var client = _sendClients is { Length: > 0 } clients ? clients[socketIndex] : _client;
+
+            // Phase 3a′ defensive lock: with TickBroadcaster's SendWorkers>1 path now
+            // genuinely running chunks concurrently on distinct thread-pool threads (see
+            // TickBroadcaster class doc), a per-socket lock is required here because
+            // Socket.Send is NOT documented as safe for concurrent calls on the same handle.
+            // In the safe/default configuration this lock is uncontended: UdpSockets
+            // auto-resolves to (at least) the resolved SendWorkers count (see
+            // SendFanOut.ResolveUdpSocketCount), and SendFanOut.SocketForChunk gives every
+            // concurrently-running chunk index a DISTINCT socket when socketCount >=
+            // workers — so two threads never contend for the same lock in practice. This
+            // lock exists purely as a foot-gun guard for a misconfigured deployment that
+            // pins Replication:UdpSockets below Replication:SendWorkers, where two worker
+            // chunks legitimately map to the same socket index and would otherwise call
+            // Send concurrently on it. Cost: one uncontended monitor enter/exit per send.
+            lock (_sendLocks[socketIndex])
+            {
+                client!.Send(packet, packet.Length, session.UdpEndpoint);
+            }
             LumberjacksTelemetry.RecordDelivery("udp");
             return true;
         }

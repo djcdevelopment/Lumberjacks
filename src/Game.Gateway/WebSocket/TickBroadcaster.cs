@@ -31,6 +31,14 @@ namespace Game.Gateway.WebSocket;
 /// (WebSocket.SendAsync allows only one outstanding send per socket) is preserved even
 /// though chunks run concurrently.
 ///
+/// Phase 3a′ (Follow-up F): SendWorkers&gt;1 chunks are dispatched via
+/// Parallel.ForEachAsync(MaxDegreeOfParallelism = SendWorkers) instead of an inline
+/// async-method-call + Task.WhenAll, so they genuinely run on distinct thread-pool threads
+/// — the original shape looked parallel but every chunk's awaits completed synchronously
+/// (sync UDP Send, inline-completing small-frame LAN WS sends), so it ran inline-serial on
+/// the tick thread. SendWorkers&lt;=1 (the default) is untouched: still the exact original
+/// direct `await` on chunk 0, no Task/Parallel overhead at all.
+///
 /// Deadline shedding (Replication:BroadcastDeadlineMs, default 0/off): one
 /// CancellationTokenSource per broadcast call, shared by every send this tick. A session
 /// whose send is still in flight (or hasn't started) when the deadline fires gets
@@ -221,19 +229,43 @@ public class TickBroadcaster : ITickBroadcaster
             }
             else
             {
+                // Phase 3a′ (Follow-up F): directly invoking the async SendChunkAsync method
+                // N times and Task.WhenAll'ing the results LOOKED parallel but wasn't — UDP
+                // Socket.Send is synchronous and small-frame WS SendAsync completes inline on
+                // LAN, so every await inside SendChunkAsync returned an already-completed
+                // Task and every chunk ran inline-serial on the calling (tick) thread. Measured
+                // proof: broadcast wall ~= interest+send summed across workers (send:wall ratio
+                // ~0.9) with ~3/24 cores busy while p99 blew budget.
+                //
+                // Parallel.ForEachAsync(dop=_sendWorkers) fixes this: it spins up
+                // MaxDegreeOfParallelism worker loops via Task.Run (always queues to the thread
+                // pool, never runs inline), each pulling chunks from the shared source. Since
+                // Chunk() always returns exactly _sendWorkers chunks, this is a 1:1
+                // chunk-to-pool-thread mapping — the CPU-bound per-entity serialization now
+                // actually runs concurrently across idle cores instead of queueing behind
+                // itself on one thread.
+                //
+                // ParallelOptions.CancellationToken is deliberately left unset (default/none).
+                // The broadcast deadline still flows in as deadlineToken, passed straight
+                // through to SendChunkAsync exactly as in the serial path — each chunk catches
+                // OperationCanceledException per-send and keeps going (see SendChunkAsync).
+                // Wiring deadlineToken into ParallelOptions too would make Parallel.ForEachAsync
+                // itself throw and unwind the whole fan-out the instant the deadline fires,
+                // instead of letting each chunk shed its own slow sessions independently.
                 var accumulators = new SendAccumulator[chunks.Count];
-                var tasks = new Task[chunks.Count];
-                for (var i = 0; i < chunks.Count; i++)
-                {
-                    var (start, length) = chunks[i];
-                    accumulators[i] = new SendAccumulator();
-                    tasks[i] = SendChunkAsync(
-                        sessions, offset, start, length, chunkIndex: i,
-                        regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
-                        tick, stateHash, deadlineToken, suppressMidBand, suppressAlternating, accumulators[i]);
-                }
-
-                await Task.WhenAll(tasks);
+                await Parallel.ForEachAsync(
+                    Enumerable.Range(0, chunks.Count),
+                    new ParallelOptions { MaxDegreeOfParallelism = _sendWorkers },
+                    async (i, _) =>
+                    {
+                        var (start, length) = chunks[i];
+                        var acc = new SendAccumulator();
+                        accumulators[i] = acc;
+                        await SendChunkAsync(
+                            sessions, offset, start, length, chunkIndex: i,
+                            regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
+                            tick, stateHash, deadlineToken, suppressMidBand, suppressAlternating, acc);
+                    });
 
                 foreach (var acc in accumulators)
                 {
