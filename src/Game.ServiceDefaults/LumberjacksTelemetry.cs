@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
@@ -5,6 +6,10 @@ namespace Game.ServiceDefaults;
 
 public static class LumberjacksTelemetry
 {
+    // In-process tallies alongside the OTel counters, so the Gateway can expose
+    // live-metrics endpoints without a Cloud Monitoring round-trip.
+    private static readonly ConcurrentDictionary<string, long> DeliveryTally = new();
+    private static readonly ConcurrentDictionary<string, long> TransitionTally = new();
     public const string ActivitySourceName = "Lumberjacks.Gameplay";
     public const string MeterName = "Lumberjacks.Gameplay";
 
@@ -46,20 +51,34 @@ public static class LumberjacksTelemetry
     public static void SessionCreated(bool resumed)
     {
         ActiveSessions.Add(1);
-        SessionTransitions.Add(1, new KeyValuePair<string, object?>("transition", resumed ? "resumed" : "created"));
+        var transition = resumed ? "resumed" : "created";
+        SessionTransitions.Add(1, new KeyValuePair<string, object?>("transition", transition));
+        TransitionTally.AddOrUpdate(transition, 1, (_, v) => v + 1);
     }
 
     public static void SessionDetached()
     {
         ActiveSessions.Add(-1);
         SessionTransitions.Add(1, new KeyValuePair<string, object?>("transition", "detached"));
+        TransitionTally.AddOrUpdate("detached", 1, (_, v) => v + 1);
     }
 
     public static void RecordUdpPacket(string outcome) =>
         UdpPackets.Add(1, new KeyValuePair<string, object?>("outcome", outcome));
 
-    public static void RecordDelivery(string path) =>
+    public static void RecordDelivery(string path)
+    {
         Delivery.Add(1, new KeyValuePair<string, object?>("path", path));
+        DeliveryTally.AddOrUpdate(path, 1, (_, v) => v + 1);
+    }
+
+    /// <summary>Point-in-time copy of delivery-path counts, keyed by path label.</summary>
+    public static IReadOnlyDictionary<string, long> SnapshotDelivery() =>
+        new Dictionary<string, long>(DeliveryTally);
+
+    /// <summary>Point-in-time copy of session transition counts (created/resumed/detached).</summary>
+    public static IReadOnlyDictionary<string, long> SnapshotTransitions() =>
+        new Dictionary<string, long>(TransitionTally);
 
     public static void RecordTick(TimeSpan duration, int changedPlayers, int changedResources)
     {

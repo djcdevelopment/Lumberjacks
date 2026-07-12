@@ -128,7 +128,8 @@ public class TickBroadcaster : ITickBroadcaster
     {
         if (_udpTransport == null || session.UdpEndpoint == null)
         {
-            LumberjacksTelemetry.RecordDelivery("websocket_fallback");
+            // No UDP channel bound — caller falls back to a WebSocket send,
+            // which records the actual delivery path (binary_ws / json_ws).
             return false;
         }
 
@@ -148,10 +149,9 @@ public class TickBroadcaster : ITickBroadcaster
             seq: 0,
             payloadBuf[..payloadLen]);
 
-        var sent = _udpTransport.TrySend(session, frameBuf);
-        if (!sent)
-            LumberjacksTelemetry.RecordDelivery("websocket_fallback");
-        return sent;
+        // On success TrySend records RecordDelivery("udp"); on failure the caller
+        // falls back to a WebSocket send which records its own delivery path.
+        return _udpTransport.TrySend(session, frameBuf);
     }
 
     private static async Task SendBinaryEntityUpdate(
@@ -180,6 +180,8 @@ public class TickBroadcaster : ITickBroadcaster
             WebSocketMessageType.Binary,
             true,
             CancellationToken.None);
+
+        LumberjacksTelemetry.RecordDelivery("binary_ws");
     }
 
     private static async Task SendJsonEntityUpdate(
@@ -208,6 +210,8 @@ public class TickBroadcaster : ITickBroadcaster
             WebSocketMessageType.Text,
             true,
             CancellationToken.None);
+
+        LumberjacksTelemetry.RecordDelivery("json_ws");
     }
 
     private static async Task SendJsonNaturalResourceUpdate(

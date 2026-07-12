@@ -66,6 +66,26 @@ public static class ProxyEndpoints
             return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
         });
 
+        // Live transport distribution (proxied from Gateway's in-process telemetry)
+        app.MapGet("/api/transport", async (IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Gateway"] ?? "http://localhost:4000";
+            var client = httpFactory.CreateClient();
+            var response = await client.GetAsync($"{url}/live/transport");
+            var content = await response.Content.ReadAsStringAsync();
+            return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
+        });
+
+        // Live session transitions (proxied from Gateway's in-process telemetry)
+        app.MapGet("/api/sessions", async (IHttpClientFactory httpFactory, IConfiguration config) =>
+        {
+            var url = config["ServiceUrls:Gateway"] ?? "http://localhost:4000";
+            var client = httpFactory.CreateClient();
+            var response = await client.GetAsync($"{url}/live/sessions");
+            var content = await response.Content.ReadAsStringAsync();
+            return Results.Content(content, "application/json", statusCode: (int)response.StatusCode);
+        });
+
         // Create region (proxied to Gateway's in-process simulation)
         app.MapPost("/api/regions", async (HttpContext context, IHttpClientFactory httpFactory, IConfiguration config) =>
         {

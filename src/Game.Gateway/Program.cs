@@ -74,6 +74,7 @@ Game.Simulation.Endpoints.PlayerEndpoints.Map(app);
 Game.Simulation.Endpoints.StructureEndpoints.Map(app);
 Game.Simulation.Endpoints.InventoryEndpoints.Map(app);
 Game.Simulation.Endpoints.TickEndpoints.Map(app);
+Game.Gateway.Endpoints.LiveMetricsEndpoints.Map(app);
 ValheimPriorityManifestEndpoints.Map(app);
 ValheimZdoRedirectEndpoints.Map(app);
 ValheimZdoInjectionEndpoints.Map(app);
