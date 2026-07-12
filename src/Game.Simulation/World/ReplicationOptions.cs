@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Configuration;
 
 namespace Game.Simulation.World;
@@ -71,25 +72,91 @@ public sealed record ReplicationOptions
         _ => "tiered",
     };
 
-    public static ReplicationOptions FromConfiguration(IConfiguration config)
+    /// <summary>
+    /// Builds options from raw configuration, tolerating operator typos. Every key is parsed
+    /// with explicit TryParse-and-fall-back-to-default semantics rather than the raw type-binder
+    /// (<see cref="ConfigurationBinder.GetValue{T}(IConfiguration, string, T)"/>), because the
+    /// binder throws an unhandled <see cref="FormatException"/> on any unparseable value — a
+    /// plausible-but-wrong operator input like <c>AdaptiveDegrade=off</c> or
+    /// <c>SendWorkers=lots</c> hard-crashes the gateway on startup (exit 139) instead of degrading
+    /// to the documented default. See docs/benchmark-host-capacity-2026-07-12.md
+    /// ("Robustness bug found during the rerun").
+    /// </summary>
+    /// <param name="config">Configuration source (env vars / appsettings).</param>
+    /// <param name="onWarning">
+    /// Optional sink for a human-readable warning whenever a key is present but unparseable and
+    /// the default is substituted. Left null in tests; the gateway wires it to its logger.
+    /// </param>
+    public static ReplicationOptions FromConfiguration(IConfiguration config, Action<string>? onWarning = null)
     {
         var policy = (config["Replication:Policy"] ?? "tiered").Trim().ToLowerInvariant() switch
         {
             "full" => ReplicationPolicy.Full,
             "radius" => ReplicationPolicy.Radius,
             "tiered" => ReplicationPolicy.Tiered,
-            _ => ReplicationPolicy.Tiered, // unknown value — fall back to the safe default
+            _ => WarnAndDefault("Replication:Policy", config["Replication:Policy"], ReplicationPolicy.Tiered, onWarning),
         };
 
         return new ReplicationOptions
         {
             Policy = policy,
-            NearRadius = config.GetValue("Replication:NearRadius", DefaultNearRadius),
-            MidRadius = config.GetValue("Replication:MidRadius", DefaultMidRadius),
-            MidTickInterval = config.GetValue("Replication:MidTickInterval", DefaultMidTickInterval),
-            SendWorkers = config.GetValue("Replication:SendWorkers", DefaultSendWorkers),
-            BroadcastDeadlineMs = config.GetValue("Replication:BroadcastDeadlineMs", DefaultBroadcastDeadlineMs),
-            AdaptiveDegrade = config.GetValue("Replication:AdaptiveDegrade", DefaultAdaptiveDegrade),
+            NearRadius = ParseDouble(config, "Replication:NearRadius", DefaultNearRadius, onWarning),
+            MidRadius = ParseDouble(config, "Replication:MidRadius", DefaultMidRadius, onWarning),
+            MidTickInterval = ParseInt(config, "Replication:MidTickInterval", DefaultMidTickInterval, onWarning),
+            SendWorkers = ParseInt(config, "Replication:SendWorkers", DefaultSendWorkers, onWarning),
+            BroadcastDeadlineMs = ParseInt(config, "Replication:BroadcastDeadlineMs", DefaultBroadcastDeadlineMs, onWarning),
+            AdaptiveDegrade = ParseBool(config, "Replication:AdaptiveDegrade", DefaultAdaptiveDegrade, onWarning),
         };
     }
+
+    // ── Tolerant parsers ─────────────────────────────────────────────────────────────────
+    // A missing/blank key silently takes the default (not configured is not an error). A key
+    // that is present but unparseable warns and takes the default — never throws.
+
+    private static int ParseInt(IConfiguration config, string key, int @default, Action<string>? onWarning)
+    {
+        var raw = config[key];
+        if (string.IsNullOrWhiteSpace(raw))
+            return @default;
+        return int.TryParse(raw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : WarnAndDefault(key, raw, @default, onWarning);
+    }
+
+    private static double ParseDouble(IConfiguration config, string key, double @default, Action<string>? onWarning)
+    {
+        var raw = config[key];
+        if (string.IsNullOrWhiteSpace(raw))
+            return @default;
+        return double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : WarnAndDefault(key, raw, @default, onWarning);
+    }
+
+    private static bool ParseBool(IConfiguration config, string key, bool @default, Action<string>? onWarning)
+    {
+        var raw = config[key];
+        if (string.IsNullOrWhiteSpace(raw))
+            return @default;
+        return bool.TryParse(raw.Trim(), out var value)
+            ? value
+            : WarnAndDefault(key, raw, @default, onWarning);
+    }
+
+    private static T WarnAndDefault<T>(string key, string? raw, T @default, Action<string>? onWarning)
+    {
+        onWarning?.Invoke(
+            $"Config '{key}' has unrecognized value '{raw}' — falling back to default '{@default}'. " +
+            $"Expected a {DescribeExpected(@default)}.");
+        return @default;
+    }
+
+    private static string DescribeExpected<T>(T @default) => @default switch
+    {
+        bool => "boolean (true/false)",
+        int => "whole number",
+        double => "number",
+        ReplicationPolicy => "policy name (tiered/full/radius)",
+        _ => "valid value",
+    };
 }
