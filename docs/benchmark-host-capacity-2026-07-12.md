@@ -273,6 +273,56 @@ narrow soft-overrun band just past the knee, then a cliff. The cliff — and the
 recovery only ever comes from bots disconnecting — is the strongest argument yet that
 Phase 2 needs backpressure/shedding in the send loop, not just more culling.
 
+## Follow-up E — send-loop rework after-snapshot (same date; Phase 2)
+
+Branch `agent/send-loop-phase2` (on top of the merged rig) added four independently
+toggleable mechanisms, all default-off/serial: chunked parallel fan-out
+(`Replication__SendWorkers`, 0 = auto→8), always-on fairness rotation, per-broadcast
+deadline shedding (`Replication__BroadcastDeadlineMs` — a send that misses the deadline
+gets its socket aborted), and adaptive degrade (`Replication__AdaptiveDegrade` — halve
+load the tick after an overrun). The loader gained steady-state RTT percentiles with a
+first-vs-last-quartile bot split. After-matrix (radius policy, spread+wander, 60 s,
+off-host AM4; before-curve = Follow-up D):
+
+| Run | knobs | tick p99 (steady) | worst tick | over/100 | verdict |
+|---|---|---|---|---|---|
+| 400, 8 workers | parallel only | 44–53 ms | 57 ms | 0–21 | ≈ serial before (~46 ms) — 400 was never worker-bound |
+| 500, 8 workers | parallel only | 82–107 ms | 109 ms | 95–100 | soft-fail band unchanged (before 76–112) |
+| 600, 8 workers | parallel only | 95–139 ms | 374 ms | 90–100 | **cliff → slope** (before: 576 ms p99, 20.9 s stall) |
+| 800, 8 workers | parallel only | 163–167 ms | 7.6 s (join surge, no deadline) | 100 | server bounded; clients drown (RTT p95 20–22 s) |
+| tiered 400, 8 workers | parallel only | 236–291 ms | 299 ms | 24–32 | tiered not rescued — volume-bound, not worker-bound |
+| 600, serial + 150 ms deadline | deadline only | 123–174 ms | **249.8 ms** | 100 | **cliff killed: worst tick 20,900 → 250 ms (~84×), 17 aborts total** |
+| tiered 400, adaptive | adaptive only | 261–286 ms | 316 ms | 25 | **miss** — degrade fires the tick *after* the overrun, which for tiered's every-4th-tick burst is a cheap tick; wrong phase |
+
+**Reading:**
+
+1. **The budget-compliant ceiling stays ~400 bots (radius).** Parallelism did not raise
+   it: 500 fails the same, 400 is no faster than serial.
+2. **What Phase 2 actually bought is failure shape.** 500→800 now degrade roughly
+   linearly (~0.2 ms of p99 per bot past 400, all bounded) instead of collapsing, and
+   deadline shedding converts the 20.9-second stall into a 250 ms worst tick at the cost
+   of 17 targeted disconnects. Cliff → slope + bounded stalls is exactly what a public
+   alpha needs from overload — it just isn't more capacity.
+3. **Why parallelism didn't help — the parallel-efficiency signal fired:** summed
+   worker send time ≈ broadcast wall time in every parallel run (e.g. 600 bots: sum
+   87 ms vs wall 102 ms; 8 workers should approach wall ≈ sum/8). The workers are not
+   overlapping. Prime suspect: **the single shared `UdpClient`** — ~97 % of update
+   volume leaves through one socket via synchronous `Send`, so eight workers funnel
+   into one kernel-serialized resource. Testable Phase-3 hypothesis: per-worker UDP
+   sockets (or async batched sends) should pull wall toward sum/8. (CPU headroom was
+   ample — ~3.4 of 24 cores — so it is not compute-bound.)
+4. **Adaptive degrade has a design bug, with a known fix:** the halving must be
+   burst-aligned (suppress the *next burst tick's* mid-band after a burst-tick overrun),
+   not next-tick-aligned. Not rebuilt this phase.
+5. **At 800 the bottleneck moves to the clients** — the server ships ~460 k updates/s
+   bounded, and client RTT hits 20+ s anyway. More server throughput is the wrong lever
+   past the interest ceiling; **per-client send budgets** (ADR-0011's real intent) are
+   the missing mechanism.
+6. **Fairness inverted rather than fixed:** with rotation on, *first*-connected bots
+   now fare consistently worse than last-connected (e.g. p50 3.7 s vs 0.8 s at 400) —
+   open issue; the rotation/join-order interaction needs a look before trusting any
+   fairness claim.
+
 ## Next steps
 
 1. ~~Contention probe~~ — **done** (Follow-up A): no regression under local dGPU
@@ -288,15 +338,21 @@ Phase 2 needs backpressure/shedding in the send loop, not just more culling.
    policies) and this docs branch (delivery metrics / `LumberjacksTelemetry`) each carry
    instrumentation the other lacks; reconcile `TickBroadcaster` at merge (suggested:
    TickMetrics canonical for tick timing, LumberjacksTelemetry keeps delivery).
-6. **Phase 2 — the send loop itself:** `full`'s collapse and radius@800's
-   100/100-overrun plateau both show there is no graceful shedding — a slow tick just
-   cascades. Parallelize/fair-schedule the serial send loop, add backpressure, re-check
-   late-joiner fairness; then re-run Follow-up D's matrix as the after-snapshot.
-7. **Dial-tuning for gameplay:** sweep `Replication__NearRadius` (100 → 200 → 300) and
+6. ~~Phase 2 — the send loop itself~~ — **done** (Follow-up E): cliff killed (worst
+   tick 20.9 s → 250 ms via deadline shedding), overload now degrades linearly; ceiling
+   unmoved at ~400; adaptive degrade missed (fix known); fairness inverted (open).
+7. **Phase 3 candidates, in evidence order:** (a) test the shared-`UdpClient`
+   hypothesis — per-worker UDP sockets / async batched sends; success = broadcast wall
+   falls toward sum/8 and the 500-bot band clears; (b) **per-client send budgets**
+   (ADR-0011) for the client-drowning regime past the interest ceiling; (c) adaptive
+   degrade v2, burst-aligned; (d) diagnose the inverted fairness split;
+   (e) serialize-once shared payload segments if (a) moves the wall onto CPU.
+8. **Dial-tuning for gameplay:** sweep `Replication__NearRadius` (100 → 200 → 300) and
    tier intervals to find the largest gameplay-acceptable policy that still fits the
    budget at target load — the rig makes this a table, not a debate.
-8. **Loader improvement:** report steady-state RTT percentiles (exclude join surge) so
-   client-side numbers stop contradicting healthy tick windows.
-9. **Contention probe, hard mode (optional):** repeat Follow-up A with a host-DRAM-heavy
-   job (shared-memory/iGPU or CPU inference); the `interval` phase metric now makes
-   scheduler jitter directly visible.
+9. ~~Loader improvement~~ — **done** (Phase 2): steady-state RTT percentiles + quartile
+   fairness split shipped. Note the pre-existing JSON-lane RTT parse bug (chipped as a
+   background task) — benchmarks ride the binary/UDP lane, which records correctly.
+10. **Contention probe, hard mode (optional):** repeat Follow-up A with a
+    host-DRAM-heavy job (shared-memory/iGPU or CPU inference); the `interval` phase
+    metric now makes scheduler jitter directly visible.
