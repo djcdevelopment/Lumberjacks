@@ -77,9 +77,18 @@ than adequate for authoritative hosting; the cloud's genuine advantages are else
    is a networking-method artifact, not pure CPU. The qualitative result (most headroom)
    is solid; a literal ~3× CPU win is not claimed.
 3. **DB-less, in-memory.** The EventLog/persistence path was not exercised.
-4. **Single region, full interest** → O(N²) broadcast fan-out is the real scaling wall
-   (159k → 569k → 2.03M updates as bots doubled), not CPU. Spatial interest tiers exist to
-   cut exactly this and were not engaged here.
+4. **Single region, effectively-full interest** → O(N²) broadcast fan-out is the real
+   scaling wall (159k → 569k → 2.03M updates as bots doubled), not CPU. **Correction
+   (post-recon, same date):** the spatial interest tiers were *not* "disengaged" — they
+   are hardcoded always-on (`InterestManager`: near 100 u every tick, mid 300 u every
+   4th tick, far dropped; no config switch exists) and were active in every run here
+   (that's the measured `interest` phase). They were merely **geometrically
+   ineffective**: the DB-less region is a 1000×1000 square, the 300 u mid radius covers
+   ~28 % of it, every player spawns at the same point (0,0,0), and clamped random-walk
+   movement pools bots at the walls. All baselines in this doc therefore measure the
+   hardcoded *tiered* policy under worst-case clustering; a true `full` (unfiltered)
+   baseline does not exist in any binary yet — Phase 1 of the telemetry strategy builds
+   it, plus spawn-spread and loader-wander knobs to make radius experiments meaningful.
 5. **AM4's higher idle-load RTT** (45 ms vs cloud's 22 ms at 50 bots) reproduced in
    Follow-up A's fresh baseline (43/61/56 ms) — but the probe **weakens** the
    memory-bandwidth suspicion: RTT got *better*, not worse, while inference actively ran.
