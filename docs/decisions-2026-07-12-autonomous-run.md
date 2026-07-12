@@ -98,3 +98,25 @@ means per connection quality — ADR-0011 leaves it open); serialize-once payloa
   clickable confirm-guarded scenario cards, benchmark card wraps the existing load
   harness (UI-over-console, no second load path). Honesty rule enforced: live v0 data
   where it exists, labeled "sample — backend pending" everywhere else.
+
+## Third session (on "approved, onward"): Phase 3 a′ — the ceiling moved
+
+- **Base decision:** built a′ on `agent/udp-sockets-degrade-v2` (the one branch with both
+  the fan-out to fix and the per-worker UDP sockets that make true parallelism safe). The
+  config fix (`0d9093f`, `claude/kind-panini-1c9767`) is an independent line off master and
+  a′ doesn't depend on it (measurement passes valid booleans). Master is still 4 approved
+  branches behind — flagged for consolidation on request; did not merge autonomously.
+- **Result: SUCCESS — the capacity ceiling moved ~400 → ~600 bots/region (+50%)** — the
+  first ceiling move in the whole investigation (Follow-up G). `Parallel.ForEachAsync`
+  dispatch delivered 5–7× parallel speedup; radius/500 went from 100-overrun collapse to
+  0 overruns; a serial control validated the delta.
+- **Interpretation correction I had to make:** the run agent (and my own measurement brief)
+  mislabeled the send:wall success direction as "toward 1/8"; the correct signal is the
+  ratio rising toward the worker count (serial 0.81 → parallel 5.6). Documented the fix in
+  Follow-up G so the record is right.
+- **Two honest downgrades in the same pass:** tiered isn't rescued by parallelism (it's
+  blocked on a separate mid-band lock — uses *less* CPU, won't scale), and the fairness
+  "inversion" from Follow-ups E/F is largely a loader artifact (partial retraction). Better
+  to correct the record than let a tidy-but-wrong story stand.
+- a′ on branch `agent/parallel-send-dispatch` (197 tests green), pushed for review; not
+  merged to master.
