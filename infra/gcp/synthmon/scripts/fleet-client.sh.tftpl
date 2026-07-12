@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+cd /tmp
+for i in $(seq 1 30); do curl -sf -o synthclient "${synthclient_url}" && break; sleep 5; done
+chmod +x synthclient
+for M in json binary udp; do
+  OUT=$(SYNTH_TARGET="${sut_ws_url}" SYNTH_REGION_LABEL="${region_label}" SYNTH_MODE=$M SYNTH_REGION_ID=region-spawn SYNTH_RATE_HZ=10 SYNTH_DURATION_S=20 SYNTH_CLIENTS=1 ./synthclient 2>/dev/null | sed -n '/^{/,/^}/p' | tr -d '\n')
+  echo "SYNTHJSON $OUT"
+done
+echo "SYNTHDONE ${region_label}"
