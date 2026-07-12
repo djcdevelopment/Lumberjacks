@@ -22,6 +22,14 @@ namespace Game.Gateway.WebSocket;
 ///   Radius            — hard cutoff at NearRadius; inside every tick, outside dropped.
 ///
 /// Sends binary frames to binary-mode sessions, JSON to JSON-mode sessions.
+///
+/// Send-loop rework (phase 2): the per-region session list is split into
+/// Replication:SendWorkers contiguous chunks (default 1 — exactly the original serial
+/// foreach) and rotated by tick number first (Replication:SendWorkers-independent — see
+/// <see cref="SendFanOut.RotateOffset"/>) so no session is systematically served last. A
+/// session appears in exactly one chunk per tick, so per-socket send serialization
+/// (WebSocket.SendAsync allows only one outstanding send per socket) is preserved even
+/// though chunks run concurrently.
 /// </summary>
 public class TickBroadcaster : ITickBroadcaster
 {
@@ -30,6 +38,7 @@ public class TickBroadcaster : ITickBroadcaster
     private readonly UdpTransport? _udpTransport;
     private readonly ILogger<TickBroadcaster> _logger;
     private readonly TickMetrics? _metrics;
+    private readonly int _sendWorkers;
 
     public TickBroadcaster(
         SessionManager sessions,
@@ -47,9 +56,12 @@ public class TickBroadcaster : ITickBroadcaster
         _metrics = metrics;
         _metrics?.SetReplicationPolicy(replicationOptions.PolicyName);
 
+        _sendWorkers = SendFanOut.ResolveWorkerCount(replicationOptions.SendWorkers, Environment.ProcessorCount);
+
         _logger.LogInformation(
-            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval}",
-            replicationOptions.PolicyName, replicationOptions.NearRadius, replicationOptions.MidRadius, replicationOptions.MidTickInterval);
+            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval} sendWorkers={SendWorkers}",
+            replicationOptions.PolicyName, replicationOptions.NearRadius, replicationOptions.MidRadius, replicationOptions.MidTickInterval,
+            _sendWorkers);
     }
 
     public async Task BroadcastTickAsync(
@@ -84,7 +96,13 @@ public class TickBroadcaster : ITickBroadcaster
             .Concat(resourceData.Values.Select(r => r.RegionId))
             .Distinct();
 
-        // Raw Stopwatch tick accumulators for the interest and send sub-phases.
+        // Raw Stopwatch tick accumulators for the interest and send sub-phases. Under
+        // SendWorkers>1 these are SUMS across worker chunks (each chunk accumulates locally,
+        // no Interlocked needed — one accumulator instance per task, summed at Task.WhenAll
+        // join). Broadcast WALL time (measured by TickLoop around the whole
+        // BroadcastTickAsync call) is the tick-budget truth; the gap between that wall time
+        // and this interest+send SUM is the parallelism-efficiency signal (wide gap = good
+        // overlap across workers, near-equal = no effective parallelism).
         // "send" includes per-entity serialization (stackalloc/JSON) — socket writes dominate.
         long interestElapsed = 0, sendElapsed = 0;
 
@@ -95,7 +113,7 @@ public class TickBroadcaster : ITickBroadcaster
 
         foreach (var regionId in regionIds)
         {
-            var sessions = _sessions.GetByRegion(regionId);
+            var sessions = _sessions.GetByRegion(regionId).ToList();
             if (sessions.Count == 0) continue;
 
             var regionPlayerChanges = changedPlayerIds
@@ -106,54 +124,51 @@ public class TickBroadcaster : ITickBroadcaster
                 .Where(id => resourceData.TryGetValue(id, out var r) && r.RegionId == regionId)
                 .ToHashSet();
 
-            foreach (var session in sessions)
+            // Fairness rotation: always on, independent of SendWorkers. Rotates the starting
+            // point through the session list each tick so early-connected sessions don't
+            // absorb the whole send-phase tail every single tick — session order was never a
+            // guaranteed fairness contract. No list copy: RotatedIndex maps a chunk-local
+            // position back to the real index below.
+            var offset = SendFanOut.RotateOffset(tick, sessions.Count);
+            var chunks = SendFanOut.Chunk(sessions.Count, _sendWorkers);
+
+            if (_sendWorkers <= 1)
             {
-                if (session.Socket.State != WebSocketState.Open) continue;
-
-                var isBinary = session.Protocol == ProtocolMode.Binary;
-
-                // --- Player Updates ---
-                var tInterest = Stopwatch.GetTimestamp();
-                var visiblePlayers = _interest.FilterForObserver(session.PlayerId, regionPlayerChanges, players, tick);
-                interestElapsed += Stopwatch.GetTimestamp() - tInterest;
-
-                entitiesSent += visiblePlayers.Count;
-                entitiesCulled += regionPlayerChanges.Count - visiblePlayers.Count;
-
-                var tSend = Stopwatch.GetTimestamp();
-                foreach (var playerId in visiblePlayers)
+                // Default: exactly today's serial behavior, no Task/array overhead.
+                var acc = new SendAccumulator();
+                var (start, length) = chunks[0];
+                await SendChunkAsync(
+                    sessions, offset, start, length,
+                    regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
+                    tick, stateHash, acc);
+                interestElapsed += acc.InterestTicks;
+                sendElapsed += acc.SendTicks;
+                entitiesSent += acc.Sent;
+                entitiesCulled += acc.Culled;
+            }
+            else
+            {
+                var accumulators = new SendAccumulator[chunks.Count];
+                var tasks = new Task[chunks.Count];
+                for (var i = 0; i < chunks.Count; i++)
                 {
-                    if (!playerData.TryGetValue(playerId, out var data)) continue;
-                    try
-                    {
-                        if (isBinary)
-                        {
-                            if (!TrySendUdpEntityUpdate(session, playerId, data.Player, tick, stateHash))
-                                await SendBinaryEntityUpdate(session, playerId, data.Player, tick, stateHash);
-                        }
-                        else
-                        {
-                            await SendJsonEntityUpdate(session, playerId, data.Player, tick, stateHash);
-                        }
-                    }
-                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to send player update"); }
+                    var (start, length) = chunks[i];
+                    accumulators[i] = new SendAccumulator();
+                    tasks[i] = SendChunkAsync(
+                        sessions, offset, start, length,
+                        regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
+                        tick, stateHash, accumulators[i]);
                 }
 
-                // --- Resource Updates (Nature 2.0) ---
-                // For now, simpler AoI for resources: everyone in region gets them if they change (trees are big)
-                foreach (var resourceId in regionResourceChanges)
+                await Task.WhenAll(tasks);
+
+                foreach (var acc in accumulators)
                 {
-                    if (!resourceData.TryGetValue(resourceId, out var data)) continue;
-                    try
-                    {
-                        if (!isBinary) // Binary path for resources can be added later if needed
-                        {
-                            await SendJsonNaturalResourceUpdate(session, resourceId, data.Resource, tick, stateHash);
-                        }
-                    }
-                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to send resource update"); }
+                    interestElapsed += acc.InterestTicks;
+                    sendElapsed += acc.SendTicks;
+                    entitiesSent += acc.Sent;
+                    entitiesCulled += acc.Culled;
                 }
-                sendElapsed += Stopwatch.GetTimestamp() - tSend;
             }
         }
 
@@ -161,6 +176,94 @@ public class TickBroadcaster : ITickBroadcaster
             Stopwatch.GetElapsedTime(0, interestElapsed).TotalMilliseconds,
             Stopwatch.GetElapsedTime(0, sendElapsed).TotalMilliseconds);
         _metrics?.RecordReplication(entitiesSent, entitiesCulled);
+    }
+
+    /// <summary>
+    /// Per-worker accumulator for one chunk's send loop. Each concurrent chunk task gets its
+    /// own instance (see the fan-out loop above), so no Interlocked/locking is needed — the
+    /// caller sums them after Task.WhenAll.
+    /// </summary>
+    private sealed class SendAccumulator
+    {
+        public long InterestTicks;
+        public long SendTicks;
+        public long Sent;
+        public long Culled;
+    }
+
+    /// <summary>
+    /// Sends the full per-session body (player entity updates + resource updates) for a
+    /// contiguous, rotated slice of <paramref name="sessions"/>. Safe to run concurrently
+    /// against other chunks of the SAME sessions list because rotation+chunking guarantees a
+    /// session appears in exactly one chunk per tick — WebSocket.SendAsync allows only one
+    /// outstanding send per socket, but concurrent sends to DIFFERENT sockets are safe.
+    /// </summary>
+    private async Task SendChunkAsync(
+        IReadOnlyList<GameSession> sessions,
+        int rotationOffset,
+        int chunkStart,
+        int chunkLength,
+        HashSet<string> regionPlayerChanges,
+        HashSet<string> regionResourceChanges,
+        Dictionary<string, (string RegionId, Player Player)> playerData,
+        Dictionary<string, (string RegionId, NaturalResource Resource)> resourceData,
+        IReadOnlyDictionary<string, Player> players,
+        long tick,
+        uint stateHash,
+        SendAccumulator acc)
+    {
+        for (var i = 0; i < chunkLength; i++)
+        {
+            var index = SendFanOut.RotatedIndex(chunkStart + i, rotationOffset, sessions.Count);
+            var session = sessions[index];
+
+            if (session.Socket.State != WebSocketState.Open) continue;
+
+            var isBinary = session.Protocol == ProtocolMode.Binary;
+
+            // --- Player Updates ---
+            var tInterest = Stopwatch.GetTimestamp();
+            var visiblePlayers = _interest.FilterForObserver(session.PlayerId, regionPlayerChanges, players, tick);
+            acc.InterestTicks += Stopwatch.GetTimestamp() - tInterest;
+
+            acc.Sent += visiblePlayers.Count;
+            acc.Culled += regionPlayerChanges.Count - visiblePlayers.Count;
+
+            var tSend = Stopwatch.GetTimestamp();
+            foreach (var playerId in visiblePlayers)
+            {
+                if (!playerData.TryGetValue(playerId, out var data)) continue;
+                try
+                {
+                    if (isBinary)
+                    {
+                        if (!TrySendUdpEntityUpdate(session, playerId, data.Player, tick, stateHash))
+                            await SendBinaryEntityUpdate(session, playerId, data.Player, tick, stateHash);
+                    }
+                    else
+                    {
+                        await SendJsonEntityUpdate(session, playerId, data.Player, tick, stateHash);
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to send player update"); }
+            }
+
+            // --- Resource Updates (Nature 2.0) ---
+            // For now, simpler AoI for resources: everyone in region gets them if they change (trees are big)
+            foreach (var resourceId in regionResourceChanges)
+            {
+                if (!resourceData.TryGetValue(resourceId, out var data)) continue;
+                try
+                {
+                    if (!isBinary) // Binary path for resources can be added later if needed
+                    {
+                        await SendJsonNaturalResourceUpdate(session, resourceId, data.Resource, tick, stateHash);
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to send resource update"); }
+            }
+            acc.SendTicks += Stopwatch.GetTimestamp() - tSend;
+        }
     }
 
     private bool TrySendUdpEntityUpdate(

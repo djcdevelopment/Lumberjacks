@@ -309,6 +309,41 @@ public class InterestManagerTests
         Assert.Equal(4, options.MidTickInterval);
     }
 
+    [Fact]
+    public void ConfigurationDefaultsSendWorkersToTodaysSerialBehavior()
+    {
+        // workers=1 — the A/B isolates each send-loop mechanism (see also BroadcastDeadlineMs,
+        // AdaptiveDegrade, added alongside deadline shedding / adaptive degrade respectively).
+        var config = new ConfigurationBuilder().Build();
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(1, options.SendWorkers);
+    }
+
+    [Fact]
+    public void ConfigurationReadsSendWorkers()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:SendWorkers"] = "4" })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(4, options.SendWorkers);
+    }
+
+    [Fact]
+    public void ConfigurationReadsSendWorkersZeroAsAuto()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:SendWorkers"] = "0" })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(0, options.SendWorkers); // resolved to an effective count by SendFanOut.ResolveWorkerCount
+    }
+
     [Theory]
     [InlineData("full", ReplicationPolicy.Full)]
     [InlineData("radius", ReplicationPolicy.Radius)]
