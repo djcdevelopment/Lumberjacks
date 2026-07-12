@@ -37,12 +37,19 @@ public class InterestManager
     /// <param name="changedEntityIds">All entities that changed this tick.</param>
     /// <param name="players">Current player state (for position lookup).</param>
     /// <param name="tick">Current tick number (for mid-band throttling).</param>
+    /// <param name="suppressMidBand">
+    /// Adaptive degrade (Replication:AdaptiveDegrade): when true, forces the mid band off for
+    /// this call regardless of <paramref name="tick"/>'s normal MidTickInterval schedule. Only
+    /// meaningful for the Tiered policy — Full and Radius have no mid band, so this is a no-op
+    /// for them.
+    /// </param>
     /// <returns>Filtered set of entity IDs the observer should receive.</returns>
     public HashSet<string> FilterForObserver(
         string observerId,
         HashSet<string> changedEntityIds,
         IReadOnlyDictionary<string, Player> players,
-        long tick)
+        long tick,
+        bool suppressMidBand = false)
     {
         // Full replication: no interest filtering at all — short-circuit before any
         // grid lookup or distance math.
@@ -57,7 +64,7 @@ public class InterestManager
         var nearRadiusSq = _options.NearRadius * _options.NearRadius;
         var midRadiusSq = _options.MidRadius * _options.MidRadius;
         var useMidBand = _options.Policy == ReplicationPolicy.Tiered;
-        var isMidTick = useMidBand && _options.MidTickInterval > 0 && tick % _options.MidTickInterval == 0;
+        var isMidTick = !suppressMidBand && useMidBand && _options.MidTickInterval > 0 && tick % _options.MidTickInterval == 0;
 
         foreach (var entityId in changedEntityIds)
         {

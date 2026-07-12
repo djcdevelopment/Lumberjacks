@@ -25,8 +25,8 @@ public enum ReplicationPolicy
 /// (matching the <c>Udp:Port</c> / <c>Udp__Port</c> pattern used by <c>UdpTransport</c>).
 ///
 /// Env vars: Replication__Policy, Replication__NearRadius, Replication__MidRadius,
-/// Replication__MidTickInterval, Replication__SendWorkers, Replication__BroadcastDeadlineMs
-/// (send-loop rework, phase 2 — see TickBroadcaster).
+/// Replication__MidTickInterval, Replication__SendWorkers, Replication__BroadcastDeadlineMs,
+/// Replication__AdaptiveDegrade (send-loop rework, phase 2 — see TickBroadcaster).
 /// </summary>
 public sealed record ReplicationOptions
 {
@@ -35,6 +35,7 @@ public sealed record ReplicationOptions
     public const int DefaultMidTickInterval = 4;
     public const int DefaultSendWorkers = 1;
     public const int DefaultBroadcastDeadlineMs = 0;
+    public const bool DefaultAdaptiveDegrade = false;
 
     public ReplicationPolicy Policy { get; init; } = ReplicationPolicy.Tiered;
     public double NearRadius { get; init; } = DefaultNearRadius;
@@ -54,6 +55,13 @@ public sealed record ReplicationOptions
     /// aborted so the tick can end (see <see cref="Game.Simulation.Tick.BroadcastDeadline"/>).
     /// </summary>
     public int BroadcastDeadlineMs { get; init; } = DefaultBroadcastDeadlineMs;
+
+    /// <summary>
+    /// ADR-0011 "reduce frequency before dropping". False (default) = off. True = when the
+    /// previous tick's broadcast wall time exceeded budget, this tick suppresses mid-band
+    /// updates (tiered) or every-other-session (radius/full) — see <see cref="Game.Simulation.Tick.AdaptiveDegrade"/>.
+    /// </summary>
+    public bool AdaptiveDegrade { get; init; } = DefaultAdaptiveDegrade;
 
     /// <summary>Lowercase policy name, for logging and metrics tagging.</summary>
     public string PolicyName => Policy switch
@@ -81,6 +89,7 @@ public sealed record ReplicationOptions
             MidTickInterval = config.GetValue("Replication:MidTickInterval", DefaultMidTickInterval),
             SendWorkers = config.GetValue("Replication:SendWorkers", DefaultSendWorkers),
             BroadcastDeadlineMs = config.GetValue("Replication:BroadcastDeadlineMs", DefaultBroadcastDeadlineMs),
+            AdaptiveDegrade = config.GetValue("Replication:AdaptiveDegrade", DefaultAdaptiveDegrade),
         };
     }
 }

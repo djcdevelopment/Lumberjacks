@@ -295,6 +295,65 @@ public class InterestManagerTests
         Assert.DoesNotContain("far", evenTick);
     }
 
+    // ── Adaptive degrade: suppressMidBand (see AdaptiveDegradeTests for the alternating half
+    //    used by radius/full — the mid-band half lives here since it's InterestManager's rule) ──
+
+    [Fact]
+    public void SuppressMidBandForcesNoMidEvenOnAMidTick()
+    {
+        var (manager, grid) = CreateManager();
+        grid.Update("observer", new Vec3(0, 0, 0));
+        grid.Update("mid", new Vec3(200, 0, 0)); // mid band (100-300)
+
+        var changed = new HashSet<string> { "mid" };
+
+        // tick 4 is normally a mid-band tick (MidTickInterval defaults to 4)
+        var visible = manager.FilterForObserver("observer", changed, new Dictionary<string, Player>(), tick: 4, suppressMidBand: true);
+
+        Assert.DoesNotContain("mid", visible);
+    }
+
+    [Fact]
+    public void SuppressMidBandDoesNotAffectNearBand()
+    {
+        var (manager, grid) = CreateManager();
+        grid.Update("observer", new Vec3(0, 0, 0));
+        grid.Update("near", new Vec3(50, 0, 0));
+
+        var changed = new HashSet<string> { "near" };
+        var visible = manager.FilterForObserver("observer", changed, new Dictionary<string, Player>(), tick: 4, suppressMidBand: true);
+
+        Assert.Contains("near", visible);
+    }
+
+    [Fact]
+    public void SuppressMidBandDefaultsToFalse()
+    {
+        var (manager, grid) = CreateManager();
+        grid.Update("observer", new Vec3(0, 0, 0));
+        grid.Update("mid", new Vec3(200, 0, 0));
+
+        var changed = new HashSet<string> { "mid" };
+        // No suppressMidBand argument — must behave exactly like before this parameter existed.
+        var visible = manager.FilterForObserver("observer", changed, new Dictionary<string, Player>(), tick: 4);
+
+        Assert.Contains("mid", visible);
+    }
+
+    [Fact]
+    public void SuppressMidBandIsNoOpForPoliciesWithoutAMidBand()
+    {
+        var options = new ReplicationOptions { Policy = ReplicationPolicy.Full };
+        var (manager, grid) = CreateManager(options);
+        grid.Update("observer", new Vec3(0, 0, 0));
+        grid.Update("far", new Vec3(10_000, 0, 0));
+
+        var changed = new HashSet<string> { "far" };
+        var visible = manager.FilterForObserver("observer", changed, new Dictionary<string, Player>(), tick: 4, suppressMidBand: true);
+
+        Assert.Contains("far", visible); // Full ignores suppressMidBand entirely — no mid band to suppress
+    }
+
     // ── ReplicationOptions.FromConfiguration ──
 
     [Fact]
@@ -400,5 +459,26 @@ public class InterestManagerTests
         var options = ReplicationOptions.FromConfiguration(config);
 
         Assert.Equal(100, options.BroadcastDeadlineMs);
+    }
+
+    [Fact]
+    public void ConfigurationDefaultsAdaptiveDegradeToOff()
+    {
+        var config = new ConfigurationBuilder().Build();
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.False(options.AdaptiveDegrade);
+    }
+
+    [Fact]
+    public void ConfigurationReadsAdaptiveDegrade()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:AdaptiveDegrade"] = "true" })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.True(options.AdaptiveDegrade);
     }
 }

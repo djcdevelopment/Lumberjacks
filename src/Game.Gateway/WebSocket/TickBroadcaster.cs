@@ -38,6 +38,14 @@ namespace Game.Gateway.WebSocket;
 /// stream — never keep using it) and counted, and the loop moves on: the tick must end
 /// within budget even if that means shedding the slowest sessions this tick. The existing
 /// per-send try/catch + SessionManager's stale-session cleanup reaps the aborted sessions.
+///
+/// Adaptive degrade (Replication:AdaptiveDegrade, default false — ADR-0011 "reduce
+/// frequency before dropping"): stateless beyond the PREVIOUS broadcast's wall-clock time
+/// (tracked here, self-measured — the same interval TickLoop measures around this whole
+/// call, since nothing else runs between them). If that exceeded the 50ms tick budget, this
+/// tick suppresses the mid band (tiered policy, via InterestManager) or every other
+/// session in rotated order (radius/full, which have no mid band) — a one-tick halving
+/// that lifts the instant a broadcast fits again.
 /// </summary>
 public class TickBroadcaster : ITickBroadcaster
 {
@@ -48,6 +56,11 @@ public class TickBroadcaster : ITickBroadcaster
     private readonly TickMetrics? _metrics;
     private readonly int _sendWorkers;
     private readonly int _deadlineMs;
+    private readonly bool _adaptiveDegrade;
+
+    // Mutable, but only ever touched from the tick loop's sequential flow — BroadcastTickAsync
+    // calls never overlap (TickLoop awaits each one before starting the next), so no locking.
+    private double _lastBroadcastWallMs;
 
     public TickBroadcaster(
         SessionManager sessions,
@@ -67,11 +80,12 @@ public class TickBroadcaster : ITickBroadcaster
 
         _sendWorkers = SendFanOut.ResolveWorkerCount(replicationOptions.SendWorkers, Environment.ProcessorCount);
         _deadlineMs = replicationOptions.BroadcastDeadlineMs;
+        _adaptiveDegrade = replicationOptions.AdaptiveDegrade;
 
         _logger.LogInformation(
-            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval} sendWorkers={SendWorkers} deadlineMs={DeadlineMs}",
+            "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval} sendWorkers={SendWorkers} deadlineMs={DeadlineMs} adaptive={Adaptive}",
             replicationOptions.PolicyName, replicationOptions.NearRadius, replicationOptions.MidRadius, replicationOptions.MidTickInterval,
-            _sendWorkers, _deadlineMs);
+            _sendWorkers, _deadlineMs, _adaptiveDegrade);
     }
 
     public async Task BroadcastTickAsync(
@@ -83,6 +97,8 @@ public class TickBroadcaster : ITickBroadcaster
         long tick,
         uint stateHash)
     {
+        var wallStart = Stopwatch.GetTimestamp();
+
         // 1. Prepare Player data
         var playerData = new Dictionary<string, (string RegionId, Player Player)>();
         foreach (var playerId in changedPlayerIds)
@@ -129,6 +145,14 @@ public class TickBroadcaster : ITickBroadcaster
         deadlineCts?.CancelAfter(_deadlineMs);
         var deadlineToken = deadlineCts?.Token ?? CancellationToken.None;
 
+        // Adaptive degrade: decided ONCE for the whole tick, from the PREVIOUS broadcast's
+        // wall time — stateless beyond that one number (see class doc). Off (the default)
+        // is always false here, so suppressMidBand/suppressAlternating below are never true
+        // and every session gets its normal update — zero behavior change.
+        var degraded = AdaptiveDegrade.ShouldDegrade(_adaptiveDegrade, _lastBroadcastWallMs);
+        var suppressMidBand = degraded && _interest.Policy == ReplicationPolicy.Tiered;
+        var suppressAlternating = degraded && _interest.Policy != ReplicationPolicy.Tiered;
+
         foreach (var regionId in regionIds)
         {
             var sessions = _sessions.GetByRegion(regionId).ToList();
@@ -158,7 +182,7 @@ public class TickBroadcaster : ITickBroadcaster
                 await SendChunkAsync(
                     sessions, offset, start, length,
                     regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
-                    tick, stateHash, deadlineToken, acc);
+                    tick, stateHash, deadlineToken, suppressMidBand, suppressAlternating, acc);
                 interestElapsed += acc.InterestTicks;
                 sendElapsed += acc.SendTicks;
                 entitiesSent += acc.Sent;
@@ -176,7 +200,7 @@ public class TickBroadcaster : ITickBroadcaster
                     tasks[i] = SendChunkAsync(
                         sessions, offset, start, length,
                         regionPlayerChanges, regionResourceChanges, playerData, resourceData, players,
-                        tick, stateHash, deadlineToken, accumulators[i]);
+                        tick, stateHash, deadlineToken, suppressMidBand, suppressAlternating, accumulators[i]);
                 }
 
                 await Task.WhenAll(tasks);
@@ -192,11 +216,19 @@ public class TickBroadcaster : ITickBroadcaster
             }
         }
 
+        // Broadcast WALL time — measured here around the whole call, NOT summed across worker
+        // chunks — is the tick-budget truth (the same interval TickLoop measures) and feeds
+        // the NEXT tick's adaptive-degrade decision. Deliberately recorded even when
+        // AdaptiveDegrade is off, so flipping it on mid-run has a real previous value to work
+        // from immediately rather than a cold-start 0.
+        _lastBroadcastWallMs = Stopwatch.GetElapsedTime(wallStart).TotalMilliseconds;
+
         _metrics?.RecordBroadcastPhases(
             Stopwatch.GetElapsedTime(0, interestElapsed).TotalMilliseconds,
             Stopwatch.GetElapsedTime(0, sendElapsed).TotalMilliseconds);
         _metrics?.RecordReplication(entitiesSent, entitiesCulled);
-        // deadlineAborts is folded into TickMetrics' replication window (see RecordDeadlineAborts).
+        // deadlineAborts/degraded are folded into TickMetrics' replication window (see
+        // RecordDeadlineAborts / RecordDegraded) — "log nothing per tick" for degrade itself.
         if (deadlineAborts > 0)
             _logger.LogDebug("Broadcast deadline shed {Aborts} session(s) this tick (tick {Tick})", deadlineAborts, tick);
     }
@@ -235,20 +267,29 @@ public class TickBroadcaster : ITickBroadcaster
         long tick,
         uint stateHash,
         CancellationToken deadlineToken,
+        bool suppressMidBand,
+        bool suppressAlternating,
         SendAccumulator acc)
     {
         for (var i = 0; i < chunkLength; i++)
         {
-            var index = SendFanOut.RotatedIndex(chunkStart + i, rotationOffset, sessions.Count);
+            var rotatedPos = chunkStart + i;
+            var index = SendFanOut.RotatedIndex(rotatedPos, rotationOffset, sessions.Count);
             var session = sessions[index];
 
             if (session.Socket.State != WebSocketState.Open) continue;
+
+            // Adaptive degrade halving for radius/full (no mid band to suppress instead):
+            // skip this session's ENTIRE update for this tick. Position is in rotated order,
+            // so which physical sessions get skipped shifts every degraded tick along with
+            // the fairness rotation above — no session is skipped every time.
+            if (suppressAlternating && AdaptiveDegrade.ShouldSkipAlternating(rotatedPos)) continue;
 
             var isBinary = session.Protocol == ProtocolMode.Binary;
 
             // --- Player Updates ---
             var tInterest = Stopwatch.GetTimestamp();
-            var visiblePlayers = _interest.FilterForObserver(session.PlayerId, regionPlayerChanges, players, tick);
+            var visiblePlayers = _interest.FilterForObserver(session.PlayerId, regionPlayerChanges, players, tick, suppressMidBand);
             acc.InterestTicks += Stopwatch.GetTimestamp() - tInterest;
 
             acc.Sent += visiblePlayers.Count;
