@@ -148,9 +148,9 @@
     <h1>Comfy&nbsp;Lumberjacks · Community Dashboard</h1>
     <span class="sub">Strategy &amp; Workflow — a living document</span>
     <div class="meta">
-      <span>v<b>0.10.1</b></span>
+      <span>v<b>0.10.2</b></span>
       <span>updated <b>2026-07-11</b></span>
-      <span>status <b style="color:var(--accent)">ACTIVE · Community slice shipped</b></span>
+      <span>status <b style="color:var(--accent)">ACTIVE · Community slice runtime-verified</b></span>
     </div>
   </div>
 </header>
@@ -599,13 +599,14 @@ Live                 Safety                History              Trust
           <tr><td>D-04</td><td>1 · Live</td><td>Re-frame admin-web into Live / Safety / History / Trust</td><td><b style="color:var(--accent)">✓ code 07-11</b></td></tr>
           <tr><td>D-05</td><td>2 · Instrument</td><td>RTT latency histogram metric</td><td>subagent (Opus)</td></tr>
           <tr><td>D-06</td><td>2 · Instrument</td><td>Packet-loss rate metric derived from <code>udp.packets{outcome}</code></td><td>subagent</td></tr>
-          <tr><td>D-07</td><td>3 · Community</td><td>Achievement catalog (8) as pure event-log projection + provenance (Observed/Reconstructed auto; Verified/Community-awarded as extension points) → <code>/api/achievements</code> → console History view</td><td><b style="color:var(--accent)">✓ done 07-11</b></td></tr>
+          <tr><td>D-07</td><td>3 · Community</td><td>Achievement catalog (8) as pure event-log projection + provenance (Observed/Reconstructed auto; Verified/Community-awarded as extension points) → <code>/api/achievements</code> → console History view. <b>Runtime-verified</b> on AM4: 34 events → all 8 unlock, provenance + evidence correct.</td><td><b style="color:var(--accent)">✓ done 07-11</b></td></tr>
           <tr><td>D-08</td><td>4 · Steward</td><td>Backup-status + verified-restore-point signal</td><td>needs design</td></tr>
           <tr><td>D-09</td><td>4 · Steward</td><td>Auth/role model + attributable action log</td><td>pull-in human</td></tr>
           <tr><td>D-10</td><td>1 · Live</td><td>Clone stage1 <code>google_monitoring_dashboard</code> into <code>infra/gcp/p7</code> (cross-repo, comfy)</td><td>pull-in human</td></tr>
           <tr><td>D-11</td><td>1 · Live</td><td>Players-online source decision for P7 (arm window vs parse Valheim server logs)</td><td>needs design</td></tr>
           <tr><td>D-12</td><td>1 · Live</td><td>Verify Live slice — <b style="color:var(--accent)">✓ build + 162 tests + live smoke on AM4 07-11</b> (json_ws 0→45 exactly-once; sessions created/detached; via <code>/api/*</code> proxy). Residual: frontend render only — <b>udp/binary_ws now verified</b> via synthclient (D-14).</td><td><b style="color:var(--accent)">✓ done</b></td></tr>
           <tr><td>D-13</td><td>2 · Instrument</td><td><b>Decided:</b> resource/tree broadcasts stay OUT of <code>delivery{path}</code>. That metric answers "how is each client connected" (per-session transport choice); tree updates are server-initiated world state that only flows over JSON-WS and would inflate <code>json_ws</code>. A by-message-type volume metric is the right home if that view is ever wanted.</td><td><b style="color:var(--accent)">✓ resolved</b></td></tr>
+          <tr><td>D-18</td><td>4 · Steward</td><td>EventLog has no auto-migration — the <code>events</code> table is provisioned by <code>infra/docker/init.sql</code> (the TS services own the schema), not EF. Decide: add an EF migration / startup ensure, or document this as the deployment contract. (Found during D-07 runtime verify.)</td><td>needs design</td></tr>
           <tr><td colspan="4" style="background:var(--grey-soft);font-weight:650;font-size:12px;letter-spacing:.04em;color:var(--ink-soft)">Synthetic monitoring (GCP <code>lumberjacks-synthmon-260711</code>, on-demand)</td></tr>
           <tr><td>D-14</td><td>2 · Instrument</td><td>Measuring client harness <code>tools/synthclient</code> — seq-echo RTT, loss, transport breakdown; json/binary/udp modes</td><td><b style="color:var(--accent)">✓ validated AM4 07-11</b></td></tr>
           <tr><td>D-15</td><td>2 · Instrument</td><td>SUT deploy — <code>infra/gcp/synthmon</code> (33 res, us-west1); gateway serving public <code>136.118.58.123:4000</code>. External smoke from AM4: all 3 transports, loss 0, real WAN RTT p50 52–58 ms.</td><td><b style="color:var(--accent)">✓ done 07-11</b></td></tr>
@@ -620,6 +621,7 @@ Live                 Safety                History              Trust
     <h2><span class="n">09</span>Changelog</h2>
     <p class="lede">The living ledger. Every shipped increment flips a §03 pill and lands a row here.</p>
     <div class="panel log">
+      <div class="row"><div class="d">2026-07-11</div><div>v0.10.2 — <b>D-07 runtime-verified.</b> Ran the achievements chain end-to-end on AM4 (real Postgres + EventLog): 34 canonical events POSTed → all 8 achievements unlocked with correct provenance + evidence; the <code>reconstructed</code> world-age tier confirmed. Finding: EventLog doesn't auto-migrate — the <code>events</code> table is provisioned by <code>infra/docker/init.sql</code>, not EF (logged as D-18).</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.10.1 — <b>D-13 resolved (decision, no code).</b> Resource/tree broadcasts stay excluded from <code>delivery{path}</code>: that metric measures per-client transport choice (UDP / binary-WS / JSON-WS); tree updates are server-initiated JSON-only world state that would skew <code>json_ws</code>. A by-message-type volume metric is the right home if that view is ever needed.</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.10.0 — <b>Community slice shipped (D-07).</b> Achievements as a pure projection over the authoritative event log: 8-entry catalog, <code>Observed</code> unlocks with event evidence + <code>Reconstructed</code> (world age) auto-unlock; <code>Verified</code>/<code>Community-awarded</code> modeled as extension points (test asserts they never auto-emit). New <code>Game.EventLog</code> <code>/achievements</code> endpoint → Operator API <code>/api/achievements</code> → admin-web History view with provenance badges. 9 new unit tests pass; full suite green (120 + 51); builds clean; frontend typechecks.</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.9.0 — <b>Geo latency is now a standing Cloud Monitoring dashboard (D-17 done).</b> synthclient emits percentile gauges (<code>synthclient.rtt_p50_ms / rtt_p99_ms / loss_rate</code> tagged region+transport) via OTLP; fleet VMs run the Ops Agent to ship them to Cloud Monitoring. Re-ran all 6 regions — metrics verified landed per region (loss 0), permanent dashboard <b>“Synthclient — Geo Latency”</b> created. Fleet torn down (no orphans); full solution builds clean after the shared OpenTelemetry package addition.</div></div>
