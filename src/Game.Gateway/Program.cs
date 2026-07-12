@@ -82,6 +82,12 @@ Game.Gateway.Endpoints.LiveMetricsEndpoints.Map(app);
 Game.Simulation.Endpoints.TelemetryV0Endpoints.Map(app);
 Game.Gateway.Endpoints.TelemetryV0SessionsEndpoints.Map(app);
 Game.Gateway.Endpoints.CommunityViewEndpoints.Map(app);
+// G3/G4/G5 UI first pass (community-telemetry-strategy.md, docs/ui/g3-g4-g5-first-pass.md):
+// siblings of /community. G3 is live v0 data; G4/G5 are first-pass mockups with sample data /
+// simulated actions behind visible banners — see each endpoint's doc comment.
+Game.Gateway.Endpoints.NetworkSenseEndpoints.Map(app);
+Game.Gateway.Endpoints.GameplayEventsEndpoints.Map(app);
+Game.Gateway.Endpoints.LocalTestingEndpoints.Map(app);
 ValheimPriorityManifestEndpoints.Map(app);
 ValheimZdoRedirectEndpoints.Map(app);
 ValheimZdoInjectionEndpoints.Map(app);
