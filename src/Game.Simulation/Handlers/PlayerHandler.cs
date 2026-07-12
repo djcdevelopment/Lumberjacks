@@ -23,12 +23,17 @@ public class PlayerHandler
         _logger = logger;
     }
 
+    /// <summary>Bounds inset used to keep spread-spawned players off the region walls.</summary>
+    private const double SpawnSpreadInset = 50.0;
+
     public JoinResult Join(JoinRequest request)
     {
         if (!_world.Regions.TryGetValue(request.RegionId, out var region))
             return JoinResult.Fail("Region not found");
 
-        var spawnPos = new Vec3(0, 0, 0);
+        var spawnPos = _config.GetValue("World:SpawnSpread", false)
+            ? RandomSpawnPosition(region)
+            : new Vec3(0, 0, 0);
 
         var player = new Player
         {
@@ -105,6 +110,25 @@ public class PlayerHandler
         _logger.LogInformation("Player {PlayerId} joined {RegionId}", request.PlayerId, request.RegionId);
 
         return JoinResult.Ok(request.RegionId, player.Id, allEntities);
+    }
+
+    /// <summary>
+    /// Uniform-random XZ position within the region's bounds, inset by <see cref="SpawnSpreadInset"/>
+    /// on each side to keep spawned players off the walls. Y is fixed at 0, matching the existing
+    /// spawn height. Falls back to the region's bounds midpoint if the region is too small for the
+    /// inset (defensive — region-spawn is 1000x1000, never hit today).
+    /// </summary>
+    private static Vec3 RandomSpawnPosition(Region region)
+    {
+        var minX = region.BoundsMin.X + SpawnSpreadInset;
+        var maxX = region.BoundsMax.X - SpawnSpreadInset;
+        var minZ = region.BoundsMin.Z + SpawnSpreadInset;
+        var maxZ = region.BoundsMax.Z - SpawnSpreadInset;
+
+        var x = minX <= maxX ? minX + Random.Shared.NextDouble() * (maxX - minX) : (region.BoundsMin.X + region.BoundsMax.X) / 2.0;
+        var z = minZ <= maxZ ? minZ + Random.Shared.NextDouble() * (maxZ - minZ) : (region.BoundsMin.Z + region.BoundsMax.Z) / 2.0;
+
+        return new Vec3(x, 0, z);
     }
 
     public MoveResult Move(MoveRequest request)
