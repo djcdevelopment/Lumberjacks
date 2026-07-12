@@ -57,10 +57,25 @@ public sealed class TickMetrics : IDisposable
     private long _pendingSent;
     private long _pendingCulled;
 
+    // Send-loop rework (phase 2) counters for the in-flight tick; folded into the next
+    // RecordTick. Deadline aborts and degrade are both 0/false whenever their respective
+    // Replication:BroadcastDeadlineMs / Replication:AdaptiveDegrade knobs are off.
+    private int _pendingDeadlineAborts;
+    private bool _pendingDegraded;
+
     // Window totals (sums, not percentiles) for entity-updates sent vs. culled by the
     // active InterestManager policy. Reset when the window closes.
     private long _windowSent;
     private long _windowCulled;
+
+    // Window totals for the send-loop rework knobs. DeadlineAborts sums sessions aborted
+    // across the window; DegradedTicks counts how many of the window's ticks ran with
+    // adaptive degrade active. Reset when the window closes.
+    private long _windowDeadlineAborts;
+    private int _windowDegradedTicks;
+
+    // Set once at startup by the broadcaster (post-auto-resolve — see SendFanOut.ResolveWorkerCount).
+    private int _effectiveSendWorkers = 1;
 
     // Set once at startup by the broadcaster; "unknown" until then.
     private string _replicationPolicy = "unknown";
@@ -102,6 +117,26 @@ public sealed class TickMetrics : IDisposable
     public void SetReplicationPolicy(string policyName) => _replicationPolicy = policyName;
 
     /// <summary>
+    /// Called once at startup by the broadcaster to tag the EFFECTIVE send-worker count
+    /// (Replication:SendWorkers after auto-resolution — see SendFanOut.ResolveWorkerCount).
+    /// </summary>
+    public void SetSendWorkers(int workers) => _effectiveSendWorkers = workers;
+
+    /// <summary>
+    /// Called by the tick broadcaster (on ticks where it runs) with the number of sessions
+    /// aborted this tick because their send raced the Replication:BroadcastDeadlineMs
+    /// deadline. Ticks with no broadcast, or with deadline shedding off, report 0.
+    /// </summary>
+    public void RecordDeadlineAborts(int aborts) => _pendingDeadlineAborts = aborts;
+
+    /// <summary>
+    /// Called by the tick broadcaster (on ticks where it runs) to flag whether THIS tick's
+    /// broadcast ran in adaptive-degrade mode (Replication:AdaptiveDegrade, triggered by the
+    /// previous tick's broadcast wall time exceeding budget).
+    /// </summary>
+    public void RecordDegraded(bool degraded) => _pendingDegraded = degraded;
+
+    /// <summary>
     /// Called by the tick broadcaster (on ticks where it runs) with the total entity-updates
     /// sent vs. culled by InterestManager, summed across every observer this tick. Ticks with
     /// no broadcast report 0 for both.
@@ -128,6 +163,14 @@ public sealed class TickMetrics : IDisposable
         _pendingCulled = 0;
         _windowSent += sent;
         _windowCulled += culled;
+
+        var deadlineAborts = _pendingDeadlineAborts;
+        _pendingDeadlineAborts = 0;
+        _windowDeadlineAborts += deadlineAborts;
+
+        var wasDegraded = _pendingDegraded;
+        _pendingDegraded = false;
+        if (wasDegraded) _windowDegradedTicks++;
 
         _duration.Record(totalMs, _phaseTags[TotalIdx]);
         if (intervalMs > 0)
@@ -174,7 +217,9 @@ public sealed class TickMetrics : IDisposable
                 MaxMs: sorted[n - 1]);
         }
 
-        var replication = new ReplicationWindowStats(_replicationPolicy, _windowSent, _windowCulled);
+        var replication = new ReplicationWindowStats(
+            _replicationPolicy, _windowSent, _windowCulled,
+            _effectiveSendWorkers, _windowDeadlineAborts, _windowDegradedTicks);
 
         _lastWindow = new TickTimingSnapshot(
             WindowEndTick: tick,
@@ -189,7 +234,7 @@ public sealed class TickMetrics : IDisposable
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Tick timing (last {Count} ticks): total p50={TotalP50:F2}ms p99={TotalP99:F2}ms max={TotalMax:F2}ms overruns={Overruns} (budget {BudgetMs}ms) | interval p99={IntervalP99:F1}ms | sim p99={SimP99:F2}ms hash p99={HashP99:F2}ms broadcast p99={BroadcastP99:F2}ms (interest p99={InterestP99:F2}ms send p99={SendP99:F2}ms) housekeeping p99={HousekeepingP99:F2}ms | repl policy={Policy} sent={Sent} culled={Culled}",
+                "Tick timing (last {Count} ticks): total p50={TotalP50:F2}ms p99={TotalP99:F2}ms max={TotalMax:F2}ms overruns={Overruns} (budget {BudgetMs}ms) | interval p99={IntervalP99:F1}ms | sim p99={SimP99:F2}ms hash p99={HashP99:F2}ms broadcast p99={BroadcastP99:F2}ms (interest p99={InterestP99:F2}ms send p99={SendP99:F2}ms) housekeeping p99={HousekeepingP99:F2}ms | repl policy={Policy} sent={Sent} culled={Culled} sendWorkers={SendWorkers} deadlineAborts={DeadlineAborts} degradedTicks={DegradedTicks}",
                 n,
                 phases["total"].P50Ms, phases["total"].P99Ms, phases["total"].MaxMs,
                 _windowOverruns, TickBudgetMs,
@@ -197,13 +242,16 @@ public sealed class TickMetrics : IDisposable
                 phases["sim"].P99Ms, phases["hash"].P99Ms,
                 phases["broadcast"].P99Ms, phases["interest"].P99Ms, phases["send"].P99Ms,
                 phases["housekeeping"].P99Ms,
-                replication.Policy, replication.Sent, replication.Culled);
+                replication.Policy, replication.Sent, replication.Culled,
+                replication.SendWorkers, replication.DeadlineAborts, replication.DegradedTicks);
         }
 
         _sampleCount = 0;
         _windowOverruns = 0;
         _windowSent = 0;
         _windowCulled = 0;
+        _windowDeadlineAborts = 0;
+        _windowDegradedTicks = 0;
     }
 
     /// <summary>Nearest-rank percentile on an ascending-sorted array.</summary>
@@ -224,8 +272,22 @@ public sealed record PhaseStats(double P50Ms, double P99Ms, double MaxMs);
 /// Entity-update replication totals for one window (~5s), summed (not percentiled) across
 /// every observer/tick in the window. Sent = updates actually dispatched; Culled = updates
 /// evaluated by InterestManager but dropped by the active policy.
+///
+/// SendWorkers/DeadlineAborts/DegradedTicks are the send-loop rework (phase 2) knobs:
+/// SendWorkers is the EFFECTIVE (post-auto-resolve) Replication:SendWorkers value, constant
+/// for the process's lifetime, not really a "window" stat but exposed here alongside the
+/// others it explains. DeadlineAborts sums Replication:BroadcastDeadlineMs aborts across the
+/// window; DegradedTicks counts how many of the window's ticks ran with
+/// Replication:AdaptiveDegrade active. Under SendWorkers>1, the "send"/"interest" phase
+/// timings above (from RecordBroadcastPhases) are SUMS across concurrent worker chunks, not
+/// wall time — the "broadcast" phase (measured once around the whole call, in TickLoop) is
+/// the actual tick-budget truth. The gap between the broadcast wall time and the
+/// interest+send sum is the parallelism-efficiency signal: a wide gap means the workers
+/// meaningfully overlapped; a near-zero gap means little real concurrency was achieved.
 /// </summary>
-public sealed record ReplicationWindowStats(string Policy, long Sent, long Culled);
+public sealed record ReplicationWindowStats(
+    string Policy, long Sent, long Culled,
+    int SendWorkers, long DeadlineAborts, int DegradedTicks);
 
 /// <summary>Per-phase tick timing stats for the most recent completed window (~5s).</summary>
 public sealed record TickTimingSnapshot(

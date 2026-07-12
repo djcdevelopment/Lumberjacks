@@ -46,6 +46,11 @@ const DEFAULT_UDP_PORT = 4005;
 // Display-only label for the dashboard — the real port is resolved per-bot (see Bot.udpPort).
 const udpPortLabel = () => UDP_PORT_ENV ? String(UDP_PORT_ENV) : `${DEFAULT_UDP_PORT} (default, per-bot from session_started)`;
 
+// RTT_WARMUP_S: seconds of RTT samples to exclude from the steady-state summary, measured
+// from when the load test actually starts (all bots connected — see loadTestStartTime),
+// not from process start. Default 15s covers connection ramp-up + a few seconds of settling.
+const RTT_WARMUP_S = process.env.RTT_WARMUP_S !== undefined ? parseFloat(process.env.RTT_WARMUP_S) : 15;
+
 // BOT_WANDER=1: bots head toward a random waypoint instead of pure random-walk.
 // Unset (default) leaves the original 5%-chance-per-tick random-walk behavior unchanged.
 const BOT_WANDER = process.env.BOT_WANDER === "1";
@@ -196,10 +201,18 @@ const metrics = {
   lastTick: 0,
   ticksSeen: new Set(),
 
-  // Latency tracking
+  // Latency tracking — latencySamples stays capped at the last 100 for the live dashboard
+  // (unchanged). rttLog is the FULL, per-bot, timestamped history used for the steady-state
+  // summary below; only populated once loadTestStartTime is set (i.e. after the connect/join
+  // ramp-up), so it never needs its own warmup edge-case handling.
   latencySamples: [],
   inputSeqSentAt: new Map(), // inputSeq → timestamp
+  rttLog: [], // { botId, ms, atMs } — atMs is relative to loadTestStartTime
 };
+
+// Set once all bots have connected and the timed run begins (see main()). RTT samples
+// recorded before this is set (during staggered connect/join) are not added to rttLog.
+let loadTestStartTime = null;
 
 // ── Bot Class ───────────────────────────────────────────────────────
 class Bot {
@@ -428,11 +441,17 @@ class Bot {
     const key = `${this.playerId}:${seq}`;
     const sentAt = metrics.inputSeqSentAt.get(key);
     if (sentAt) {
-      metrics.latencySamples.push(Date.now() - sentAt);
+      const rttMs = Date.now() - sentAt;
+      metrics.latencySamples.push(rttMs);
       metrics.inputSeqSentAt.delete(key);
       // Keep only last 100 samples
       if (metrics.latencySamples.length > 100) {
         metrics.latencySamples = metrics.latencySamples.slice(-100);
+      }
+      // Full history for the steady-state summary — only once the timed run has actually
+      // started, so connect/join ramp-up noise never enters it.
+      if (loadTestStartTime !== null) {
+        metrics.rttLog.push({ botId: this.id, ms: rttMs, atMs: Date.now() - loadTestStartTime });
       }
     }
   }
@@ -536,6 +555,68 @@ function printDashboard() {
   prevMetrics = now;
 }
 
+// ── Steady-state RTT summary ───────────────────────────────────────
+// Appended after the existing FINAL SUMMARY block (does not replace or reshape it — the
+// whole-run "Avg latency" line above stays as-is for continuity). Excludes RTT samples from
+// the first RTT_WARMUP_S seconds of the timed run, then reports avg/p50/p95/max both overall
+// and split by bot-index quartile (first 25% of bots connected vs last 25%) — the fairness
+// signal: a send loop that serves early-connected sessions first every tick should show the
+// last-quartile bots with a visibly worse RTT distribution than the first.
+
+function percentile(sortedAscending, p) {
+  if (sortedAscending.length === 0) return null;
+  const rank = Math.min(sortedAscending.length, Math.max(1, Math.ceil(p * sortedAscending.length)));
+  return sortedAscending[rank - 1];
+}
+
+function rttStats(samples) {
+  if (samples.length === 0) return null;
+  const ms = samples.map(s => s.ms).sort((a, b) => a - b);
+  const avg = ms.reduce((a, b) => a + b, 0) / ms.length;
+  return {
+    count: ms.length,
+    avg,
+    p50: percentile(ms, 0.50),
+    p95: percentile(ms, 0.95),
+    max: ms[ms.length - 1],
+  };
+}
+
+function formatRttStats(label, stats) {
+  if (!stats) {
+    console.log(`  ${label}: n/a (no samples)`);
+    return;
+  }
+  console.log(`  ${label}: avg=${stats.avg.toFixed(1)}ms  p50=${stats.p50.toFixed(0)}ms  p95=${stats.p95.toFixed(0)}ms  max=${stats.max.toFixed(0)}ms  (n=${stats.count})`);
+}
+
+function printSteadyStateRttSummary() {
+  const warmupMs = RTT_WARMUP_S * 1000;
+  const steadySamples = metrics.rttLog.filter(s => s.atMs >= warmupMs);
+
+  console.log("\n" + "=".repeat(68));
+  console.log(`  STEADY-STATE RTT SUMMARY  (excludes first ${RTT_WARMUP_S}s of the run)`);
+  console.log("=".repeat(68));
+  console.log(`  Samples: ${steadySamples.length} of ${metrics.rttLog.length} total (RTT_WARMUP_S=${RTT_WARMUP_S})`);
+  console.log("");
+
+  formatRttStats("Overall".padEnd(24), rttStats(steadySamples));
+
+  // Fairness split: first 25% of bots (by connection order / id) vs last 25%.
+  const quartileSize = Math.max(1, Math.floor(BOT_COUNT * 0.25));
+  const firstQuartileMax = quartileSize - 1;
+  const lastQuartileMin = BOT_COUNT - quartileSize;
+
+  const firstQuartileSamples = steadySamples.filter(s => s.botId <= firstQuartileMax);
+  const lastQuartileSamples = steadySamples.filter(s => s.botId >= lastQuartileMin);
+
+  console.log("");
+  formatRttStats(`First 25% (bots 0-${firstQuartileMax})`.padEnd(24), rttStats(firstQuartileSamples));
+  formatRttStats(`Last 25% (bots ${lastQuartileMin}-${BOT_COUNT - 1})`.padEnd(24), rttStats(lastQuartileSamples));
+
+  console.log("=".repeat(68));
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 async function main() {
   console.log(`\nSpawning ${BOT_COUNT} bots against ${GATEWAY_WS}...`);
@@ -564,6 +645,7 @@ async function main() {
 
   console.log(`All ${bots.length} bots connected. Starting load test...\n`);
   startTime = Date.now();
+  loadTestStartTime = startTime; // marks t=0 for the steady-state RTT summary below
   prevMetrics = snapshotMetrics();
 
   // Dashboard update interval
@@ -613,6 +695,9 @@ async function main() {
   }
 
   console.log("=".repeat(68));
+
+  printSteadyStateRttSummary();
+
   process.exit(0);
 }
 
