@@ -161,22 +161,58 @@ corollaries:
   and 400 bots on an 8-vCPU cloud VM and a 24-thread desktop alike; the lever is
   **interest management / parallelizing the fan-out** (build-order steps 3–4).
 
+## Follow-up C — tick-phase attribution (same date, new instrumentation)
+
+Commit `6f1670d` (branch `claude/optimistic-mclean-435ef7`) landed per-tick/per-phase
+timing: `game.tick.duration` histograms plus a DB-less ~5 s rolling window emitted as a
+"Tick timing" log line and as `tick_timing` on `GET /tick`. A fresh image built from that
+commit (`lumberjacks-gateway:tick`, left staged on AM4) re-ran the off-host AM4 levels —
+this converts Follow-up B's RTT-inferred knee into a measured tick p99 with phase
+attribution (steady-state windows; 60 s levels; driver on OMEN):
+
+| Bots | tick total p50 / p99 | overruns per 100 ticks | interest p99 | send p99 |
+|---|---|---|---|---|
+| 0 | 0.01 / 0.03 ms | 0 | 0 | 0 |
+| 200 | ~8 / 39–44 ms | 0–1 | ~2 ms | 37–42 ms |
+| 400 | ~30 / **160–175 ms** | **25** | ~8 ms | **152–168 ms** |
+
+Findings, in order of importance:
+
+1. **The wall is the `send` phase.** At 400 bots, broadcast is ~100 % of tick time and
+   `send` outweighs `interest` ~20:1 (152–168 ms vs ~8 ms). Serializing/writing updates
+   to N clients in a single-threaded loop is the whole knee; sim (~0.4 ms) and hash
+   (~0.2 ms) are irrelevant at these scales.
+2. **The full-interest safe ceiling is ~200 bots/region.** 200 bots fits the 50 ms
+   budget but consumes ~80–88 % of it at p99 (one window grazed 49.8 ms with 1 overrun);
+   400 blows it 3.3× with a quarter of all ticks overrunning.
+3. **Overrun delays are self-inflicted, not host jitter.** `interval` p99 (tick-start
+   spacing) sits at the nominal ~50–51 ms at idle and 200 bots, and tracks total p99
+   exactly at 400 — ticks start late because the *previous* tick overran, not because
+   the scheduler starved the loop. This also retro-validates Follow-up A: co-tenant GPU
+   load never disturbed tick spacing.
+4. **Ticks are bimodal under load** (400 bots: p50 30 ms vs p99 166 ms) — the cost
+   concentrates in the ~25 % of ticks doing heavy broadcast work.
+5. **The serial fan-out is unfair to late joiners.** At 400 bots the first-connected
+   shard averaged 49 ms RTT while the second averaged 1798 ms (and finished 4 bots shy
+   of clean disconnect, 0 errors) — early sessions get served first in the send loop and
+   late sessions absorb nearly the entire send-phase delay. Re-test fairness after the
+   fan-out rework.
+6. **An idle region is essentially free** (total p50 0.01 ms) — reinforcing the
+   co-tenancy economics from Follow-up A.
+
 ## Next steps
 
 1. ~~Contention probe~~ — **done** (Follow-up A): no regression under local dGPU
    inference; "anytime" co-tenancy holds at these load levels.
 2. ~~Off-host clean re-run~~ — **done** (Follow-up B): true knee = 400 bots on both
    hosts, and it is architectural, not hardware.
-3. **Make tick health observable in the bench harness.** Per-tick metrics already exist
-   in the deployed binary — `lumberjacks.tick.duration` (histogram) and
-   `lumberjacks.tick.overruns` (count of ticks over the 50 ms budget), recorded by
-   `TickLoop` via `LumberjacksTelemetry` — but they are OTLP metrics, so a bare DB-less
-   bench container with no collector shows nothing (which is why these runs fell back to
-   RTT and `GET /tick` deltas). Fix: attach an OTLP collector in the bench recipe (AM4
-   already runs one) or add a cheap HTTP tick-summary endpoint alongside `/live/*`.
-   Per-tick-*phase* breakdown (input/sim/interest/serialize/send) remains genuinely open.
-4. **Move the knee:** engage spatial interest tiers / parallelize the broadcast fan-out,
-   then repeat Follow-up B to measure the new knee — this is capacity work now, not
-   hardware selection.
+3. ~~Make tick health observable in the bench harness~~ — **done** (Follow-up C):
+   commit `6f1670d` added the DB-less tick-timing window (log line + `GET /tick`), and
+   the confirmation run measured the knee directly. Merge that branch.
+4. **Move the knee — specifically the `send` phase:** parallelize the broadcast
+   fan-out and/or engage spatial interest tiers, then repeat Follow-up C's run as the
+   after-snapshot (before: 400 bots → tick p99 160–175 ms, send p99 152–168 ms,
+   25 % overruns). Also re-check late-joiner fairness (finding 5).
 5. **Contention probe, hard mode (optional):** repeat Follow-up A with a host-DRAM-heavy
    job (shared-memory/iGPU or CPU inference) to close the remaining bandwidth scenario.
+   The `interval` phase metric now makes scheduler jitter directly visible.
