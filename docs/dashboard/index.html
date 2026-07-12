@@ -148,9 +148,9 @@
     <h1>Comfy&nbsp;Lumberjacks · Community Dashboard</h1>
     <span class="sub">Strategy &amp; Workflow — a living document</span>
     <div class="meta">
-      <span>v<b>0.10.2</b></span>
+      <span>v<b>0.11.0</b></span>
       <span>updated <b>2026-07-11</b></span>
-      <span>status <b style="color:var(--accent)">ACTIVE · Community slice runtime-verified</b></span>
+      <span>status <b style="color:var(--accent)">ACTIVE · situated in platform vision</b></span>
     </div>
   </div>
 </header>
@@ -166,6 +166,7 @@
     <a href="#workflow">Operating model</a>
     <a href="#roadmap">Roadmap</a>
     <a href="#backlog">Backlog</a>
+    <a href="#platform">Platform context</a>
     <a href="#log">Changelog</a>
   </div>
 </nav>
@@ -617,10 +618,54 @@ Live                 Safety                History              Trust
     </div>
   </section>
 
+  <section id="platform">
+    <h2><span class="n">10</span>Strategic context — the Community Compute platform</h2>
+    <p class="lede">Three strategy docs (2026-07-11) situate this dashboard inside a larger arc: evolving Lumberjacks
+      from a single authoritative server into a <b>community-assisted distributed hosting platform</b> — a cloud
+      <em>coordinator</em> plus <em>trusted volunteer nodes</em>, with a control plane for node enrollment, capability
+      reporting, placement, leases, snapshots, telemetry, and failover. This dashboard is that platform's
+      <b>legibility &amp; accountability layer</b>.</p>
+
+    <div class="panel">
+      <p class="kicker">What we've built, mapped onto the platform build order</p>
+      <ul style="margin-bottom:0;font-size:14.5px">
+        <li><b>“Instrument tick phases &amp; telemetry”</b> → the Live slice + <code>LumberjacksTelemetry</code> (partial:
+          tick duration/overruns emitted; per-tick-<em>phase</em> profiling still open).</li>
+        <li><b>“Benchmark cloud vs AM4 under identical workloads”</b> (step 5) → we built exactly this rig —
+          <code>synthclient</code> (identical-workload driver) + the cloud SUT + AM4 (a named volunteer-node candidate).
+          <b>Ready to run</b>; it produces the evidence for the platform's core bet: <em>can a volunteer node host
+          competitively?</em></li>
+        <li><b>Stewardship backlog reframed as the control plane:</b> D-09 (identity/roles) = <em>node enrollment &amp;
+          identity</em>; D-08 (backups/restore) = <em>snapshot management</em>.</li>
+        <li><b>Evidence discipline already aligned:</b> the Workbook's “evidence immutable, interpretation separate” is
+          this repo's provenance model — Observed/Reconstructed events (evidence) vs. the achievement projection
+          (interpretation). See §04.</li>
+      </ul>
+    </div>
+
+    <div class="grid2">
+      <div class="panel tight">
+        <p class="kicker">SUT evolution (migration strategy)</p>
+        <p style="font-size:13.5px;margin:2px 0 0">The synthmon SUT is <b>Stage 1</b> (VM + Compose, DB-less). Stages 2–4
+          add <b>Cloud SQL</b>, <b>Caddy/TLS</b>, <b>Artifact Registry + CI/CD</b>, and production monitoring — the
+          concrete hardening path once behavioral parity holds.</p>
+      </div>
+      <div class="panel tight">
+        <p class="kicker">Community capacity economy</p>
+        <p style="font-size:13.5px;margin:2px 0 0">Contributors earn non-transferable <b>Hosting Credits</b> for reliable
+          compute (valued by availability, reliability, capability, network quality, regional demand), spent to launch
+          private instances — a future Trust/Stewardship surface.</p>
+      </div>
+    </div>
+    <p class="note" style="margin-bottom:0">Guiding principle (Workbook): make existing capabilities
+      <b>reproducible, observable, and transferable</b> before expanding scope — automate bookkeeping, not judgment.</p>
+  </section>
+
   <section id="log">
-    <h2><span class="n">09</span>Changelog</h2>
+    <h2><span class="n">11</span>Changelog</h2>
     <p class="lede">The living ledger. Every shipped increment flips a §03 pill and lands a row here.</p>
     <div class="panel log">
+      <div class="row"><div class="d">2026-07-11</div><div>v0.11.0 — <b>Situated in the Community Compute platform vision (§10).</b> Reconciled three strategy docs (Community Compute Strategy, Development Workbook, GCP Migration Strategy): the dashboard is the platform's legibility/accountability layer; the synthetic-monitoring rig <em>is</em> build-order step 5 (“benchmark cloud vs AM4”); Stewardship backlog reframes as the control plane (node identity, snapshots); provenance discipline already matches the Workbook's evidence-vs-interpretation rule.</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.10.2 — <b>D-07 runtime-verified.</b> Ran the achievements chain end-to-end on AM4 (real Postgres + EventLog): 34 canonical events POSTed → all 8 achievements unlocked with correct provenance + evidence; the <code>reconstructed</code> world-age tier confirmed. Finding: EventLog doesn't auto-migrate — the <code>events</code> table is provisioned by <code>infra/docker/init.sql</code>, not EF (logged as D-18).</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.10.1 — <b>D-13 resolved (decision, no code).</b> Resource/tree broadcasts stay excluded from <code>delivery{path}</code>: that metric measures per-client transport choice (UDP / binary-WS / JSON-WS); tree updates are server-initiated JSON-only world state that would skew <code>json_ws</code>. A by-message-type volume metric is the right home if that view is ever needed.</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.10.0 — <b>Community slice shipped (D-07).</b> Achievements as a pure projection over the authoritative event log: 8-entry catalog, <code>Observed</code> unlocks with event evidence + <code>Reconstructed</code> (world age) auto-unlock; <code>Verified</code>/<code>Community-awarded</code> modeled as extension points (test asserts they never auto-emit). New <code>Game.EventLog</code> <code>/achievements</code> endpoint → Operator API <code>/api/achievements</code> → admin-web History view with provenance badges. 9 new unit tests pass; full suite green (120 + 51); builds clean; frontend typechecks.</div></div>
