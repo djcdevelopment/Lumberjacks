@@ -209,6 +209,70 @@ Findings, in order of importance:
 6. **An idle region is essentially free** (total p50 0.01 ms) — reinforcing the
    co-tenancy economics from Follow-up A.
 
+## Follow-up D — replication-policy A/B (same date; Phase 1 of the telemetry strategy)
+
+Branch `agent/replication-policies` added env-selectable policies to the broadcast path —
+`tiered` (default; the previously hardcoded near-100 u / mid-300 u-every-4th-tick / far-drop
+behavior), `full` (no filtering; the true baseline that never existed in a binary), and
+`radius` (hard cutoff at NearRadius) — plus sent/culled counters in the tick-timing
+window, a `World__SpawnSpread` knob, and a loader `BOT_WANDER` waypoint mode. The
+off-host AM4 rig then ran the matrix (60 s runs, fresh gateway per run; "spread" =
+SpawnSpread + wander, i.e. realistic spatial distribution; "clustered" = the old
+everyone-spawns-at-origin behavior):
+
+| Policy | Bots | Spatial | tick p50/p99 | overruns/100 | send p99 | sent:culled |
+|---|---|---|---|---|---|---|
+| tiered | 400 | clustered | 30 / **168 ms** | 25 | 160 ms | 1:14.4 |
+| full | 400 | spread | no steady state — p99 0.9–2.4 s | 27–76 | up to 2.36 s | 1:0 |
+| tiered | 400 | spread | 40 / **272 ms** | 25 | 264 ms | 1:8.6 |
+| **radius** | **400** | spread | 40 / **46 ms** | ~0 | 39 ms | 1:23.7 |
+| full | 200 | spread | no steady state — overloaded entire run | 84–100 | 206–467 ms | 1:0 |
+| tiered | 200 | spread | 11 / 71 ms | 25 | 68 ms | 1:8.3 |
+| radius | 200 | spread | 11 / **15 ms** | 0 | 12.5 ms | 1:21.9 |
+| radius | 800 | spread | knee: transient p99 2.7 s, then 100/100-overrun plateau | 100 | 128 ms+ | 1:27.1 |
+
+Zero errors in every run; drivers proven non-bottlenecked (27–60 % per loader container).
+
+**Findings:**
+
+1. **Continuity holds.** The new binary's `tiered` under clustered spawns reproduces
+   Follow-up C exactly (p99 167–169 ms, 25/100 overruns) — the refactor changed no
+   physics, and cross-run comparisons are valid.
+2. **The Phase-1 success criterion is met: `radius` (100 u) holds 400 bots at p99
+   ~46 ms with ~0 overruns** — a ~6× tick-time improvement over `tiered` under the same
+   spatial conditions, doubling the previous ~200-bot ceiling. At 800 it collapses
+   (transient p99 2.7 s, then a sustained 100/100-overrun plateau that only recovers as
+   bots drop) — a hard knee, not graceful degradation. Bisection narrows the bracket
+   (see below).
+3. **`full` cannot reach steady state even at 200 bots.** The unfiltered baseline is
+   not merely slower — it is unservable at loads the tiers handle easily. Every capacity
+   number this repo has ever measured owes its feasibility to interest filtering.
+4. **Realistic spatial distribution is *harsher* than the old clustered behavior for
+   `tiered`** (400 bots: p99 168 → 272 ms; cull ratio 1:14.4 → 1:8.6). The historical
+   baselines — measured under origin-spawn clustering — *flattered* the tiered policy;
+   wall-pooled clusters put more pairs in the far-drop band than a uniform spread does.
+   Carry this forward: spread+wander is the honest load shape.
+5. **The late-joiner fairness problem persists under every policy** (shard whole-run
+   RTT spreads up to ~2× at 800 bots, divergent disconnect counts). Policies cut send
+   volume; they don't reorder the serial send loop. This is Phase-2 material.
+6. **Measurement caveat:** the loader's "avg RTT" is a whole-run average dominated by
+   the join surge (e.g. radius@400 shows seconds-scale averages while every steady-state
+   tick fits the budget). Trust the tick windows for server health; treat loader RTT as
+   a surge-inclusive aggregate until the loader reports steady-state percentiles.
+7. **Policy semantics are a gameplay trade, not a free win:** `radius`(100 u) means
+   players beyond 100 u receive no position updates at all. The rig exists to price
+   these trades (radius value, tier intervals) in tick-budget terms; 100 u is the
+   aggressive end of the dial, not a recommendation.
+
+**Knee bisection (radius policy, spread): the ceiling is 400 bots; the knee sits in
+(400, 500].** 500 bots *soft-fails* — tick p99 settles at 76–112 ms (~1.5–2× budget) with
+97–100/100 overruns, sustained but stable. 600 bots *collapses* — p99 to 576 ms with a
+**20.9-second max-tick stall** and 100/100 overruns, same runaway signature as 800. Two
+distinct failure regimes, both send-dominated (interest stays 9–16 ms even at 600): a
+narrow soft-overrun band just past the knee, then a cliff. The cliff — and the fact that
+recovery only ever comes from bots disconnecting — is the strongest argument yet that
+Phase 2 needs backpressure/shedding in the send loop, not just more culling.
+
 ## Next steps
 
 1. ~~Contention probe~~ — **done** (Follow-up A): no regression under local dGPU
@@ -218,10 +282,21 @@ Findings, in order of importance:
 3. ~~Make tick health observable in the bench harness~~ — **done** (Follow-up C):
    commit `6f1670d` added the DB-less tick-timing window (log line + `GET /tick`), and
    the confirmation run measured the knee directly. Merge that branch.
-4. **Move the knee — specifically the `send` phase:** parallelize the broadcast
-   fan-out and/or engage spatial interest tiers, then repeat Follow-up C's run as the
-   after-snapshot (before: 400 bots → tick p99 160–175 ms, send p99 152–168 ms,
-   25 % overruns). Also re-check late-joiner fairness (finding 5).
-5. **Contention probe, hard mode (optional):** repeat Follow-up A with a host-DRAM-heavy
-   job (shared-memory/iGPU or CPU inference) to close the remaining bandwidth scenario.
-   The `interval` phase metric now makes scheduler jitter directly visible.
+4. ~~Move the knee~~ — **done** (Follow-up D): `radius`(100 u) holds 400 bots at p99
+   ~46 ms; the policy rig now prices interest policies in tick-budget terms.
+5. **Merge & reconcile.** `agent/replication-policies` (master-based: TickMetrics +
+   policies) and this docs branch (delivery metrics / `LumberjacksTelemetry`) each carry
+   instrumentation the other lacks; reconcile `TickBroadcaster` at merge (suggested:
+   TickMetrics canonical for tick timing, LumberjacksTelemetry keeps delivery).
+6. **Phase 2 — the send loop itself:** `full`'s collapse and radius@800's
+   100/100-overrun plateau both show there is no graceful shedding — a slow tick just
+   cascades. Parallelize/fair-schedule the serial send loop, add backpressure, re-check
+   late-joiner fairness; then re-run Follow-up D's matrix as the after-snapshot.
+7. **Dial-tuning for gameplay:** sweep `Replication__NearRadius` (100 → 200 → 300) and
+   tier intervals to find the largest gameplay-acceptable policy that still fits the
+   budget at target load — the rig makes this a table, not a debate.
+8. **Loader improvement:** report steady-state RTT percentiles (exclude join surge) so
+   client-side numbers stop contradicting healthy tick windows.
+9. **Contention probe, hard mode (optional):** repeat Follow-up A with a host-DRAM-heavy
+   job (shared-memory/iGPU or CPU inference); the `interval` phase metric now makes
+   scheduler jitter directly visible.
