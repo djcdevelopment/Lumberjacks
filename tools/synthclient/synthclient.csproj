@@ -14,4 +14,9 @@
     <ProjectReference Include="..\..\src\Game.Contracts\Game.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+  </ItemGroup>
+
 </Project>

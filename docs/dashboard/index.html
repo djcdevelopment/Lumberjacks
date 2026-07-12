@@ -148,9 +148,9 @@
     <h1>Comfy&nbsp;Lumberjacks · Community Dashboard</h1>
     <span class="sub">Strategy &amp; Workflow — a living document</span>
     <div class="meta">
-      <span>v<b>0.8.0</b></span>
+      <span>v<b>0.9.0</b></span>
       <span>updated <b>2026-07-11</b></span>
-      <span>status <b style="color:var(--accent)">ACTIVE · 6-region geo data captured</b></span>
+      <span>status <b style="color:var(--accent)">ACTIVE · geo dashboard live</b></span>
     </div>
   </div>
 </header>
@@ -345,7 +345,7 @@ Live                 Safety                History              Trust
           <tr><td>Restarts / incidents</td><td><span class="pill partial">PARTIAL</span></td><td>Cloud Monitoring incident list widget + 6 alert policies; no app-level entity</td></tr>
 
           <tr><td colspan="3" style="background:var(--grey-soft);font-weight:650;font-size:12px;letter-spacing:.04em;color:var(--ink-soft)">GAP — instrument first</td></tr>
-          <tr><td>Network latency (RTT)</td><td><span class="pill partial">MEASURED</span></td><td><b>Real 6-region geo dataset</b> (07-11): UDP p50 <b>30 ms</b> (us-west1) → <b>205 ms</b> (São Paulo), loss 0 — see the geo snapshot below. Client-measured; server metric pending (D-17 renders it to Cloud Monitoring).</td></tr>
+          <tr><td>Network latency (RTT)</td><td><span class="pill partial">MEASURED</span></td><td><b>Real 6-region geo dataset</b> (07-11): UDP p50 <b>30 ms</b> (us-west1) → <b>205 ms</b> (São Paulo), loss 0 — see the geo snapshot below. Now a <b>standing Cloud Monitoring dashboard</b> (D-17): <code>synthclient.rtt_p50_ms{region,transport}</code>.</td></tr>
           <tr><td>Packet-loss rate</td><td><span class="pill partial">MEASURED</span></td><td>synthclient loss = <b>0 across all 6 regions × 3 transports</b> (25.5k deliveries, 07-11). Client-measured; server-side rate metric still not derived (D-06).</td></tr>
           <tr><td>Backups / restore point / restore rehearsal</td><td><span class="pill gap">GAP</span></td><td>Strategy text only; no metric or endpoint</td></tr>
           <tr><td>Achievements (as first-class, provenance-tagged)</td><td><span class="pill gap">GAP</span></td><td>Progression computes points/rank from events; no achievement entity or provenance flag</td></tr>
@@ -420,8 +420,9 @@ Live                 Safety                History              Trust
       <p class="note" style="margin-bottom:0">All three transports were exercised from every region; UDP is shown because
         it had the tightest tail (e.g. us-west1 UDP p99 51 ms vs binary-WS 250 ms). A cold-start warm-up skewed the very
         first probe in two regions (us-west1/europe-west3 <em>json</em>), which is why the warmed UDP pass is the honest
-        per-region number. Next: emit these as <code>workload.googleapis.com/synthclient.rtt{region}</code> so they live
-        on a Cloud Monitoring dashboard, not just here.</p>
+        per-region number. These now emit as <code>workload.googleapis.com/synthclient.rtt_p50_ms{region,transport}</code>
+        (via OTLP → per-VM Ops Agent) to a <b>standing Cloud Monitoring dashboard, “Synthclient — Geo Latency”</b> — this
+        panel is a point-in-time copy of that live view (D-17 done).</p>
     </div>
   </section>
 
@@ -607,7 +608,7 @@ Live                 Safety                History              Trust
           <tr><td>D-14</td><td>2 · Instrument</td><td>Measuring client harness <code>tools/synthclient</code> — seq-echo RTT, loss, transport breakdown; json/binary/udp modes</td><td><b style="color:var(--accent)">✓ validated AM4 07-11</b></td></tr>
           <tr><td>D-15</td><td>2 · Instrument</td><td>SUT deploy — <code>infra/gcp/synthmon</code> (33 res, us-west1); gateway serving public <code>136.118.58.123:4000</code>. External smoke from AM4: all 3 transports, loss 0, real WAN RTT p50 52–58 ms.</td><td><b style="color:var(--accent)">✓ done 07-11</b></td></tr>
           <tr><td>D-16</td><td>2 · Instrument</td><td>Multi-region fleet (6 regions: US×2, Frankfurt, Tokyo, São Paulo, Sydney) — ran + collected + <b>torn down</b>, no orphans</td><td><b style="color:var(--accent)">✓ done 07-11</b></td></tr>
-          <tr><td>D-17</td><td>2 · Instrument</td><td>Geo snapshot rendered in §03 (UDP p50/p99 by region). <b>Next:</b> emit as <code>synthclient.rtt{region}</code> to Cloud Monitoring for a standing widget</td><td><b style="color:var(--accent)">✓ v1 · metric TODO</b></td></tr>
+          <tr><td>D-17</td><td>2 · Instrument</td><td>Geo latency as real metrics — <code>synthclient.rtt_p50_ms/p99_ms/loss_rate{region,transport}</code> via OTLP → Ops Agent → the standing <b>“Synthclient — Geo Latency”</b> Cloud Monitoring dashboard</td><td><b style="color:var(--accent)">✓ done 07-11</b></td></tr>
         </tbody>
       </table>
     </div>
@@ -617,6 +618,7 @@ Live                 Safety                History              Trust
     <h2><span class="n">09</span>Changelog</h2>
     <p class="lede">The living ledger. Every shipped increment flips a §03 pill and lands a row here.</p>
     <div class="panel log">
+      <div class="row"><div class="d">2026-07-11</div><div>v0.9.0 — <b>Geo latency is now a standing Cloud Monitoring dashboard (D-17 done).</b> synthclient emits percentile gauges (<code>synthclient.rtt_p50_ms / rtt_p99_ms / loss_rate</code> tagged region+transport) via OTLP; fleet VMs run the Ops Agent to ship them to Cloud Monitoring. Re-ran all 6 regions — metrics verified landed per region (loss 0), permanent dashboard <b>“Synthclient — Geo Latency”</b> created. Fleet torn down (no orphans); full solution builds clean after the shared OpenTelemetry package addition.</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.8.0 — <b>6-region geo latency captured (D-16/D-17).</b> Fleet of <code>e2-micro</code> in us-west1, us-east4, Frankfurt, Tokyo, São Paulo, Sydney measured real RTT against the us-west1 SUT: UDP p50 30 → 205 ms by geography, <b>loss 0 everywhere</b> (server confirmed +23.5k deliveries across all 3 transports). Fleet then destroyed — verified only SUT resources remain, GCS artifact bucket deleted, no orphans. Geo snapshot rendered in §03. Fleet cost ≈ pennies.</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.7.0 — <b>SUT live on GCP + real external traffic (D-15).</b> Applied <code>infra/gcp/synthmon</code> (33 res, us-west1), deployed the current branch (gateway image built in-VM, running DB-less), public at <code>136.118.58.123:4000</code>. Ran synthclient from AM4 over real WAN: json p50 58 ms / binary p50 58 ms (p99 232) / <b>udp p50 52 ms</b>, loss 0 all modes — UDP lowest-latency as designed. Server cross-check <code>/live/transport</code> {udp:611, binary_ws:613, json_ws:607} — exactly-once held over WAN. Next: 6-region fleet (D-16).</div></div>
       <div class="row"><div class="d">2026-07-11</div><div>v0.6.0 — <b>Synthetic-monitoring workstream started.</b> Built <code>tools/synthclient</code> (BCL-only measuring client: seq-echo RTT, packet loss, transport breakdown; json/binary/udp modes). Validated on AM4: all three paths delivered 304 each, loss 0, RTT p50 ~25–30ms (tick-quantization, correct), exactly-once held — this also <b>closes the udp/binary_ws live-verification residual</b> (D-12/D-14). Reverse-engineered the UDP bind handshake (8-byte <code>ulong</code> token prefix). Created GCP project <code>lumberjacks-synthmon-260711</code> (billing linked, compute/monitoring/logging on; zero VMs = $0). Next: SUT deploy + region fleet.</div></div>

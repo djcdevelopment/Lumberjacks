@@ -72,10 +72,18 @@ resource "google_compute_instance" "fleet" {
   }
 
   metadata_startup_script = templatefile("${path.module}/scripts/fleet-client.sh.tftpl", {
-    region_label    = each.key
-    sut_ws_url      = var.sut_ws_url
-    synthclient_url = var.synthclient_url
+    region_label     = each.key
+    sut_ws_url       = var.sut_ws_url
+    synthclient_url  = var.synthclient_url
+    ops_agent_config = file("${path.module}/ops-agent-config.yaml")
   })
+
+  # Reuse the SUT runtime SA (holds roles/monitoring.metricWriter) so the fleet's
+  # Ops Agent can write the synthclient OTLP gauges into Cloud Monitoring.
+  service_account {
+    email  = google_service_account.runtime.email
+    scopes = ["cloud-platform"]
+  }
 
   shielded_instance_config {
     enable_secure_boot          = true

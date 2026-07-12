@@ -15,6 +15,7 @@
 // References Game.Contracts to reuse the exact wire serializers (BinaryEnvelope / PayloadSerializers).
 
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -22,6 +23,8 @@ using System.Text;
 using System.Text.Json;
 using Game.Contracts.Protocol;
 using Game.Contracts.Protocol.Binary;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Config (env vars with defaults)
@@ -112,6 +115,45 @@ var summary = new
 };
 
 Console.WriteLine(JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Emit computed-percentile GAUGES via OpenTelemetry OTLP.
+//
+//  A synthetic probe pre-computes its percentiles, so we ship the already-derived
+//  p50/p99/loss values as observable gauges (not histograms) tagged with region +
+//  transport. Endpoint/protocol come from OTEL_EXPORTER_OTLP_ENDPOINT /
+//  OTEL_EXPORTER_OTLP_PROTOCOL (via .AddOtlpExporter()). Through the SUT/fleet Ops
+//  Agent OTLP receiver these surface as workload.googleapis.com/synthclient.*.
+//  We ForceFlush + Dispose so a short-lived run actually exports before exit.
+// ─────────────────────────────────────────────────────────────────────────────
+var p50Ms = Round(Pct(50));
+var p99Ms = Round(Pct(99));
+
+using (var meter = new Meter("synthclient"))
+{
+    var gaugeTags = new KeyValuePair<string, object?>[]
+    {
+        new("region", regionLabel),
+        new("transport", mode),
+    };
+
+    meter.CreateObservableGauge(
+        "synthclient.rtt_p50_ms", () => new Measurement<double>(p50Ms, gaugeTags), unit: "ms");
+    meter.CreateObservableGauge(
+        "synthclient.rtt_p99_ms", () => new Measurement<double>(p99Ms, gaugeTags), unit: "ms");
+    meter.CreateObservableGauge(
+        "synthclient.loss_rate", () => new Measurement<double>(lossRate, gaugeTags), unit: "1");
+
+    using var meterProvider = Sdk.CreateMeterProviderBuilder()
+        .AddMeter("synthclient")
+        .AddOtlpExporter()
+        .Build();
+
+    // Trigger a collection of the observable gauges and push them to the exporter,
+    // then let the using-dispose flush/shut down the provider cleanly.
+    meterProvider?.ForceFlush(5000);
+}
+
 return 0;
 
 static double Round(double v) => Math.Round(v, 4);
