@@ -9,12 +9,12 @@ namespace Game.Simulation.Tests;
 
 public class PlayerHandlerTests
 {
-    private static (PlayerHandler handler, WorldState world) CreateHandler()
+    private static (PlayerHandler handler, WorldState world) CreateHandler(IConfiguration? config = null)
     {
         var world = new WorldState();
         // PlayerHandler needs IHttpClientFactory and IConfiguration for fire-and-forget events.
         // For tests we use a stub HttpClientFactory and empty config — events will silently fail, which is fine.
-        var config = new ConfigurationBuilder().Build();
+        config ??= new ConfigurationBuilder().Build();
         var handler = new PlayerHandler(
             world,
             new StubHttpClientFactory(),
@@ -184,6 +184,41 @@ public class PlayerHandlerTests
         handler.Leave(new LeaveRequest { PlayerId = "player-01" });
 
         Assert.Equal(1, world.Regions["region-spawn"].PlayerCount);
+    }
+
+    [Fact]
+    public void JoinDefaultsToOriginSpawnWhenSpawnSpreadDisabled()
+    {
+        var (handler, world) = CreateHandler(); // World:SpawnSpread unset — default false
+
+        handler.Join(new JoinRequest { PlayerId = "player-1", RegionId = "region-spawn" });
+
+        Assert.Equal(new Vec3(0, 0, 0), world.Players["player-1"].Position);
+    }
+
+    [Fact]
+    public void JoinSpreadsSpawnsWithinBoundsWhenEnabled()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["World:SpawnSpread"] = "true" })
+            .Build();
+        var (handler, world) = CreateHandler(config);
+
+        // region-spawn bounds are (-500,-10,-500)..(500,200,500); spread insets by 50u.
+        for (var i = 0; i < 5; i++)
+            handler.Join(new JoinRequest { PlayerId = $"player-{i}", RegionId = "region-spawn" });
+
+        var positions = world.Players.Values.Select(p => p.Position).ToList();
+
+        foreach (var pos in positions)
+        {
+            Assert.InRange(pos.X, -450, 450);
+            Assert.InRange(pos.Z, -450, 450);
+        }
+
+        // Not all identical — spread is actually randomized (astronomically unlikely to collide by chance).
+        Assert.True(positions.Select(p => (p.X, p.Z)).Distinct().Count() > 1,
+            "Expected spread spawns to differ across joins");
     }
 
     /// <summary>Stub IHttpClientFactory that returns a default HttpClient (fire-and-forget calls will fail silently).</summary>

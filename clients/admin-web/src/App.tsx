@@ -58,6 +58,35 @@ interface GuildProgress {
   updated_at: string
 }
 
+interface TransportDistribution {
+  paths: Record<string, number>
+  total: number
+}
+
+interface AchievementEvidence {
+  event_id: string
+  event_type: string
+  occurred_at: string
+}
+
+interface Achievement {
+  id: string
+  title: string
+  description: string
+  provenance: 'observed' | 'verified' | 'community_awarded' | 'reconstructed'
+  scope: 'community' | 'guild' | 'player'
+  unlocked: boolean
+  unlocked_at: string | null
+  evidence: AchievementEvidence[]
+}
+
+interface SessionTransitions {
+  active: number
+  created: number
+  resumed: number
+  detached: number
+}
+
 const tableStyle = { width: '100%', borderCollapse: 'collapse' as const }
 const thStyle = { textAlign: 'left' as const, padding: 8, borderBottom: '1px solid #30363d' }
 const tdStyle = { padding: 8, borderBottom: '1px solid #21262d' }
@@ -102,6 +131,47 @@ const btnDangerStyle = {
   fontSize: 12,
 }
 
+// Provenance tiers are visually distinct and never presented as equivalent
+// (dashboard §04): Observed/Reconstructed are auto-computed; Verified and
+// Community-awarded are stronger, human/multi-signal claims.
+function provenanceBadge(provenance: Achievement['provenance']): {
+  label: string
+  color: string
+  bg: string
+  title: string
+} {
+  switch (provenance) {
+    case 'observed':
+      return {
+        label: 'Observed',
+        color: '#58a6ff',
+        bg: 'rgba(88,166,255,0.12)',
+        title: 'Directly derived from authoritative server events.',
+      }
+    case 'reconstructed':
+      return {
+        label: 'Reconstructed',
+        color: '#d29922',
+        bg: 'rgba(210,153,34,0.12)',
+        title: 'Inferred from aggregate/derived data, not a single event.',
+      }
+    case 'verified':
+      return {
+        label: 'Verified',
+        color: '#3fb950',
+        bg: 'rgba(63,185,80,0.12)',
+        title: 'Confirmed by an independent second signal (not auto-computed in v1).',
+      }
+    case 'community_awarded':
+      return {
+        label: 'Community-awarded',
+        color: '#d2a8ff',
+        bg: 'rgba(210,168,255,0.12)',
+        title: 'Explicitly granted by members/stewards; attributable (not auto-computed in v1).',
+      }
+  }
+}
+
 function formatUptime(seconds: number) {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -120,6 +190,9 @@ function App() {
   const [structures, setStructures] = useState<Structure[]>([])
   const [players, setPlayers] = useState<PlayerProgress[]>([])
   const [guilds, setGuilds] = useState<GuildProgress[]>([])
+  const [achievements, setAchievements] = useState<Achievement[]>([])
+  const [transport, setTransport] = useState<TransportDistribution | null>(null)
+  const [sessions, setSessions] = useState<SessionTransitions | null>(null)
 
   // Region creation form
   const [newRegion, setNewRegion] = useState({
@@ -145,6 +218,20 @@ function App() {
       .catch(() => setRegions([]))
   }, [])
 
+  const fetchTransport = useCallback(() => {
+    fetch('/api/transport')
+      .then((r) => r.json())
+      .then((d) => setTransport(d))
+      .catch(() => setTransport(null))
+  }, [])
+
+  const fetchSessions = useCallback(() => {
+    fetch('/api/sessions')
+      .then((r) => r.json())
+      .then((d) => setSessions(d))
+      .catch(() => setSessions(null))
+  }, [])
+
   // Load service status + tick on mount
   useEffect(() => {
     fetch('/api/status')
@@ -160,6 +247,22 @@ function App() {
     const interval = setInterval(fetchTick, 2000)
     return () => clearInterval(interval)
   }, [activeTab, fetchTick])
+
+  // Auto-refresh transport distribution every 2 seconds when on transport tab
+  useEffect(() => {
+    if (activeTab !== 'transport') return
+    fetchTransport()
+    const interval = setInterval(fetchTransport, 2000)
+    return () => clearInterval(interval)
+  }, [activeTab, fetchTransport])
+
+  // Auto-refresh session transitions every 2 seconds when on sessions tab
+  useEffect(() => {
+    if (activeTab !== 'sessions') return
+    fetchSessions()
+    const interval = setInterval(fetchSessions, 2000)
+    return () => clearInterval(interval)
+  }, [activeTab, fetchSessions])
 
   useEffect(() => {
     if (activeTab === 'events') {
@@ -198,6 +301,12 @@ function App() {
         .then((r) => r.json())
         .then((d) => setGuilds(Array.isArray(d) ? d : []))
         .catch(() => setGuilds([]))
+    }
+    if (activeTab === 'achievements') {
+      fetch('/api/achievements')
+        .then((r) => r.json())
+        .then((d) => setAchievements(d.achievements || []))
+        .catch(() => setAchievements([]))
     }
   }, [activeTab, fetchRegions])
 
@@ -242,7 +351,12 @@ function App() {
     }
   }
 
-  const tabs = ['status', 'events', 'regions', 'structures', 'players', 'guilds']
+  const sections: { title: string; tabs: string[] }[] = [
+    { title: 'Live', tabs: ['status', 'transport', 'sessions', 'regions', 'structures'] },
+    { title: 'Safety', tabs: ['safety'] },
+    { title: 'History', tabs: ['events', 'players', 'guilds', 'achievements'] },
+    { title: 'Trust', tabs: ['trust'] },
+  ]
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif' }}>
@@ -258,25 +372,41 @@ function App() {
         <h2 style={{ padding: '0 16px', marginBottom: 20, fontSize: 14, color: '#8b949e' }}>
           OPERATOR CONSOLE
         </h2>
-        {tabs.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              display: 'block',
-              width: '100%',
-              padding: '8px 16px',
-              background: activeTab === tab ? '#21262d' : 'transparent',
-              border: 'none',
-              color: activeTab === tab ? '#58a6ff' : '#c9d1d9',
-              textAlign: 'left',
-              cursor: 'pointer',
-              fontSize: 14,
-              textTransform: 'capitalize',
-            }}
-          >
-            {tab}
-          </button>
+        {sections.map((section) => (
+          <div key={section.title} style={{ marginBottom: 16 }}>
+            <div
+              style={{
+                padding: '0 16px 4px',
+                fontSize: 11,
+                fontWeight: 'bold',
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+                color: '#6e7681',
+              }}
+            >
+              {section.title}
+            </div>
+            {section.tabs.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '8px 16px',
+                  background: activeTab === tab ? '#21262d' : 'transparent',
+                  border: 'none',
+                  color: activeTab === tab ? '#58a6ff' : '#c9d1d9',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  textTransform: 'capitalize',
+                }}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
         ))}
       </nav>
 
@@ -349,6 +479,143 @@ function App() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {activeTab === 'transport' && (
+          <div>
+            <p style={subtitleStyle}>
+              How delivered entity updates split across transports (live, in-process telemetry)
+            </p>
+            {!transport || transport.total === 0 ? (
+              <p>No deliveries recorded yet.</p>
+            ) : (
+              (() => {
+                const order = ['udp', 'binary_ws', 'json_ws']
+                const labels: Record<string, string> = {
+                  udp: 'UDP',
+                  binary_ws: 'Binary WS',
+                  json_ws: 'JSON WS (compatibility)',
+                }
+                const colors: Record<string, string> = {
+                  udp: '#58a6ff',
+                  binary_ws: '#3fb950',
+                  json_ws: '#d29922',
+                }
+                const total = transport.total
+                return (
+                  <>
+                    <div
+                      style={{
+                        display: 'flex',
+                        width: '100%',
+                        height: 32,
+                        borderRadius: 6,
+                        overflow: 'hidden',
+                        marginBottom: 16,
+                        background: '#161b22',
+                        border: '1px solid #30363d',
+                      }}
+                    >
+                      {order.map((path) => {
+                        const count = transport.paths[path] || 0
+                        const pct = (count / total) * 100
+                        if (count === 0) return null
+                        return (
+                          <div
+                            key={path}
+                            title={`${labels[path]}: ${count} (${pct.toFixed(1)}%)`}
+                            style={{
+                              width: `${pct}%`,
+                              background: colors[path],
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: 11,
+                              color: '#0d1117',
+                              fontWeight: 'bold',
+                              overflow: 'hidden',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {pct >= 8 ? `${pct.toFixed(0)}%` : ''}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <table style={tableStyle}>
+                      <thead>
+                        <tr>
+                          <th style={thStyle}>Transport</th>
+                          <th style={thStyle}>Count</th>
+                          <th style={thStyle}>Share</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.map((path) => {
+                          const count = transport.paths[path] || 0
+                          const pct = total > 0 ? (count / total) * 100 : 0
+                          return (
+                            <tr key={path}>
+                              <td style={tdStyle}>
+                                <span
+                                  style={{
+                                    display: 'inline-block',
+                                    width: 10,
+                                    height: 10,
+                                    borderRadius: 2,
+                                    background: colors[path],
+                                    marginRight: 8,
+                                  }}
+                                />
+                                {labels[path]}
+                              </td>
+                              <td style={tdStyle}>{count.toLocaleString()}</td>
+                              <td style={{ ...tdStyle, color: '#8b949e' }}>{pct.toFixed(1)}%</td>
+                            </tr>
+                          )
+                        })}
+                        <tr>
+                          <td style={{ ...tdStyle, fontWeight: 'bold' }}>Total</td>
+                          <td style={{ ...tdStyle, fontWeight: 'bold' }}>{total.toLocaleString()}</td>
+                          <td style={tdStyle}>—</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </>
+                )
+              })()
+            )}
+          </div>
+        )}
+
+        {activeTab === 'sessions' && (
+          <div>
+            <p style={subtitleStyle}>
+              Session joins and leaves (live active count plus cumulative transitions)
+            </p>
+            {!sessions ? (
+              <p>No session data available yet.</p>
+            ) : (
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{sessions.active.toLocaleString()}</div>
+                  <div style={statLabelStyle}>Active</div>
+                </div>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{sessions.created.toLocaleString()}</div>
+                  <div style={statLabelStyle}>Created</div>
+                </div>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{sessions.resumed.toLocaleString()}</div>
+                  <div style={statLabelStyle}>Resumed</div>
+                </div>
+                <div style={{ ...cardStyle, flex: '1 1 140px', minWidth: 140 }}>
+                  <div style={statValueStyle}>{sessions.detached.toLocaleString()}</div>
+                  <div style={statLabelStyle}>Detached</div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -598,6 +865,116 @@ function App() {
                 </tbody>
               </table>
             )}
+          </div>
+        )}
+
+        {activeTab === 'achievements' && (
+          <div>
+            <p style={subtitleStyle}>
+              What this community has accomplished together. Each achievement is a projection
+              over authoritative events — never a manually-asserted badge — and carries a
+              provenance tier. Only Observed and Reconstructed unlock automatically; Verified
+              and Community-awarded require confirmation or human authority and are not equivalent.
+            </p>
+            {achievements.length === 0 ? (
+              <p>No achievements available yet.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {achievements.map((a) => {
+                  const badge = provenanceBadge(a.provenance)
+                  return (
+                    <div
+                      key={a.id}
+                      style={{
+                        ...cardStyle,
+                        marginBottom: 0,
+                        opacity: a.unlocked ? 1 : 0.55,
+                        borderLeft: `3px solid ${a.unlocked ? '#3fb950' : '#30363d'}`,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 15, fontWeight: 'bold', color: '#c9d1d9' }}>
+                          {a.title}
+                        </span>
+                        <span
+                          title={badge.title}
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 'bold',
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.5,
+                            padding: '2px 8px',
+                            borderRadius: 10,
+                            color: badge.color,
+                            background: badge.bg,
+                            border: `1px solid ${badge.color}`,
+                          }}
+                        >
+                          {badge.label}
+                        </span>
+                        <span style={{ fontSize: 11, color: '#8b949e', textTransform: 'capitalize' }}>
+                          {a.scope}
+                        </span>
+                        <span
+                          style={{
+                            marginLeft: 'auto',
+                            ...(a.unlocked ? badgeUp : badgeDown),
+                            fontSize: 12,
+                          }}
+                        >
+                          {a.unlocked ? '● unlocked' : '○ locked'}
+                        </span>
+                      </div>
+                      <p style={{ margin: '8px 0 0', color: '#8b949e', fontSize: 13.5, lineHeight: 1.5 }}>
+                        {a.description}
+                      </p>
+                      {a.unlocked && (
+                        <div style={{ marginTop: 10, fontSize: 12, color: '#6e7681' }}>
+                          {a.unlocked_at && (
+                            <div>Unlocked {new Date(a.unlocked_at).toLocaleString()}</div>
+                          )}
+                          {a.evidence.length > 0 && (
+                            <div style={{ marginTop: 4 }}>
+                              <span style={{ color: '#8b949e' }}>Evidence: </span>
+                              {a.evidence.map((ev, i) => (
+                                <span key={ev.event_id} style={{ fontFamily: 'monospace' }}>
+                                  {i > 0 ? ', ' : ''}
+                                  {ev.event_type} ({ev.event_id.slice(0, 8)})
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'safety' && (
+          <div>
+            <p style={subtitleStyle}>Backup and restore integrity signals</p>
+            <div style={cardStyle}>
+              <p style={{ margin: 0, lineHeight: 1.5 }}>
+                Safety signals (backups, verified restore point) are not yet instrumented — see
+                docs/dashboard strategy backlog item D-08.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'trust' && (
+          <div>
+            <p style={subtitleStyle}>Roles, access, and attributable actions</p>
+            <div style={cardStyle}>
+              <p style={{ margin: 0, lineHeight: 1.5 }}>
+                Trust signals (roles, access, attributable actions) require an auth/role model that
+                does not exist yet — see backlog D-09.
+              </p>
+            </div>
           </div>
         )}
       </main>

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using Game.Contracts.Protocol.Binary;
+using Game.ServiceDefaults;
 
 namespace Game.Gateway.WebSocket;
 
@@ -83,7 +84,11 @@ public class UdpTransport : BackgroundService
                 }
 
                 if (result.Buffer.Length < MinPacketSize)
+                {
+                    LumberjacksTelemetry.RecordUdpPacket("invalid");
                     continue; // too small to be valid
+
+                }
 
                 try
                 {
@@ -108,6 +113,7 @@ public class UdpTransport : BackgroundService
         var token = BitConverter.ToUInt64(data, 0);
 
         var session = _sessions.FindByUdpToken(token);
+        LumberjacksTelemetry.RecordUdpPacket(session == null ? "unknown_session" : "received");
         if (session == null)
             return; // unknown token — drop silently
 
@@ -126,7 +132,7 @@ public class UdpTransport : BackgroundService
         {
             var payload = BinaryEnvelope.GetPayload(envelope, header);
             var input = PayloadSerializers.ReadPlayerInput(payload);
-            _router.HandlePlayerInputBinary(session, input);
+            _router.HandlePlayerInputBinary(session, input, "udp");
             return;
         }
 
@@ -151,11 +157,13 @@ public class UdpTransport : BackgroundService
             binaryFrame.CopyTo(packet.AsSpan(TokenBytes));
 
             _client.Send(packet, packet.Length, session.UdpEndpoint);
+            LumberjacksTelemetry.RecordDelivery("udp");
             return true;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "UdpTransport.TrySend failed for session {SessionId}", session.SessionId);
+            LumberjacksTelemetry.RecordUdpPacket("send_error");
             return false;
         }
     }

@@ -29,6 +29,20 @@ builds/
 tools/Godot_*.exe
 tools/GodotSharp/
 
+# Terraform local state and plans
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
 # Personal files
 Documents - Shortcut.lnk
 LI-coach.md

@@ -13,5 +13,6 @@ var app = builder.Build();
 app.MapServiceDefaults();
 
 Game.EventLog.Endpoints.EventEndpoints.Map(app);
+Game.EventLog.Endpoints.AchievementEndpoints.Map(app);
 
 app.Run();
