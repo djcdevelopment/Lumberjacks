@@ -23,6 +23,9 @@ builder.Services.AddSingleton<ValheimHandshakeService>();
 // Simulation services (in-process — eliminates HTTP-per-move hop)
 builder.Services.AddSingleton<WorldState>();
 builder.Services.AddSingleton<InputQueue>();
+// Tick timing: OTel-compatible histograms + windowed p50/p99/max log line and /tick snapshot
+builder.Services.AddMetrics();
+builder.Services.AddSingleton<TickMetrics>();
 builder.Services.AddSingleton<UdpTransport>();
 builder.Services.AddSingleton<TickBroadcaster>();
 builder.Services.AddSingleton<ITickBroadcaster>(sp => sp.GetRequiredService<TickBroadcaster>());

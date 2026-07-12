@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using Game.Contracts.Entities;
 using Game.Contracts.Protocol;
 using Game.Contracts.Protocol.Binary;
+using Game.Simulation.Tick;
 using Game.Simulation.World;
 
 namespace Game.Gateway.WebSocket;
@@ -24,13 +26,15 @@ public class TickBroadcaster : ITickBroadcaster
     private readonly InterestManager _interest;
     private readonly UdpTransport? _udpTransport;
     private readonly ILogger<TickBroadcaster> _logger;
+    private readonly TickMetrics? _metrics;
 
-    public TickBroadcaster(SessionManager sessions, WorldState world, ILogger<TickBroadcaster> logger, UdpTransport? udpTransport = null)
+    public TickBroadcaster(SessionManager sessions, WorldState world, ILogger<TickBroadcaster> logger, UdpTransport? udpTransport = null, TickMetrics? metrics = null)
     {
         _sessions = sessions;
         _interest = new InterestManager(world.SpatialGrid);
         _udpTransport = udpTransport;
         _logger = logger;
+        _metrics = metrics;
     }
 
     public async Task BroadcastTickAsync(
@@ -65,6 +69,10 @@ public class TickBroadcaster : ITickBroadcaster
             .Concat(resourceData.Values.Select(r => r.RegionId))
             .Distinct();
 
+        // Raw Stopwatch tick accumulators for the interest and send sub-phases.
+        // "send" includes per-entity serialization (stackalloc/JSON) — socket writes dominate.
+        long interestElapsed = 0, sendElapsed = 0;
+
         foreach (var regionId in regionIds)
         {
             var sessions = _sessions.GetByRegion(regionId);
@@ -85,7 +93,11 @@ public class TickBroadcaster : ITickBroadcaster
                 var isBinary = session.Protocol == ProtocolMode.Binary;
 
                 // --- Player Updates ---
+                var tInterest = Stopwatch.GetTimestamp();
                 var visiblePlayers = _interest.FilterForObserver(session.PlayerId, regionPlayerChanges, players, tick);
+                interestElapsed += Stopwatch.GetTimestamp() - tInterest;
+
+                var tSend = Stopwatch.GetTimestamp();
                 foreach (var playerId in visiblePlayers)
                 {
                     if (!playerData.TryGetValue(playerId, out var data)) continue;
@@ -118,8 +130,13 @@ public class TickBroadcaster : ITickBroadcaster
                     }
                     catch (Exception ex) { _logger.LogWarning(ex, "Failed to send resource update"); }
                 }
+                sendElapsed += Stopwatch.GetTimestamp() - tSend;
             }
         }
+
+        _metrics?.RecordBroadcastPhases(
+            Stopwatch.GetElapsedTime(0, interestElapsed).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(0, sendElapsed).TotalMilliseconds);
     }
 
     private bool TrySendUdpEntityUpdate(
