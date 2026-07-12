@@ -19,12 +19,21 @@ metrics, and delivered alerts from the same pinned revision.
 Current cloud status, 2026-07-11 local / 2026-07-12 UTC: the proven deployment is
 the combined Comfy/Lumberjacks P7 Valheim netcode replacement environment, not this
 original Godot Stage 1 proof. That deployment lives under `C:\work\comfy\infra\gcp\p7`
-and runs VM `comfy-lumberjacks-p7` in project `lumberjacks-exp-20260711-djc`.
+and runs VM `comfy-lumberjacks-p7` (`n2-highmem-8`, us-west1-b) in project
+`lumberjacks-exp-20260711-djc`.
 It exposes Valheim at `8.231.129.249:2456`, Lumberjacks Gateway at
 `http://8.231.129.249:4000`, and Compose services `postgres`, `gateway`, `eventlog`,
 `progression`, `operatorapi`, and `valheim-server`. Its P7 gate passed for handshake,
 ownership pin, redirect, injection, client stability, and save integrity, and the
 server was disarmed afterward.
+
+Cutover-test update (2026-07-12): the full P7 cutover test was rerun and passed
+end-to-end. An earlier attempt failed with an out-of-memory condition while the
+Valheim server, Lumberjacks authority services, and PostgreSQL were co-located on a
+smaller instance; sizing the VM up to `n2-highmem-8` (8 vCPU / 64 GB) cleared it.
+This is operator-confirmed, not a re-collected Section 8 evidence bundle. The
+original Godot Stage 1 VM (`lumberjacks-stage1`, `e2-medium`) was stopped on
+2026-07-12 as superseded; `comfy-lumberjacks-p7` remains running.
 
 Use this runbook as the completion plan. Sections 1-4 prepare and deploy one immutable
 revision, Sections 5-7 execute the live proof, Section 8 records the evidence, and

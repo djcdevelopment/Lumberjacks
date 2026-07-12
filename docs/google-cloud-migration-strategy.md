@@ -1,9 +1,10 @@
 # Google Cloud Migration Strategy
 
 Status: Stage 1 implementation complete; original Godot Gate 1 evidence pending;
-Comfy/Lumberjacks P7 deployment proven
+Comfy/Lumberjacks P7 deployment proven; full P7 cutover test passed on
+`n2-highmem-8` after resolving the earlier out-of-memory failure
 
-Last reviewed: 2026-07-11
+Last reviewed: 2026-07-12
 
 ## Current GCP deployment note
 
@@ -12,8 +13,19 @@ combined Valheim x Lumberjacks netcode replacement environment, not the original
 Godot multiplayer vertical slice described by the Stage 1 gate below. The deployment
 runs from the Comfy repository's `infra/gcp/p7` Terraform root and co-locates the
 migrated `ComfyEra16` Valheim dedicated server, ComfyNetworkSense 0.5.18, and the
-Lumberjacks authority services on GCP VM `comfy-lumberjacks-p7` in project
-`lumberjacks-exp-20260711-djc`.
+Lumberjacks authority services on GCP VM `comfy-lumberjacks-p7` (`n2-highmem-8`,
+us-west1-b) in project `lumberjacks-exp-20260711-djc`.
+
+Cutover-test update (2026-07-12): the full P7 cutover test has been run end-to-end
+and passed. An earlier run failed under memory pressure (out-of-memory) when the
+co-located Valheim server, Lumberjacks authority services, and PostgreSQL shared a
+smaller instance; moving the VM to `n2-highmem-8` (8 vCPU / 64 GB) resolved it and
+the cutover then ran clean. This is an operator-confirmed result; the formal Section
+8 evidence bundle (compose state, scenario logs, correlated telemetry) has not been
+re-collected against a pinned revision, so it is recorded as proven-in-practice, not
+as a formally gated evidence bundle. The `comfy-lumberjacks-p7` VM is left running;
+the superseded original Stage 1 VM (`lumberjacks-stage1`, `e2-medium`) was stopped
+on 2026-07-12 to stop its idle spend.
 
 Current endpoints and entry points:
 
