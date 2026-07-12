@@ -63,6 +63,23 @@ interface TransportDistribution {
   total: number
 }
 
+interface AchievementEvidence {
+  event_id: string
+  event_type: string
+  occurred_at: string
+}
+
+interface Achievement {
+  id: string
+  title: string
+  description: string
+  provenance: 'observed' | 'verified' | 'community_awarded' | 'reconstructed'
+  scope: 'community' | 'guild' | 'player'
+  unlocked: boolean
+  unlocked_at: string | null
+  evidence: AchievementEvidence[]
+}
+
 interface SessionTransitions {
   active: number
   created: number
@@ -114,6 +131,47 @@ const btnDangerStyle = {
   fontSize: 12,
 }
 
+// Provenance tiers are visually distinct and never presented as equivalent
+// (dashboard §04): Observed/Reconstructed are auto-computed; Verified and
+// Community-awarded are stronger, human/multi-signal claims.
+function provenanceBadge(provenance: Achievement['provenance']): {
+  label: string
+  color: string
+  bg: string
+  title: string
+} {
+  switch (provenance) {
+    case 'observed':
+      return {
+        label: 'Observed',
+        color: '#58a6ff',
+        bg: 'rgba(88,166,255,0.12)',
+        title: 'Directly derived from authoritative server events.',
+      }
+    case 'reconstructed':
+      return {
+        label: 'Reconstructed',
+        color: '#d29922',
+        bg: 'rgba(210,153,34,0.12)',
+        title: 'Inferred from aggregate/derived data, not a single event.',
+      }
+    case 'verified':
+      return {
+        label: 'Verified',
+        color: '#3fb950',
+        bg: 'rgba(63,185,80,0.12)',
+        title: 'Confirmed by an independent second signal (not auto-computed in v1).',
+      }
+    case 'community_awarded':
+      return {
+        label: 'Community-awarded',
+        color: '#d2a8ff',
+        bg: 'rgba(210,168,255,0.12)',
+        title: 'Explicitly granted by members/stewards; attributable (not auto-computed in v1).',
+      }
+  }
+}
+
 function formatUptime(seconds: number) {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -132,6 +190,7 @@ function App() {
   const [structures, setStructures] = useState<Structure[]>([])
   const [players, setPlayers] = useState<PlayerProgress[]>([])
   const [guilds, setGuilds] = useState<GuildProgress[]>([])
+  const [achievements, setAchievements] = useState<Achievement[]>([])
   const [transport, setTransport] = useState<TransportDistribution | null>(null)
   const [sessions, setSessions] = useState<SessionTransitions | null>(null)
 
@@ -243,6 +302,12 @@ function App() {
         .then((d) => setGuilds(Array.isArray(d) ? d : []))
         .catch(() => setGuilds([]))
     }
+    if (activeTab === 'achievements') {
+      fetch('/api/achievements')
+        .then((r) => r.json())
+        .then((d) => setAchievements(d.achievements || []))
+        .catch(() => setAchievements([]))
+    }
   }, [activeTab, fetchRegions])
 
   const handleCreateRegion = async () => {
@@ -289,7 +354,7 @@ function App() {
   const sections: { title: string; tabs: string[] }[] = [
     { title: 'Live', tabs: ['status', 'transport', 'sessions', 'regions', 'structures'] },
     { title: 'Safety', tabs: ['safety'] },
-    { title: 'History', tabs: ['events', 'players', 'guilds'] },
+    { title: 'History', tabs: ['events', 'players', 'guilds', 'achievements'] },
     { title: 'Trust', tabs: ['trust'] },
   ]
 
@@ -799,6 +864,92 @@ function App() {
                   ))}
                 </tbody>
               </table>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'achievements' && (
+          <div>
+            <p style={subtitleStyle}>
+              What this community has accomplished together. Each achievement is a projection
+              over authoritative events — never a manually-asserted badge — and carries a
+              provenance tier. Only Observed and Reconstructed unlock automatically; Verified
+              and Community-awarded require confirmation or human authority and are not equivalent.
+            </p>
+            {achievements.length === 0 ? (
+              <p>No achievements available yet.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {achievements.map((a) => {
+                  const badge = provenanceBadge(a.provenance)
+                  return (
+                    <div
+                      key={a.id}
+                      style={{
+                        ...cardStyle,
+                        marginBottom: 0,
+                        opacity: a.unlocked ? 1 : 0.55,
+                        borderLeft: `3px solid ${a.unlocked ? '#3fb950' : '#30363d'}`,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 15, fontWeight: 'bold', color: '#c9d1d9' }}>
+                          {a.title}
+                        </span>
+                        <span
+                          title={badge.title}
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 'bold',
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.5,
+                            padding: '2px 8px',
+                            borderRadius: 10,
+                            color: badge.color,
+                            background: badge.bg,
+                            border: `1px solid ${badge.color}`,
+                          }}
+                        >
+                          {badge.label}
+                        </span>
+                        <span style={{ fontSize: 11, color: '#8b949e', textTransform: 'capitalize' }}>
+                          {a.scope}
+                        </span>
+                        <span
+                          style={{
+                            marginLeft: 'auto',
+                            ...(a.unlocked ? badgeUp : badgeDown),
+                            fontSize: 12,
+                          }}
+                        >
+                          {a.unlocked ? '● unlocked' : '○ locked'}
+                        </span>
+                      </div>
+                      <p style={{ margin: '8px 0 0', color: '#8b949e', fontSize: 13.5, lineHeight: 1.5 }}>
+                        {a.description}
+                      </p>
+                      {a.unlocked && (
+                        <div style={{ marginTop: 10, fontSize: 12, color: '#6e7681' }}>
+                          {a.unlocked_at && (
+                            <div>Unlocked {new Date(a.unlocked_at).toLocaleString()}</div>
+                          )}
+                          {a.evidence.length > 0 && (
+                            <div style={{ marginTop: 4 }}>
+                              <span style={{ color: '#8b949e' }}>Evidence: </span>
+                              {a.evidence.map((ev, i) => (
+                                <span key={ev.event_id} style={{ fontFamily: 'monospace' }}>
+                                  {i > 0 ? ', ' : ''}
+                                  {ev.event_type} ({ev.event_id.slice(0, 8)})
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
         )}
