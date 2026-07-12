@@ -1,8 +1,41 @@
 # Google Cloud Migration Strategy
 
-Status: Stage 1 implementation complete; Gate 1 evidence pending
+Status: Stage 1 implementation complete; original Godot Gate 1 evidence pending;
+Comfy/Lumberjacks P7 deployment proven
 
 Last reviewed: 2026-07-11
+
+## Current GCP deployment note
+
+As of 2026-07-11 local / 2026-07-12 UTC, the active proven cloud deployment is the
+combined Valheim x Lumberjacks netcode replacement environment, not the original
+Godot multiplayer vertical slice described by the Stage 1 gate below. The deployment
+runs from the Comfy repository's `infra/gcp/p7` Terraform root and co-locates the
+migrated `ComfyEra16` Valheim dedicated server, ComfyNetworkSense 0.5.18, and the
+Lumberjacks authority services on GCP VM `comfy-lumberjacks-p7` in project
+`lumberjacks-exp-20260711-djc`.
+
+Current endpoints and entry points:
+
+- Valheim direct join: `8.231.129.249:2456`
+- Lumberjacks gateway health/control: `http://8.231.129.249:4000`
+- fieldlab target setup: `C:\work\comfy\fieldlab\scripts\set-gcp-p7-target.ps1`
+- fieldlab P7 runner: `C:\work\comfy\fieldlab\scripts\run-loopback-window.ps1`
+- VM service wrapper: `comfy-lumberjacks-p7.service`
+
+Current Compose services:
+
+- `postgres`
+- `gateway`
+- `eventlog`
+- `progression`
+- `operatorapi`
+- `valheim-server`
+
+P7/I7 passed in one live window: Lumberjacks-decided handshake accept, ownership pin
+with negative control, redirect receipts with zero loss/duplicates, rendered
+injection with the Lumberjacks owner, clean client stability scan, and save-integrity
+pass. The server was disarmed back to observe-only baseline after the gate.
 
 ## 1. Objective
 

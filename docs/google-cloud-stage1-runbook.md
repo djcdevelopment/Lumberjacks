@@ -16,6 +16,16 @@ the repository does not contain a Gate 1 evidence bundle proving an external nat
 client session, UDP delivery, restart persistence, trace-correlated logs, populated
 metrics, and delivered alerts from the same pinned revision.
 
+Current cloud status, 2026-07-11 local / 2026-07-12 UTC: the proven deployment is
+the combined Comfy/Lumberjacks P7 Valheim netcode replacement environment, not this
+original Godot Stage 1 proof. That deployment lives under `C:\work\comfy\infra\gcp\p7`
+and runs VM `comfy-lumberjacks-p7` in project `lumberjacks-exp-20260711-djc`.
+It exposes Valheim at `8.231.129.249:2456`, Lumberjacks Gateway at
+`http://8.231.129.249:4000`, and Compose services `postgres`, `gateway`, `eventlog`,
+`progression`, `operatorapi`, and `valheim-server`. Its P7 gate passed for handshake,
+ownership pin, redirect, injection, client stability, and save integrity, and the
+server was disarmed afterward.
+
 Use this runbook as the completion plan. Sections 1-4 prepare and deploy one immutable
 revision, Sections 5-7 execute the live proof, Section 8 records the evidence, and
 Section 9 controls cost after the result. Do not mark Gate 1 complete unless every
