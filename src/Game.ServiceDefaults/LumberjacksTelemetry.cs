@@ -25,12 +25,6 @@ public static class LumberjacksTelemetry
         "lumberjacks.udp.packets", unit: "{packet}", description: "UDP packet outcomes.");
     private static readonly Counter<long> Delivery = Metrics.CreateCounter<long>(
         "lumberjacks.delivery", unit: "{message}", description: "Gameplay delivery path outcomes.");
-    private static readonly Histogram<double> TickDuration = Metrics.CreateHistogram<double>(
-        "lumberjacks.tick.duration", unit: "ms", description: "Authoritative simulation tick duration.");
-    private static readonly Counter<long> TickOverruns = Metrics.CreateCounter<long>(
-        "lumberjacks.tick.overruns", unit: "{tick}", description: "Simulation ticks exceeding the 50 ms budget.");
-    private static readonly Histogram<long> ChangedEntities = Metrics.CreateHistogram<long>(
-        "lumberjacks.tick.changed_entities", unit: "{entity}", description: "Entities changed per simulation tick.");
 
     public static Activity? StartMessageActivity(string messageType, string transport)
     {
@@ -79,12 +73,4 @@ public static class LumberjacksTelemetry
     /// <summary>Point-in-time copy of session transition counts (created/resumed/detached).</summary>
     public static IReadOnlyDictionary<string, long> SnapshotTransitions() =>
         new Dictionary<string, long>(TransitionTally);
-
-    public static void RecordTick(TimeSpan duration, int changedPlayers, int changedResources)
-    {
-        TickDuration.Record(duration.TotalMilliseconds);
-        ChangedEntities.Record(changedPlayers + changedResources);
-        if (duration.TotalMilliseconds > 50)
-            TickOverruns.Add(1);
-    }
 }

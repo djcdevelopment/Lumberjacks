@@ -1,3 +1,4 @@
+using Game.Simulation.Tick;
 using Game.Simulation.World;
 
 namespace Game.Simulation.Endpoints;
@@ -6,9 +7,13 @@ public static class TickEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/tick", (WorldState world) =>
+        app.MapGet("/tick", (WorldState world, HttpContext http) =>
         {
             var uptime = DateTimeOffset.UtcNow - world.StartedAt;
+
+            // Registered only where the tick loop is hosted (Gateway); null before
+            // the first ~5s window completes or in the standalone Simulation service.
+            var timing = http.RequestServices.GetService<TickMetrics>()?.LastWindow;
 
             return Results.Ok(new
             {
@@ -23,6 +28,7 @@ public static class TickEndpoints
                     player_count = r.PlayerCount,
                     active = r.Active,
                 }),
+                tick_timing = timing,
             });
         });
     }

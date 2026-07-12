@@ -38,7 +38,22 @@ const REGION_ID  = "region-spawn";
 // Derive UDP host/port from WS URL
 const wsUrl = new URL(GATEWAY_WS);
 const UDP_HOST = wsUrl.hostname;
-const UDP_PORT = 4005;
+
+// UDP port resolution: explicit env wins; otherwise each bot uses the udp_port field
+// from its own session_started payload (falls back to 4005 until that arrives).
+const UDP_PORT_ENV = process.env.UDP_PORT ? parseInt(process.env.UDP_PORT, 10) : null;
+const DEFAULT_UDP_PORT = 4005;
+// Display-only label for the dashboard — the real port is resolved per-bot (see Bot.udpPort).
+const udpPortLabel = () => UDP_PORT_ENV ? String(UDP_PORT_ENV) : `${DEFAULT_UDP_PORT} (default, per-bot from session_started)`;
+
+// BOT_WANDER=1: bots head toward a random waypoint instead of pure random-walk.
+// Unset (default) leaves the original 5%-chance-per-tick random-walk behavior unchanged.
+const BOT_WANDER = process.env.BOT_WANDER === "1";
+const WANDER_HALF_EXTENT = 450;      // waypoints uniform in [-450, 450] on X/Z (inside the 500u region bounds)
+const WANDER_ARRIVAL_DIST = 20;      // re-pick once within this many units of the waypoint
+const WANDER_MAX_AGE_MS = 10_000;    // ...or after 10s, whichever comes first
+const WANDER_SPEED_PERCENT = 80;     // matches the speed already sent by _startInput
+const WANDER_MAX_SPEED_PER_TICK = 10.0; // mirrors SimulationStep.MaxSpeedPerTick (10 u/tick @ 20Hz, 100%)
 
 // ── Binary Protocol Helpers ─────────────────────────────────────────
 
@@ -200,6 +215,13 @@ class Bot {
     this.direction = Math.floor(Math.random() * 256); // random walk direction
     this.joined = false;
     this.udpBound = false;
+    this.udpPort = UDP_PORT_ENV || DEFAULT_UDP_PORT; // may be replaced by session_started's udp_port
+
+    // BOT_WANDER state: dead-reckoned position estimate (server is authoritative — this is
+    // only used to steer toward waypoints, not for gameplay correctness) + current waypoint.
+    this.pos = { x: 0, z: 0 };
+    this.waypoint = null;
+    this.waypointSetAt = 0;
   }
 
   connect() {
@@ -245,6 +267,10 @@ class Bot {
         this.playerId = msg.payload.player_id;
         this.udpToken = msg.payload.udp_token;
         this.udpTokenBytes = udpTokenToBytes(this.udpToken);
+        // Prefer the server-advertised udp_port unless UDP_PORT was explicitly set.
+        if (!UDP_PORT_ENV && typeof msg.payload.udp_port === "number" && msg.payload.udp_port > 0) {
+          this.udpPort = msg.payload.udp_port;
+        }
         metrics.sessionStarted++;
         // Join region
         this._sendJson("join_region", { region_id: REGION_ID });
@@ -311,7 +337,7 @@ class Bot {
 
     // Send a bind packet (first UDP packet establishes the session mapping)
     const bindPacket = this._buildUdpInput(0, 0, 0);
-    this.udpSocket.send(bindPacket, UDP_PORT, UDP_HOST, (err) => {
+    this.udpSocket.send(bindPacket, this.udpPort, UDP_HOST, (err) => {
       if (!err) {
         metrics.udpBound++;
         this.udpBound = true;
@@ -325,6 +351,44 @@ class Bot {
     return Buffer.concat([this.udpTokenBytes, envelope]);
   }
 
+  // Pick a new waypoint uniformly within ±WANDER_HALF_EXTENT on X/Z.
+  _pickWaypoint() {
+    this.waypoint = {
+      x: (Math.random() * 2 - 1) * WANDER_HALF_EXTENT,
+      z: (Math.random() * 2 - 1) * WANDER_HALF_EXTENT,
+    };
+    this.waypointSetAt = Date.now();
+  }
+
+  // Steer this.direction toward the current waypoint, re-picking on arrival or timeout.
+  // Also dead-reckons this.pos using the same physics SimulationStep applies server-side,
+  // so repeated calls keep converging on the waypoint. This is a client-side estimate only
+  // (it doesn't know about World:SpawnSpread or server-side corrections) — good enough for
+  // steering a load-test bot, not meant to track true position.
+  _wanderStep() {
+    const now = Date.now();
+    if (!this.waypoint || now - this.waypointSetAt > WANDER_MAX_AGE_MS) {
+      this._pickWaypoint();
+    }
+
+    let dx = this.waypoint.x - this.pos.x;
+    let dz = this.waypoint.z - this.pos.z;
+    if (Math.sqrt(dx * dx + dz * dz) < WANDER_ARRIVAL_DIST) {
+      this._pickWaypoint();
+      dx = this.waypoint.x - this.pos.x;
+      dz = this.waypoint.z - this.pos.z;
+    }
+
+    let headingDeg = Math.atan2(dx, dz) * 180 / Math.PI;
+    if (headingDeg < 0) headingDeg += 360;
+    this.direction = Math.round((headingDeg / 360) * 255) & 0xFF;
+
+    const headingRad = headingDeg * Math.PI / 180;
+    const speedPerTick = (WANDER_SPEED_PERCENT / 100) * WANDER_MAX_SPEED_PER_TICK;
+    this.pos.x += Math.sin(headingRad) * speedPerTick;
+    this.pos.z += Math.cos(headingRad) * speedPerTick;
+  }
+
   _startInput() {
     // Send player_input at INPUT_HZ via UDP
     this.inputInterval = setInterval(() => {
@@ -332,13 +396,15 @@ class Bot {
 
       this.inputSeq = (this.inputSeq + 1) & 0xFFFF;
 
-      // Slowly wander: change direction occasionally
-      if (Math.random() < 0.05) {
+      if (BOT_WANDER) {
+        this._wanderStep();
+      } else if (Math.random() < 0.05) {
+        // Original behavior: slowly wander by changing direction occasionally
         this.direction = Math.floor(Math.random() * 256);
       }
 
-      const packet = this._buildUdpInput(this.direction, 80, this.inputSeq);
-      this.udpSocket.send(packet, UDP_PORT, UDP_HOST);
+      const packet = this._buildUdpInput(this.direction, WANDER_SPEED_PERCENT, this.inputSeq);
+      this.udpSocket.send(packet, this.udpPort, UDP_HOST);
 
       metrics.udpInputsSent++;
       metrics.udpInputBytes += packet.length;
@@ -432,7 +498,7 @@ function printDashboard() {
   console.log("=".repeat(68));
   console.log("  DUAL-CHANNEL LOAD TEST");
   console.log("=".repeat(68));
-  console.log(`  Target:  ${GATEWAY_WS}  (UDP → ${UDP_HOST}:${UDP_PORT})`);
+  console.log(`  Target:  ${GATEWAY_WS}  (UDP → ${UDP_HOST}:${udpPortLabel()})`);
   console.log(`  Bots:    ${BOT_COUNT}   Duration: ${DURATION_S}s   Elapsed: ${elapsed}s   Left: ${remaining}s`);
   console.log("-".repeat(68));
 
@@ -473,7 +539,8 @@ function printDashboard() {
 // ── Main ────────────────────────────────────────────────────────────
 async function main() {
   console.log(`\nSpawning ${BOT_COUNT} bots against ${GATEWAY_WS}...`);
-  console.log(`UDP target: ${UDP_HOST}:${UDP_PORT}`);
+  console.log(`UDP target: ${UDP_HOST}:${udpPortLabel()}`);
+  if (BOT_WANDER) console.log(`Bot movement: BOT_WANDER=1 (waypoint-seeking, ±${WANDER_HALF_EXTENT}u)`);
   console.log(`Duration: ${DURATION_S} seconds\n`);
 
   const bots = [];

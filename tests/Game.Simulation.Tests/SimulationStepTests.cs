@@ -39,7 +39,7 @@ public class SimulationStepTests
 
         var changed = SimulationStep.Execute(world, queue, tick: 1);
 
-        Assert.Contains("player-1", changed);
+        Assert.Contains("player-1", changed.PlayerIds);
         var player = world.Players["player-1"];
         // Direction 0 → heading 0° → sin(0)=0 for X, cos(0)=1 for Z
         Assert.Equal(0, player.Position.X, precision: 5);
@@ -95,7 +95,7 @@ public class SimulationStepTests
 
         var changed = SimulationStep.Execute(world, queue, tick: 1);
 
-        Assert.Contains("player-1", changed);
+        Assert.Contains("player-1", changed.PlayerIds);
         var player = world.Players["player-1"];
         // Velocity should decrease by FrictionPerTick
         Assert.True(player.Velocity.Z < 5, "Velocity should decrease due to friction");
@@ -141,7 +141,7 @@ public class SimulationStepTests
 
         var changed = SimulationStep.Execute(world, queue, tick: 1);
 
-        Assert.DoesNotContain("disconnected", changed);
+        Assert.DoesNotContain("disconnected", changed.PlayerIds);
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public class SimulationStepTests
 
         var changed = SimulationStep.Execute(world, queue, tick: 1);
 
-        Assert.DoesNotContain("player-1", changed);
+        Assert.DoesNotContain("player-1", changed.PlayerIds);
     }
 
     [Fact]
