@@ -78,6 +78,10 @@ Game.Simulation.Endpoints.StructureEndpoints.Map(app);
 Game.Simulation.Endpoints.InventoryEndpoints.Map(app);
 Game.Simulation.Endpoints.TickEndpoints.Map(app);
 Game.Gateway.Endpoints.LiveMetricsEndpoints.Map(app);
+// Public Telemetry API v0 (community-telemetry-strategy.md Phase 3) + Live Community View (Phase 4)
+Game.Simulation.Endpoints.TelemetryV0Endpoints.Map(app);
+Game.Gateway.Endpoints.TelemetryV0SessionsEndpoints.Map(app);
+Game.Gateway.Endpoints.CommunityViewEndpoints.Map(app);
 ValheimPriorityManifestEndpoints.Map(app);
 ValheimZdoRedirectEndpoints.Map(app);
 ValheimZdoInjectionEndpoints.Map(app);
