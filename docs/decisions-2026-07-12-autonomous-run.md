@@ -80,3 +80,21 @@ means per connection quality — ADR-0011 leaves it open); serialize-once payloa
   because it is a real concurrency change to the hot path that deserves review of the
   negative result first — spending more agent time building on an unreviewed conclusion
   felt like the wrong call unattended. It is queued as the top Phase-3 candidate.
+
+## Second session (later, on request: build G3/G4/G5 + rerun the sweep)
+
+- **Sweep rerun: completed cleanly and CONFIRMS Follow-up F** (benchmark doc, "Clean-rerun
+  confirmation"). The `send:wall` ratio 0.88–0.97 is the direct proof of the
+  no-parallelism finding. It did *not* break this time, so per instruction I documented
+  rather than root-caused. The rerun did surface a real gateway robustness bug
+  (`AdaptiveDegrade=off` → unhandled FormatException) — filed as a background task; I
+  corrected the run agent's claim that this caused the earlier crashes (it did not — the
+  earlier stalls were harness/infra/quota).
+- **G3/G4/G5 UI first pass:** built on `agent/community-ui-g3-g4-g5` off the API-v0 branch,
+  Gemini-Pro-drafted + Claude-reviewed. Design directions I set (documented per-goal in
+  `docs/ui/g3-g4-g5-first-pass.md`): G3 = glanceable color-coded overlay (live over
+  gameplay > dense table); G4 = evidence timeline reusing the achievements provenance
+  vocabulary (one mental model, "evidence immutable, interpretation separate"); G5 =
+  clickable confirm-guarded scenario cards, benchmark card wraps the existing load
+  harness (UI-over-console, no second load path). Honesty rule enforced: live v0 data
+  where it exists, labeled "sample — backend pending" everywhere else.

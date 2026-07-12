@@ -378,6 +378,26 @@ Fable-5 usage limit); all seven runs' evidence was recovered from disk.
    effect. Needs a dedicated probe before any fairness claim — do not assume rotation
    helps.
 
+**Clean-rerun confirmation (same date).** The full matrix was re-run from scratch against
+the staged `phase3a` image and completed cleanly — every Follow-up F conclusion held. The
+**`send:wall` ratio** (send-phase sum ÷ broadcast wall) landed at **0.88–0.97 across all
+parallel runs** — the crispest possible confirmation of the no-parallelism result (true
+parallelism would drive the ratio toward 1/workers; ≈0.9 means the wall *is* the serial
+sum). radius/500 → p99 94 ms, 100 overruns; radius/400 → p99 51 ms, 3 overruns (the
+ceiling); radius/600 → population collapsed (98 % disconnect, never sustained — the
+hard-ceiling signature); tiered/400 v2 → overruns 12–13 (halved), p99 277 ms (insufficient
+alone); NearRadius 200/300 → p99 137/275 ms (the quadratic dial holds). Fairness inversion
+reproduced (first-quartile ~1.8–2.3 s vs last-quartile ~50–200 ms p50) — though under the
+worst thrash (NearRadius 300) the order effect breaks down entirely, another sign it is a
+saturation artifact rather than a scheduling property.
+
+**Robustness bug found during the rerun:** `Replication__AdaptiveDegrade=off` — a
+plausible operator value — hard-crashes the gateway with an unhandled `FormatException`
+(exit 139), because the option binds to a .NET `bool` (only `true`/`false` accepted).
+This did **not** cause the earlier agent stalls (those were harness/infra/quota; the
+earlier gateways ran fine and produced valid data) — but startup config binding should
+validate-and-default, not crash the process. Filed as a background task.
+
 ## Next steps
 
 1. ~~Contention probe~~ — **done** (Follow-up A): no regression under local dGPU
