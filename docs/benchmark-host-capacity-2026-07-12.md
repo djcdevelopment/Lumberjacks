@@ -323,6 +323,61 @@ off-host AM4; before-curve = Follow-up D):
    open issue; the rotation/join-order interaction needs a look before trusting any
    fairness claim.
 
+## Follow-up F — Phase 3(a): UDP-socket hypothesis, degrade v2, dial sweep (same date)
+
+Branch `agent/udp-sockets-degrade-v2` added `Replication__UdpSockets` (N send-only
+sockets so workers stop sharing one `UdpClient`) and a burst-aligned adaptive-degrade v2.
+Measured off-host on AM4 (radius/spread+wander, 8 workers + 8 UDP sockets unless noted;
+`/tick` window snapshots — note the whole matrix ran deadline-off, so it isolates
+parallelism, not shedding). The run agent crashed twice mid-matrix (API stalls, then the
+Fable-5 usage limit); all seven runs' evidence was recovered from disk.
+
+| Run | knobs | tick p99 | overruns/100 | interest (sum) | send (sum) | bcast **wall** | sent:culled |
+|---|---|---|---|---|---|---|---|
+| radius 500, 8w/8sock | parallelism test | 87 ms | 100 | 9.6 | 78.3 | **87.0 ms** | 1:19 |
+| radius 600, 8w/8sock | " | 107 ms | 100 | 13.8 | 94.3 | **106.4 ms** | 1:22 |
+| radius 400, 8w/8sock | " | 49 ms | ~1 | 7.4 | 41.8 | **49.0 ms** | 1:23 |
+| radius 400, NearRadius=200 | dial | 141 ms | 100 | 7.4 | 134.2 | 140.7 ms | 1:6.3 |
+| radius 400, NearRadius=300 | dial | 469 ms | 69+ | 15.0 | 461.2 | 468.8 ms | 1:3.2 |
+| tiered 400, adaptive v2 | degrade | 288–322 ms | **12–19** | 8.6 | 279–314 | 288–321 ms | 1:11 |
+
+**Findings:**
+
+1. **The shared-`UdpClient` hypothesis is REFUTED — and the real bottleneck is now
+   named.** With 8 independent send sockets, broadcast **wall time still equals
+   interest+send summed across workers** in every run (500 bots: wall 87.0 ≈ 9.6+78.3;
+   600: 106.4 ≈ 13.8+94.3; 400: 49.0 ≈ 7.4+41.8). That is *zero* wall-clock parallelism —
+   statistically identical to Phase 2's one-socket result (500 bots: 87 ms now vs
+   82–107 ms then). The socket was never the constraint. Root cause: the `Task.WhenAll`
+   fan-out doesn't parallelize because the per-chunk sends **complete synchronously**
+   (UDP `Send` is sync; small-frame WebSocket `SendAsync` completes inline on the LAN),
+   so all chunks run inline-serial on the tick thread with no thread-pool dispatch — CPU
+   stayed ~3 of 24 cores, confirming it isn't compute-bound, just undispatched. **The
+   Phase-3 fix is to force thread-pool dispatch** (`Task.Run` / `Parallel.ForEachAsync`
+   per chunk) so the CPU-bound per-entity serialization actually spreads across cores;
+   more sockets were the wrong lever.
+2. **Ceiling unmoved: ~400 bots (radius, NearRadius=100).** 500/600 fail exactly as
+   before. Consistent with #1 — nothing actually parallelized.
+3. **Adaptive degrade v2 is FIXED but insufficient alone.** v2 now fires on burst ticks
+   (degraded_ticks 12–13/window, vs v1's effective zero), halving tiered/400 overruns
+   from ~25/100 to **12–19/100** — a real, measured win over the v1 no-op. But the
+   un-suppressed burst ticks still cost ~250–320 ms, so p99 stays high: degrade reduces
+   overrun *frequency*, not per-burst cost. Tiered@400 still needs radius or true
+   parallelism.
+4. **Dial sweep — view distance costs ≈ quadratically** (radius, 400 bots): NearRadius
+   100 → p99 49 ms (fits, 1:23 culled); 200 → 141 ms (fails, 1:6.3); 300 → 469 ms
+   (fails, 1:3.2). **100 u is the only budget-fitting radius at 400 bots**; each step up
+   roughly triples send cost. This is the gameplay-vs-capacity price list the strategy
+   asked for: wider awareness is affordable only by trading player count or by real
+   parallelism.
+5. **Fairness inversion PERSISTS and rotation did not fix it.** Earliest-joined bots
+   (first quartile) suffer p50 RTT 2776–3785 ms while last-quartile see 43–67 ms — a
+   40–65× penalty, consistent across every run. Since the rotation equalizes send
+   *order* each tick, the penalty is almost certainly **not** send-order; likely
+   loader-side (earliest bots accumulating receive backlog) or a per-session endpoint
+   effect. Needs a dedicated probe before any fairness claim — do not assume rotation
+   helps.
+
 ## Next steps
 
 1. ~~Contention probe~~ — **done** (Follow-up A): no regression under local dGPU
@@ -341,12 +396,17 @@ off-host AM4; before-curve = Follow-up D):
 6. ~~Phase 2 — the send loop itself~~ — **done** (Follow-up E): cliff killed (worst
    tick 20.9 s → 250 ms via deadline shedding), overload now degrades linearly; ceiling
    unmoved at ~400; adaptive degrade missed (fix known); fairness inverted (open).
-7. **Phase 3 candidates, in evidence order:** (a) test the shared-`UdpClient`
-   hypothesis — per-worker UDP sockets / async batched sends; success = broadcast wall
-   falls toward sum/8 and the 500-bot band clears; (b) **per-client send budgets**
-   (ADR-0011) for the client-drowning regime past the interest ceiling; (c) adaptive
-   degrade v2, burst-aligned; (d) diagnose the inverted fairness split;
-   (e) serialize-once shared payload segments if (a) moves the wall onto CPU.
+7. **Phase 3 candidates, updated by Follow-up F evidence:** (a) ~~shared-`UdpClient`~~
+   **refuted** — sockets were not the constraint; the fan-out never parallelized because
+   sends complete synchronously. **New (a′): force thread-pool dispatch** of the send
+   chunks (`Task.Run`/`Parallel.ForEachAsync`) so broadcast wall falls toward sum/workers
+   and the CPU-bound serialization spreads across the idle 20 cores — the single most
+   promising ceiling-mover. (b) ~~adaptive degrade v2~~ **done** (fires correctly, halves
+   overruns, insufficient alone). (c) **per-client send budgets** (ADR-0011) for the
+   client-drowning regime past the interest ceiling. (d) **diagnose the fairness
+   inversion** with a dedicated probe (rotation equalizes order yet first-joiners are
+   40–65× worse — suspect loader-side or per-endpoint). (e) serialize-once shared payload
+   segments once (a′) puts real load on the cores.
 8. **Dial-tuning for gameplay:** sweep `Replication__NearRadius` (100 → 200 → 300) and
    tier intervals to find the largest gameplay-acceptable policy that still fits the
    budget at target load — the rig makes this a table, not a debate.

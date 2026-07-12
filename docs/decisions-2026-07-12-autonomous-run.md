@@ -52,3 +52,31 @@ means per connection quality — ADR-0011 leaves it open); serialize-once payloa
   not a production default.
 - **The rig serializes:** AM4 hosts one measurement at a time; code tracks run parallel
   in isolated worktrees.
+
+## Outcomes (filled in as the run completed)
+
+- **Track A — API v0 + Community View: SHIPPED** on `agent/api-v0-community-view`
+  (commit `09f6133`). Five read-only v0 endpoints (aggregates only, privacy test
+  enforces no player id/name/position leaks), a Gemini-Pro-drafted `/community` page
+  (XSS-hardened + startup-fallback added in a review pass), API reference doc. 149
+  Simulation + 31 Gateway tests green. Gemini authored the HTML/prose; Claude authored
+  all C# and did the security fix-ups — the authorship split held.
+- **Track B — UDP sockets + degrade v2: SHIPPED** on `agent/udp-sockets-degrade-v2`
+  (commit `3b0da02`). 187 Simulation + 120 Contracts green. Defaults byte-preserving.
+- **Track C — measurement: COMPLETED with a decisive negative result** (benchmark doc
+  Follow-up F). The run agent crashed three times (two API stalls, then the Fable-5
+  usage limit); I recovered all seven runs' evidence from disk rather than re-running,
+  and finished the rig teardown check myself (containers gone on both hosts, ufw back to
+  its 7-rule baseline — confirmed clean). **Headline: the shared-`UdpClient` hypothesis
+  is refuted** — 8 sockets gave zero parallelism because the `Task.WhenAll` fan-out never
+  dispatches (sends complete synchronously). The real Phase-3 lever is thread-pool
+  dispatch of the send chunks, not more sockets. Degrade v2 works (halves overruns) but
+  isn't enough alone; the dial sweep priced view-distance (~quadratic); the fairness
+  inversion persists and rotation didn't fix it.
+- **Decision honored:** nothing merged to master autonomously. Both build branches and
+  the ledger are pushed for review; master merges remain Derek's call.
+- **Judgment note for review:** I stopped short of building Phase-3 (a′)
+  (thread-pool-dispatched fan-out) tonight even though Follow-up F points straight at it,
+  because it is a real concurrency change to the hot path that deserves review of the
+  negative result first — spending more agent time building on an unreviewed conclusion
+  felt like the wrong call unattended. It is queued as the top Phase-3 candidate.
