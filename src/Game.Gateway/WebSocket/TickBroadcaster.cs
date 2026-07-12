@@ -81,6 +81,7 @@ public class TickBroadcaster : ITickBroadcaster
         _sendWorkers = SendFanOut.ResolveWorkerCount(replicationOptions.SendWorkers, Environment.ProcessorCount);
         _deadlineMs = replicationOptions.BroadcastDeadlineMs;
         _adaptiveDegrade = replicationOptions.AdaptiveDegrade;
+        _metrics?.SetSendWorkers(_sendWorkers);
 
         _logger.LogInformation(
             "Replication policy={Policy} nearRadius={NearRadius} midRadius={MidRadius} midTickInterval={MidTickInterval} sendWorkers={SendWorkers} deadlineMs={DeadlineMs} adaptive={Adaptive}",
@@ -227,8 +228,13 @@ public class TickBroadcaster : ITickBroadcaster
             Stopwatch.GetElapsedTime(0, interestElapsed).TotalMilliseconds,
             Stopwatch.GetElapsedTime(0, sendElapsed).TotalMilliseconds);
         _metrics?.RecordReplication(entitiesSent, entitiesCulled);
-        // deadlineAborts/degraded are folded into TickMetrics' replication window (see
-        // RecordDeadlineAborts / RecordDegraded) — "log nothing per tick" for degrade itself.
+        _metrics?.RecordDeadlineAborts(deadlineAborts);
+        _metrics?.RecordDegraded(degraded);
+
+        // Deadline aborts get an immediate debug-level breadcrumb too (in addition to the
+        // windowed count above) since an abort is a live socket getting force-closed — worth
+        // seeing as it happens, not just in the ~5s rollup. Adaptive degrade deliberately logs
+        // nothing per tick (see class doc) — the windowed degradedTicks count is enough.
         if (deadlineAborts > 0)
             _logger.LogDebug("Broadcast deadline shed {Aborts} session(s) this tick (tick {Tick})", deadlineAborts, tick);
     }

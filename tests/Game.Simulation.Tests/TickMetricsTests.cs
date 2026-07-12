@@ -154,6 +154,106 @@ public class TickMetricsTests
         Assert.Equal("unknown", metrics.LastWindow!.Replication.Policy);
     }
 
+    // ── Send-loop rework (phase 2): send_workers / deadline_aborts / degraded_ticks ──
+
+    [Fact]
+    public void SendWorkersDefaultsToOneUntilSet()
+    {
+        using var metrics = CreateMetrics();
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(1, metrics.LastWindow!.Replication.SendWorkers);
+    }
+
+    [Fact]
+    public void SendWorkersReflectsTheEffectiveValueSetAtStartup()
+    {
+        using var metrics = CreateMetrics();
+        metrics.SetSendWorkers(4);
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(4, metrics.LastWindow!.Replication.SendWorkers);
+    }
+
+    [Fact]
+    public void SendWorkersIsNotAWindowStat_SurvivesAcrossWindows()
+    {
+        using var metrics = CreateMetrics();
+        metrics.SetSendWorkers(8);
+
+        for (var t = 1; t <= 2 * TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(8, metrics.LastWindow!.Replication.SendWorkers);
+    }
+
+    [Fact]
+    public void DeadlineAbortsAccumulateAcrossWindowAndResetOnClose()
+    {
+        using var metrics = CreateMetrics();
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+        {
+            metrics.RecordDeadlineAborts(2);
+            RecordUniformTick(metrics, t, totalMs: 5);
+        }
+
+        Assert.Equal(2L * TickMetrics.WindowTicks, metrics.LastWindow!.Replication.DeadlineAborts);
+
+        // Second window: no RecordDeadlineAborts calls — must reset to 0, not carry over.
+        for (var t = TickMetrics.WindowTicks + 1; t <= 2 * TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(0, metrics.LastWindow!.Replication.DeadlineAborts);
+    }
+
+    [Fact]
+    public void DeadlineAbortsFoldIntoNextTickAndResetWhenNotRecorded()
+    {
+        using var metrics = CreateMetrics();
+
+        // First tick reports aborts; the rest don't — must reset to 0 for those, not carry over.
+        metrics.RecordDeadlineAborts(5);
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(5, metrics.LastWindow!.Replication.DeadlineAborts);
+    }
+
+    [Fact]
+    public void DegradedTicksCountsFlaggedTicksAndResetsOnClose()
+    {
+        using var metrics = CreateMetrics();
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+        {
+            metrics.RecordDegraded(t % 2 == 0); // half the window's ticks degraded
+            RecordUniformTick(metrics, t, totalMs: 5);
+        }
+
+        Assert.Equal(TickMetrics.WindowTicks / 2, metrics.LastWindow!.Replication.DegradedTicks);
+
+        for (var t = TickMetrics.WindowTicks + 1; t <= 2 * TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(0, metrics.LastWindow!.Replication.DegradedTicks);
+    }
+
+    [Fact]
+    public void DegradedDefaultsToFalseWhenNeverRecorded()
+    {
+        using var metrics = CreateMetrics();
+
+        for (var t = 1; t <= TickMetrics.WindowTicks; t++)
+            RecordUniformTick(metrics, t, totalMs: 5);
+
+        Assert.Equal(0, metrics.LastWindow!.Replication.DegradedTicks);
+    }
+
     [Fact]
     public void HistogramReceivesPhaseTaggedDurations()
     {
