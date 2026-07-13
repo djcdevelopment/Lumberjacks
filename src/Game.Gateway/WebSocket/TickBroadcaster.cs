@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
 using Game.Contracts.Entities;
+using Game.Contracts.Events;
 using Game.Contracts.Protocol;
 using Game.Contracts.Protocol.Binary;
 using Game.ServiceDefaults;
@@ -70,6 +72,29 @@ public class TickBroadcaster : ITickBroadcaster
     private readonly int _deadlineMs;
     private readonly bool _adaptiveDegrade;
 
+    // interest_subscription_changed evidence feed (Replication:SubscriptionEvents, default off —
+    // see InterestSubscriptionTracker). All of this is dormant unless explicitly enabled: when
+    // _subscriptionEvents is false the sampling branch in BroadcastTickAsync is never taken, so
+    // there is zero added cost on the default/benchmark path.
+    private readonly bool _subscriptionEvents;
+    private readonly int _subscriptionSampleTicks;
+    private readonly double _subscriptionRadius;
+    private readonly bool _subscriptionPolicyObservable; // false for Full (no interest filtering to observe)
+    private readonly IHttpClientFactory? _httpFactory;
+    private readonly string _eventLogUrl;
+    private readonly InterestSubscriptionTracker _subscriptionTracker = new();
+
+    // Guards against overlapping off-tick-thread emit passes (0 = idle, 1 = a pass is running).
+    // A sample is skipped if the previous pass hasn't finished — samples are spaced by
+    // _subscriptionSampleTicks so this is rare, and skipping is the right call (the next sample
+    // is a fresh full snapshot anyway; no state is lost).
+    private int _subscriptionEmitInFlight;
+
+    // Hard ceiling on events emitted from a single sample — a safety valve against a pathological
+    // burst (e.g. a whole region's worth of first-time subscriptions at once). Sampling already
+    // bounds the RATE; this bounds the size of any one pass.
+    private const int SubscriptionMaxEventsPerSample = 500;
+
     // Mutable, but only ever touched from the tick loop's sequential flow — BroadcastTickAsync
     // calls never overlap (TickLoop awaits each one before starting the next), so no locking.
     // v1 tracker: every tick's own broadcast wall time — still drives radius/full's alternating
@@ -88,7 +113,8 @@ public class TickBroadcaster : ITickBroadcaster
         IConfiguration config,
         ILogger<TickBroadcaster> logger,
         UdpTransport? udpTransport = null,
-        TickMetrics? metrics = null)
+        TickMetrics? metrics = null,
+        IHttpClientFactory? httpFactory = null)
     {
         _sessions = sessions;
         var replicationOptions = ReplicationOptions.FromConfiguration(
@@ -103,6 +129,28 @@ public class TickBroadcaster : ITickBroadcaster
         _deadlineMs = replicationOptions.BroadcastDeadlineMs;
         _adaptiveDegrade = replicationOptions.AdaptiveDegrade;
         _metrics?.SetSendWorkers(_sendWorkers);
+
+        // interest_subscription_changed feed (off by default). Full policy has no interest
+        // filtering, so there is no subscription boundary to observe — disable there even if the
+        // flag is set (SubscriptionRadius is +inf for Full).
+        _subscriptionEvents = replicationOptions.SubscriptionEvents;
+        _subscriptionSampleTicks = Math.Max(1, replicationOptions.SubscriptionSampleTicks);
+        _subscriptionRadius = _interest.SubscriptionRadius;
+        _subscriptionPolicyObservable = !double.IsPositiveInfinity(_subscriptionRadius);
+        _httpFactory = httpFactory;
+        _eventLogUrl = (config["ServiceUrls:EventLog"] ?? "http://localhost:4002").TrimEnd('/');
+        if (_subscriptionEvents && (!_subscriptionPolicyObservable || _httpFactory == null))
+        {
+            _logger.LogInformation(
+                "Replication:SubscriptionEvents requested but inactive (policy={Policy} observable={Observable} httpFactory={HasFactory}) — no interest_subscription_changed events will be emitted",
+                replicationOptions.PolicyName, _subscriptionPolicyObservable, _httpFactory != null);
+        }
+        else if (_subscriptionEvents)
+        {
+            _logger.LogInformation(
+                "Replication:SubscriptionEvents on — sampling interest subscriptions every {SampleTicks} tick(s) at radius {Radius}",
+                _subscriptionSampleTicks, _subscriptionRadius);
+        }
 
         // Phase 3a: UdpTransport resolves its own effective socket count at construction time
         // (pure config + processor-count math — see UdpTransport.SocketCount), independent of
@@ -301,6 +349,113 @@ public class TickBroadcaster : ITickBroadcaster
         // nothing per tick (see class doc) — the windowed degradedTicks count is enough.
         if (deadlineAborts > 0)
             _logger.LogDebug("Broadcast deadline shed {Aborts} session(s) this tick (tick {Tick})", deadlineAborts, tick);
+
+        // interest_subscription_changed evidence feed — sampled, and dispatched OFF the tick
+        // thread so it never inflates the broadcast wall time TickLoop measures around this call
+        // (the very number replication-policy experiments care about). No-op unless enabled.
+        MaybeSampleSubscriptions(players, tick);
+    }
+
+    /// <summary>
+    /// On a sample tick (and only when enabled + observable + wired to an EventLog), snapshot player
+    /// positions cheaply on the tick thread, then hand the O(n²) diff + fire-and-forget emit to a
+    /// background task. The tick thread does O(n) snapshot work and returns immediately; nothing
+    /// here touches the send path's state or the SpatialGrid, so it cannot race the broadcast.
+    /// </summary>
+    private void MaybeSampleSubscriptions(IReadOnlyDictionary<string, Player> players, long tick)
+    {
+        if (!_subscriptionEvents || !_subscriptionPolicyObservable || _httpFactory == null)
+            return;
+        if (tick % _subscriptionSampleTicks != 0)
+            return;
+
+        // Skip if a previous pass is still running — samples are spaced by _subscriptionSampleTicks,
+        // so this only trips under genuine overload, and skipping loses nothing (the next sample is
+        // a fresh full snapshot). Prevents overlapping passes from racing the tracker's state.
+        if (Interlocked.CompareExchange(ref _subscriptionEmitInFlight, 1, 0) != 0)
+            return;
+
+        // Snapshot on the tick thread (cheap, O(n), no distance math) so the background pass works
+        // from a stable copy rather than the live, mutating player dictionary.
+        var snapshot = new List<InterestSubscription.PlayerSnapshot>(players.Count);
+        foreach (var (id, p) in players)
+        {
+            if (!p.Connected) continue;
+            snapshot.Add(new InterestSubscription.PlayerSnapshot(id, p.RegionId, p.Position.X, p.Position.Z));
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ComputeAndEmitSubscriptionsAsync(snapshot, tick);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "interest_subscription_changed sample failed (tick {Tick})", tick);
+            }
+            finally
+            {
+                Volatile.Write(ref _subscriptionEmitInFlight, 0);
+            }
+        });
+    }
+
+    private async Task ComputeAndEmitSubscriptionsAsync(
+        IReadOnlyList<InterestSubscription.PlayerSnapshot> snapshot, long tick)
+    {
+        var current = InterestSubscription.ComputeSubscriptions(snapshot, _subscriptionRadius);
+        var changes = _subscriptionTracker.DiffAll(current);
+        if (changes.Count == 0)
+            return;
+
+        var emitted = 0;
+        foreach (var change in changes)
+        {
+            if (emitted >= SubscriptionMaxEventsPerSample)
+            {
+                _logger.LogDebug(
+                    "interest_subscription_changed sample capped at {Cap} events (tick {Tick}, {Total} observers changed)",
+                    SubscriptionMaxEventsPerSample, tick, changes.Count);
+                break;
+            }
+            await EmitInterestSubscriptionEventAsync(change, tick);
+            emitted++;
+        }
+    }
+
+    private async Task EmitInterestSubscriptionEventAsync(SubscriptionChange change, long tick)
+    {
+        try
+        {
+            var client = _httpFactory!.CreateClient();
+            await client.PostAsJsonAsync($"{_eventLogUrl}/events", new
+            {
+                event_id = Guid.NewGuid().ToString(),
+                event_type = EventType.InterestSubscriptionChanged,
+                occurred_at = DateTimeOffset.UtcNow,
+                world_id = "world-default",
+                region_id = change.RegionId,
+                actor_id = change.ObserverId,
+                source_service = "gateway",
+                schema_version = 1,
+                payload = new
+                {
+                    tick,
+                    subscribed_count = change.SubscribedCount,
+                    added = change.Added,
+                    removed = change.Removed,
+                    added_count = change.Added.Count,
+                    removed_count = change.Removed.Count,
+                    subscription_radius = _subscriptionRadius,
+                    policy = _interest.Policy.ToString().ToLowerInvariant(),
+                },
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to emit interest_subscription_changed for observer {ObserverId}", change.ObserverId);
+        }
     }
 
     /// <summary>

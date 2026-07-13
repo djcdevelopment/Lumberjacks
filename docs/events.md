@@ -44,6 +44,27 @@ These are the first canonical events for the platform.
 - `edge_node_unhealthy`
 - `edge_node_detached`
 
+### `interest_subscription_changed`
+
+Emitted by the Gateway broadcaster when a player enters or leaves an observer's interest
+radius — the AoI filter's tier transitions surfaced as evidence for replication-policy
+experiments (Goal 6). Off by default; enable with `Replication:SubscriptionEvents=true`
+(sampled every `Replication:SubscriptionSampleTicks` ticks, default 20 ≈ 1 Hz). No-op under
+the `full` policy (no interest filtering to observe). Computed off the tick thread, so it does
+not affect broadcast timing. `actor_id` is the observer; the payload lists the target players:
+
+```
+payload: {
+  tick,                 # sample tick
+  subscribed_count,     # observer's total subscriptions after this change
+  added: [player_id],   # players that entered the interest radius
+  removed: [player_id], # players that left it
+  added_count, removed_count,
+  subscription_radius,  # the policy's outer interest bound (MidRadius/NearRadius)
+  policy                # tiered | radius
+}
+```
+
 ## Event Requirements
 
 Every canonical event should carry:

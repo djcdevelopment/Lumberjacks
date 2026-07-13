@@ -31,6 +31,22 @@ public class InterestManager
     public ReplicationPolicy Policy => _options.Policy;
 
     /// <summary>
+    /// The outer radius that defines an observer's interest SUBSCRIPTION (the entities it can
+    /// receive datagram updates for at all), independent of the mid-tick send throttle — used to
+    /// emit <c>interest_subscription_changed</c> (see <see cref="InterestSubscriptionTracker"/>),
+    /// not by <see cref="FilterForObserver"/>. Tiered → <see cref="ReplicationOptions.MidRadius"/>
+    /// (mid is the outermost band that is ever sent); Radius → <see cref="ReplicationOptions.NearRadius"/>
+    /// (its hard cutoff); Full → <see cref="double.PositiveInfinity"/> (no interest filtering, so
+    /// every co-region player is "subscribed").
+    /// </summary>
+    public double SubscriptionRadius => _options.Policy switch
+    {
+        ReplicationPolicy.Full => double.PositiveInfinity,
+        ReplicationPolicy.Radius => _options.NearRadius,
+        _ => _options.MidRadius,
+    };
+
+    /// <summary>
     /// True when <paramref name="tick"/> is a "burst tick" — a tick where the Tiered policy's
     /// mid band is actually scheduled to go out, per the same <c>tick % MidTickInterval == 0</c>
     /// convention <see cref="FilterForObserver"/> uses internally to compute <c>isMidTick</c>.

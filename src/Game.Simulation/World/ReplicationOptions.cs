@@ -28,7 +28,9 @@ public enum ReplicationPolicy
 /// Env vars: Replication__Policy, Replication__NearRadius, Replication__MidRadius,
 /// Replication__MidTickInterval, Replication__SendWorkers, Replication__BroadcastDeadlineMs,
 /// Replication__AdaptiveDegrade (send-loop rework, phase 2 — see TickBroadcaster),
-/// Replication__UdpSockets (phase 3a — see UdpTransport).
+/// Replication__UdpSockets (phase 3a — see UdpTransport),
+/// Replication__SubscriptionEvents, Replication__SubscriptionSampleTicks
+/// (interest_subscription_changed evidence feed — see InterestSubscriptionTracker).
 /// </summary>
 public sealed record ReplicationOptions
 {
@@ -39,6 +41,8 @@ public sealed record ReplicationOptions
     public const int DefaultBroadcastDeadlineMs = 0;
     public const bool DefaultAdaptiveDegrade = false;
     public const int DefaultUdpSockets = 1;
+    public const bool DefaultSubscriptionEvents = false;
+    public const int DefaultSubscriptionSampleTicks = 20;
 
     public ReplicationPolicy Policy { get; init; } = ReplicationPolicy.Tiered;
     public double NearRadius { get; init; } = DefaultNearRadius;
@@ -78,6 +82,22 @@ public sealed record ReplicationOptions
     /// production default.
     /// </summary>
     public int UdpSockets { get; init; } = DefaultUdpSockets;
+
+    /// <summary>
+    /// Emit the canonical <c>interest_subscription_changed</c> event when a player enters or leaves
+    /// an observer's interest radius (see <see cref="Game.Simulation.World.InterestSubscriptionTracker"/>).
+    /// False (default) = off — zero cost, the diff/emit pass never runs. True = a sampled,
+    /// off-tick-thread diagnostic feed for replication-policy experiments (Goal 6); it does not
+    /// change what is broadcast. No-op for the Full policy (no interest filtering to observe).
+    /// </summary>
+    public bool SubscriptionEvents { get; init; } = DefaultSubscriptionEvents;
+
+    /// <summary>
+    /// When <see cref="SubscriptionEvents"/> is on, take a subscription sample every Nth tick
+    /// (default 20 → ~1 Hz at a 20 Hz tick). Larger = coarser/cheaper. &lt;=1 samples every tick
+    /// (heaviest). Bounds event volume: a full snapshot is diffed at most once per this many ticks.
+    /// </summary>
+    public int SubscriptionSampleTicks { get; init; } = DefaultSubscriptionSampleTicks;
 
     /// <summary>Lowercase policy name, for logging and metrics tagging.</summary>
     public string PolicyName => Policy switch
@@ -122,6 +142,8 @@ public sealed record ReplicationOptions
             BroadcastDeadlineMs = ParseInt(config, "Replication:BroadcastDeadlineMs", DefaultBroadcastDeadlineMs, onWarning),
             AdaptiveDegrade = ParseBool(config, "Replication:AdaptiveDegrade", DefaultAdaptiveDegrade, onWarning),
             UdpSockets = ParseInt(config, "Replication:UdpSockets", DefaultUdpSockets, onWarning),
+            SubscriptionEvents = ParseBool(config, "Replication:SubscriptionEvents", DefaultSubscriptionEvents, onWarning),
+            SubscriptionSampleTicks = ParseInt(config, "Replication:SubscriptionSampleTicks", DefaultSubscriptionSampleTicks, onWarning),
         };
     }
 

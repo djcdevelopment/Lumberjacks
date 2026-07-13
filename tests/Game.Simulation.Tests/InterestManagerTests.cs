@@ -654,6 +654,73 @@ public class InterestManagerTests
         Assert.Contains("off", warning);
     }
 
+    // ── Subscription-events config (interest_subscription_changed feed) ──
+
+    [Fact]
+    public void ConfigurationDefaultsSubscriptionEventsToOff()
+    {
+        var config = new ConfigurationBuilder().Build();
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.False(options.SubscriptionEvents);
+        Assert.Equal(20, options.SubscriptionSampleTicks);
+    }
+
+    [Fact]
+    public void ConfigurationReadsSubscriptionEventsAndSampleTicks()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Replication:SubscriptionEvents"] = "true",
+                ["Replication:SubscriptionSampleTicks"] = "5",
+            })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.True(options.SubscriptionEvents);
+        Assert.Equal(5, options.SubscriptionSampleTicks);
+    }
+
+    [Fact]
+    public void ConfigurationSubscriptionEventsInvalidValueFallsBackToDefault()
+    {
+        // Same exit-139 robustness contract as AdaptiveDegrade — a bad bool must not throw.
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Replication:SubscriptionEvents"] = "sometimes",
+                ["Replication:SubscriptionSampleTicks"] = "occasionally",
+            })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(ReplicationOptions.DefaultSubscriptionEvents, options.SubscriptionEvents);
+        Assert.Equal(ReplicationOptions.DefaultSubscriptionSampleTicks, options.SubscriptionSampleTicks);
+    }
+
+    // ── SubscriptionRadius (policy-correct outer interest bound) ──
+
+    [Theory]
+    [InlineData(ReplicationPolicy.Tiered, 300.0)]  // MidRadius — outermost band ever sent
+    [InlineData(ReplicationPolicy.Radius, 100.0)]  // NearRadius — its hard cutoff
+    public void SubscriptionRadiusMatchesPolicyOuterBound(ReplicationPolicy policy, double expected)
+    {
+        var options = new ReplicationOptions { Policy = policy, NearRadius = 100.0, MidRadius = 300.0 };
+        var (manager, _) = CreateManager(options);
+        Assert.Equal(expected, manager.SubscriptionRadius);
+    }
+
+    [Fact]
+    public void SubscriptionRadiusIsInfiniteForFullPolicy()
+    {
+        var options = new ReplicationOptions { Policy = ReplicationPolicy.Full };
+        var (manager, _) = CreateManager(options);
+        Assert.True(double.IsPositiveInfinity(manager.SubscriptionRadius));
+    }
+
     [Fact]
     public void ConfigurationValidValuesDoNotWarn()
     {
