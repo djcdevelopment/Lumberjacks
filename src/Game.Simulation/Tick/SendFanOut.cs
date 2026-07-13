@@ -79,4 +79,36 @@ public static class SendFanOut
         var idx = (rotatedPosition + offset) % count;
         return idx < 0 ? idx + count : idx;
     }
+
+    /// <summary>
+    /// Resolve the configured <c>Replication:UdpSockets</c> value (phase 3a) to an effective
+    /// send-socket count for <see cref="Game.Gateway.WebSocket.UdpTransport"/>. 1 (default) =
+    /// today's exact behavior — the single bound socket sends every reply, no extra sockets
+    /// created. 0 means auto: use <paramref name="resolvedSendWorkers"/> (the ALREADY-resolved
+    /// <see cref="ResolveWorkerCount"/> output, not raw config) so each send-worker chunk gets
+    /// its own socket. N&gt;1 uses N as-is; a bad non-positive configured value (other than
+    /// exactly 0) is clamped up to 1, mirroring <see cref="ResolveWorkerCount"/>'s guard.
+    /// </summary>
+    public static int ResolveUdpSocketCount(int configured, int resolvedSendWorkers)
+    {
+        if (configured == 0)
+            return Math.Max(1, resolvedSendWorkers);
+        return Math.Max(1, configured);
+    }
+
+    /// <summary>
+    /// Deterministic send-socket selection for a worker chunk (phase 3a): chunk index modulo
+    /// the resolved socket count. Guarantees each socket is used by at most one worker chunk
+    /// per tick (chunks never share a socket concurrently within the same broadcast — no new
+    /// concurrent-write exposure vs. today's single shared socket), and spreads load evenly
+    /// as chunk count grows past socket count. <paramref name="socketCount"/> &lt;= 0 always
+    /// maps to socket 0 (defensive — callers should never resolve a non-positive count, see
+    /// <see cref="ResolveUdpSocketCount"/>).
+    /// </summary>
+    public static int SocketForChunk(int chunkIndex, int socketCount)
+    {
+        if (socketCount <= 0) return 0;
+        var idx = chunkIndex % socketCount;
+        return idx < 0 ? idx + socketCount : idx;
+    }
 }

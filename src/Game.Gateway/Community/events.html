@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumberjacks — Gameplay Event Telemetry</title>
+    <style>
+        :root {
+            --bg-base: #0d1117;
+            --bg-surface: #161b22;
+            --bg-surface-hover: #21262d;
+            --text-main: #c9d1d9;
+            --text-muted: #8b949e;
+            --border-color: #30363d;
+            --banner-bg: #8a2a2a;
+            --banner-fg: #ffffff;
+            --brand: #58a6ff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+        }
+
+        .persistent-banner {
+            background-color: var(--banner-bg);
+            color: var(--banner-fg);
+            text-align: center;
+            padding: 12px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            border-bottom: 1px solid #000;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 32px 20px;
+        }
+
+        header {
+            margin-bottom: 32px;
+        }
+
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        p.subtitle {
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .controls {
+            background: var(--bg-surface);
+            padding: 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 32px;
+        }
+
+        .controls-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        .filters {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            background-color: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+            padding: 6px 14px;
+            border-radius: 16px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .filter-btn:hover {
+            border-color: var(--text-muted);
+        }
+
+        .filter-btn.active {
+            background-color: var(--text-main);
+            color: var(--bg-base);
+            border-color: var(--text-main);
+        }
+
+        .timeline {
+            position: relative;
+            margin-left: 16px;
+            padding-left: 32px;
+            border-left: 2px solid var(--border-color);
+        }
+
+        .event-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 24px;
+            position: relative;
+            transition: background-color 0.2s;
+        }
+
+        .event-card:hover {
+            background: var(--bg-surface-hover);
+        }
+
+        .event-card::before {
+            content: '';
+            position: absolute;
+            left: -39px; /* offset for padding + border width */
+            top: 20px;
+            width: 12px;
+            height: 12px;
+            background: var(--border-color);
+            border-radius: 50%;
+            border: 2px solid var(--bg-base);
+        }
+
+        .event-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .event-icon {
+            font-size: 1.2rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .event-type {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .event-time {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .badge {
+            font-size: 0.75rem;
+            padding: 2px 10px;
+            border-radius: 12px;
+            border: 1px solid currentColor;
+            margin-left: auto;
+            cursor: help;
+            font-weight: 600;
+        }
+
+        .event-body {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            font-size: 0.9rem;
+        }
+
+        .detail {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .detail-label {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .detail-value {
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+            color: var(--text-main);
+        }
+
+        .actor-label {
+            color: #d2a8ff;
+        }
+        
+        .weapon-label {
+            color: #ff7b72;
+        }
+
+        .event-id-row {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px dashed var(--border-color);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+        }
+
+        .empty-state {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-muted);
+            background: var(--bg-surface);
+            border: 1px dashed var(--border-color);
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+<!-- DESIGN NOTE: This page mirrors the existing achievements provenance model (Observed/Reconstructed/Verified/Community-awarded) because the strategy's core discipline is "evidence immutable, interpretation separate". Gameplay events ARE evidence, so presenting them with the same provenance vocabulary as the achievements view keeps ONE mental model across the whole telemetry surface instead of inventing a second visual language for what is conceptually the same idea (a claim backed by a traceable source). -->
+
+<div class="persistent-banner">
+    Sample data — backend pending
+</div>
+
+<div class="container">
+    <header>
+        <h1>Lumberjacks — Gameplay Event Telemetry</h1>
+        <p class="subtitle">Chronological evidence timeline of gameplay actions across active regions.</p>
+    </header>
+
+    <div class="controls">
+        <div class="controls-title">Filter by Event Type</div>
+        <div class="filters" id="filter-container">
+            <!-- Filter buttons injected via JS -->
+        </div>
+    </div>
+
+    <div class="timeline" id="timeline">
+        <!-- Timeline items injected via JS -->
+    </div>
+</div>
+
+<script>
+/**
+ * INTENDED FUTURE ENDPOINT:
+ * 
+ * GET /api/v0/telemetry/events
+ * 
+ * Expected JSON response:
+ * {
+ *   "api_version": "v0",
+ *   "stability": "unstable",
+ *   "events": [
+ *     {
+ *       "event_id": "evt-...",
+ *       "event_type": "killing_blow",
+ *       "occurred_at": "2026-07-12T21:58:03Z",
+ *       "actor_label": "Player-3F9C",
+ *       "region_id": "region-spawn",
+ *       "weapon": "iron_axe",
+ *       "provenance": "observed"
+ *     }
+ *   ]
+ * }
+ */
+
+// Vocabulary strictly mirroring the achievements provenance model.
+const PROVENANCE = {
+    observed: {
+        label: 'Observed',
+        color: '#58a6ff',
+        bg: 'rgba(88,166,255,0.12)',
+        title: 'Directly derived from authoritative server events.',
+    },
+    reconstructed: {
+        label: 'Reconstructed',
+        color: '#d29922',
+        bg: 'rgba(210,153,34,0.12)',
+        title: 'Inferred from aggregate/derived data, not a single event.',
+    },
+    verified: {
+        label: 'Verified',
+        color: '#3fb950',
+        bg: 'rgba(63,185,80,0.12)',
+        title: 'Confirmed by an independent second signal.',
+    },
+    community_awarded: {
+        label: 'Community-awarded',
+        color: '#d2a8ff',
+        bg: 'rgba(210,168,255,0.12)',
+        title: 'Explicitly granted by members/stewards; attributable.',
+    }
+};
+
+const EVENT_TYPES = {
+    first_hit: { id: 'first_hit', label: 'First Hit', icon: '🎯' },
+    killing_blow: { id: 'killing_blow', label: 'Killing Blow', icon: '⚔️' },
+    weapon_usage: { id: 'weapon_usage', label: 'Weapon Usage', icon: '🗡️' },
+    projectile: { id: 'projectile', label: 'Projectile', icon: '🏹' },
+    trigger: { id: 'trigger', label: 'Trigger', icon: '⚙️' }
+};
+
+// Fallback data satisfying the constraints (15-20 events, newest first, anonymized).
+const SAMPLE_DATA = [
+    { event_id: "evt-020", event_type: "killing_blow", occurred_at: "2026-07-12T21:58:03Z", actor_label: "Player-3F9C", region_id: "region-spawn", weapon: "iron_axe", provenance: "observed" },
+    { event_id: "evt-019", event_type: "first_hit", occurred_at: "2026-07-12T21:58:01Z", actor_label: "Player-3F9C", region_id: "region-spawn", weapon: "iron_axe", provenance: "observed" },
+    { event_id: "evt-018", event_type: "trigger", occurred_at: "2026-07-12T21:57:15Z", actor_label: "Player-A1B2", region_id: "region-gate", weapon: null, provenance: "observed" },
+    { event_id: "evt-017", event_type: "projectile", occurred_at: "2026-07-12T21:56:44Z", actor_label: "Player-99DE", region_id: "region-north", weapon: "shortbow", provenance: "reconstructed" },
+    { event_id: "evt-016", event_type: "weapon_usage", occurred_at: "2026-07-12T21:56:42Z", actor_label: "Player-99DE", region_id: "region-north", weapon: "shortbow", provenance: "observed" },
+    { event_id: "evt-015", event_type: "killing_blow", occurred_at: "2026-07-12T21:55:10Z", actor_label: "Player-77XQ", region_id: "region-south", weapon: "steel_sword", provenance: "verified" },
+    { event_id: "evt-014", event_type: "first_hit", occurred_at: "2026-07-12T21:55:05Z", actor_label: "Player-77XQ", region_id: "region-south", weapon: "steel_sword", provenance: "observed" },
+    { event_id: "evt-013", event_type: "trigger", occurred_at: "2026-07-12T21:52:30Z", actor_label: "Player-BB44", region_id: "region-dungeon", weapon: null, provenance: "reconstructed" },
+    { event_id: "evt-012", event_type: "weapon_usage", occurred_at: "2026-07-12T21:51:12Z", actor_label: "Player-C001", region_id: "region-spawn", weapon: "wooden_club", provenance: "observed" },
+    { event_id: "evt-011", event_type: "killing_blow", occurred_at: "2026-07-12T21:49:55Z", actor_label: "Player-11Z1", region_id: "region-east", weapon: "magic_missile", provenance: "community_awarded" },
+    { event_id: "evt-010", event_type: "projectile", occurred_at: "2026-07-12T21:49:54Z", actor_label: "Player-11Z1", region_id: "region-east", weapon: "magic_missile", provenance: "observed" },
+    { event_id: "evt-009", event_type: "first_hit", occurred_at: "2026-07-12T21:49:50Z", actor_label: "Player-11Z1", region_id: "region-east", weapon: "magic_missile", provenance: "observed" },
+    { event_id: "evt-008", event_type: "weapon_usage", occurred_at: "2026-07-12T21:49:48Z", actor_label: "Player-11Z1", region_id: "region-east", weapon: "magic_missile", provenance: "observed" },
+    { event_id: "evt-007", event_type: "trigger", occurred_at: "2026-07-12T21:45:22Z", actor_label: "Player-3F9C", region_id: "region-spawn", weapon: null, provenance: "observed" },
+    { event_id: "evt-006", event_type: "killing_blow", occurred_at: "2026-07-12T21:43:10Z", actor_label: "Player-A1B2", region_id: "region-gate", weapon: "halberd", provenance: "reconstructed" },
+    { event_id: "evt-005", event_type: "first_hit", occurred_at: "2026-07-12T21:43:02Z", actor_label: "Player-A1B2", region_id: "region-gate", weapon: "halberd", provenance: "observed" },
+    { event_id: "evt-004", event_type: "weapon_usage", occurred_at: "2026-07-12T21:43:00Z", actor_label: "Player-A1B2", region_id: "region-gate", weapon: "halberd", provenance: "observed" },
+    { event_id: "evt-003", event_type: "projectile", occurred_at: "2026-07-12T21:41:15Z", actor_label: "Player-99DE", region_id: "region-north", weapon: "shortbow", provenance: "observed" },
+    { event_id: "evt-002", event_type: "weapon_usage", occurred_at: "2026-07-12T21:41:13Z", actor_label: "Player-99DE", region_id: "region-north", weapon: "shortbow", provenance: "observed" },
+    { event_id: "evt-001", event_type: "trigger", occurred_at: "2026-07-12T21:40:00Z", actor_label: "Player-99DE", region_id: "region-north", weapon: null, provenance: "observed" }
+];
+
+let eventData = [];
+let activeFilters = new Set(Object.keys(EVENT_TYPES));
+
+// Defense-in-depth HTML escaping
+function escapeHtml(unsafe) {
+    if (unsafe === null || unsafe === undefined) return '';
+    const textNode = document.createTextNode(String(unsafe));
+    const div = document.createElement('div');
+    div.appendChild(textNode);
+    return div.innerHTML;
+}
+
+function formatDate(isoString) {
+    try {
+        const d = new Date(isoString);
+        return d.toLocaleString(undefined, { 
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            year: 'numeric', month: 'short', day: 'numeric',
+            timeZoneName: 'short'
+        });
+    } catch {
+        return escapeHtml(isoString);
+    }
+}
+
+function renderFilters() {
+    const container = document.getElementById('filter-container');
+    let html = '';
+    
+    Object.values(EVENT_TYPES).forEach(type => {
+        const isActive = activeFilters.has(type.id) ? 'active' : '';
+        html += `<button class="filter-btn ${isActive}" data-type="${type.id}">
+                    <span>${type.icon}</span> ${escapeHtml(type.label)}
+                 </button>`;
+    });
+    
+    container.innerHTML = html;
+    
+    // Bind click events
+    const buttons = container.querySelectorAll('.filter-btn');
+    buttons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const type = e.currentTarget.getAttribute('data-type');
+            if (activeFilters.has(type)) {
+                activeFilters.delete(type);
+            } else {
+                activeFilters.add(type);
+            }
+            renderFilters();
+            renderTimeline();
+        });
+    });
+}
+
+function renderTimeline() {
+    const container = document.getElementById('timeline');
+    const filteredEvents = eventData.filter(ev => activeFilters.has(ev.event_type));
+    
+    if (filteredEvents.length === 0) {
+        container.innerHTML = `<div class="empty-state">No events match the selected filters.</div>`;
+        return;
+    }
+
+    let html = '';
+    filteredEvents.forEach(ev => {
+        const typeInfo = EVENT_TYPES[ev.event_type] || { label: ev.event_type, icon: '❓' };
+        const provInfo = PROVENANCE[ev.provenance] || PROVENANCE.observed;
+        
+        let weaponHtml = '';
+        if (ev.weapon) {
+            weaponHtml = `
+                <div class="detail">
+                    <span class="detail-label">Weapon</span>
+                    <span class="detail-value weapon-label">${escapeHtml(ev.weapon)}</span>
+                </div>
+            `;
+        }
+
+        html += `
+            <div class="event-card">
+                <div class="event-header">
+                    <span class="event-icon" aria-hidden="true">${typeInfo.icon}</span>
+                    <span class="event-type">${escapeHtml(typeInfo.label)}</span>
+                    <span class="event-time">${formatDate(ev.occurred_at)}</span>
+                    <span class="badge" 
+                          style="color: ${provInfo.color}; background-color: ${provInfo.bg}; border-color: ${provInfo.color}" 
+                          title="${escapeHtml(provInfo.title)}">
+                        ${escapeHtml(provInfo.label)}
+                    </span>
+                </div>
+                <div class="event-body">
+                    <div class="detail">
+                        <span class="detail-label">Actor</span>
+                        <span class="detail-value actor-label">${escapeHtml(ev.actor_label)}</span>
+                    </div>
+                    <div class="detail">
+                        <span class="detail-label">Region</span>
+                        <span class="detail-value">${escapeHtml(ev.region_id)}</span>
+                    </div>
+                    ${weaponHtml}
+                </div>
+                <div class="event-id-row">
+                    Event ID: ${escapeHtml(ev.event_id)}
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+async function init() {
+    renderFilters();
+
+    try {
+        // Honesty Rule: attempt to fetch from the actual API first.
+        const res = await fetch('/api/v0/telemetry/events');
+        if (!res.ok) {
+            throw new Error(`HTTP Error ${res.status}`);
+        }
+        const data = await res.json();
+        if (data && Array.isArray(data.events)) {
+            eventData = data.events;
+        } else {
+            throw new Error("Invalid payload structure");
+        }
+    } catch (error) {
+        console.warn("Real telemetry feed fetch failed, falling back to sample data.", error);
+        eventData = SAMPLE_DATA;
+    }
+    
+    renderTimeline();
+}
+
+// Bootstrap
+document.addEventListener('DOMContentLoaded', init);
+
+</script>
+</body>
+</html>

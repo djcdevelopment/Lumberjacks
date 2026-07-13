@@ -31,6 +31,17 @@ public class InterestManager
     public ReplicationPolicy Policy => _options.Policy;
 
     /// <summary>
+    /// True when <paramref name="tick"/> is a "burst tick" — a tick where the Tiered policy's
+    /// mid band is actually scheduled to go out, per the same <c>tick % MidTickInterval == 0</c>
+    /// convention <see cref="FilterForObserver"/> uses internally to compute <c>isMidTick</c>.
+    /// Exposed so callers (adaptive-degrade v2 — see <c>AdaptiveDegrade.ShouldSuppressMidBand</c>)
+    /// can align their overrun bookkeeping to the SAME ticks that actually carry mid-band cost,
+    /// instead of every tick. Meaningless for Full/Radius (no mid band) but harmless to call —
+    /// it's pure arithmetic on <see cref="ReplicationOptions.MidTickInterval"/>, independent of policy.
+    /// </summary>
+    public bool IsBurstTick(long tick) => _options.MidTickInterval > 0 && tick % _options.MidTickInterval == 0;
+
+    /// <summary>
     /// Determine which changed entities a given observer should receive on this tick.
     /// </summary>
     /// <param name="observerId">The player receiving updates.</param>

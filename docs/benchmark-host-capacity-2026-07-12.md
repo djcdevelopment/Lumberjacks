@@ -323,6 +323,162 @@ off-host AM4; before-curve = Follow-up D):
    open issue; the rotation/join-order interaction needs a look before trusting any
    fairness claim.
 
+## Follow-up F — Phase 3(a): UDP-socket hypothesis, degrade v2, dial sweep (same date)
+
+Branch `agent/udp-sockets-degrade-v2` added `Replication__UdpSockets` (N send-only
+sockets so workers stop sharing one `UdpClient`) and a burst-aligned adaptive-degrade v2.
+Measured off-host on AM4 (radius/spread+wander, 8 workers + 8 UDP sockets unless noted;
+`/tick` window snapshots — note the whole matrix ran deadline-off, so it isolates
+parallelism, not shedding). The run agent crashed twice mid-matrix (API stalls, then the
+Fable-5 usage limit); all seven runs' evidence was recovered from disk.
+
+| Run | knobs | tick p99 | overruns/100 | interest (sum) | send (sum) | bcast **wall** | sent:culled |
+|---|---|---|---|---|---|---|---|
+| radius 500, 8w/8sock | parallelism test | 87 ms | 100 | 9.6 | 78.3 | **87.0 ms** | 1:19 |
+| radius 600, 8w/8sock | " | 107 ms | 100 | 13.8 | 94.3 | **106.4 ms** | 1:22 |
+| radius 400, 8w/8sock | " | 49 ms | ~1 | 7.4 | 41.8 | **49.0 ms** | 1:23 |
+| radius 400, NearRadius=200 | dial | 141 ms | 100 | 7.4 | 134.2 | 140.7 ms | 1:6.3 |
+| radius 400, NearRadius=300 | dial | 469 ms | 69+ | 15.0 | 461.2 | 468.8 ms | 1:3.2 |
+| tiered 400, adaptive v2 | degrade | 288–322 ms | **12–19** | 8.6 | 279–314 | 288–321 ms | 1:11 |
+
+**Findings:**
+
+1. **The shared-`UdpClient` hypothesis is REFUTED — and the real bottleneck is now
+   named.** With 8 independent send sockets, broadcast **wall time still equals
+   interest+send summed across workers** in every run (500 bots: wall 87.0 ≈ 9.6+78.3;
+   600: 106.4 ≈ 13.8+94.3; 400: 49.0 ≈ 7.4+41.8). That is *zero* wall-clock parallelism —
+   statistically identical to Phase 2's one-socket result (500 bots: 87 ms now vs
+   82–107 ms then). The socket was never the constraint. Root cause: the `Task.WhenAll`
+   fan-out doesn't parallelize because the per-chunk sends **complete synchronously**
+   (UDP `Send` is sync; small-frame WebSocket `SendAsync` completes inline on the LAN),
+   so all chunks run inline-serial on the tick thread with no thread-pool dispatch — CPU
+   stayed ~3 of 24 cores, confirming it isn't compute-bound, just undispatched. **The
+   Phase-3 fix is to force thread-pool dispatch** (`Task.Run` / `Parallel.ForEachAsync`
+   per chunk) so the CPU-bound per-entity serialization actually spreads across cores;
+   more sockets were the wrong lever.
+2. **Ceiling unmoved: ~400 bots (radius, NearRadius=100).** 500/600 fail exactly as
+   before. Consistent with #1 — nothing actually parallelized.
+3. **Adaptive degrade v2 is FIXED but insufficient alone.** v2 now fires on burst ticks
+   (degraded_ticks 12–13/window, vs v1's effective zero), halving tiered/400 overruns
+   from ~25/100 to **12–19/100** — a real, measured win over the v1 no-op. But the
+   un-suppressed burst ticks still cost ~250–320 ms, so p99 stays high: degrade reduces
+   overrun *frequency*, not per-burst cost. Tiered@400 still needs radius or true
+   parallelism.
+4. **Dial sweep — view distance costs ≈ quadratically** (radius, 400 bots): NearRadius
+   100 → p99 49 ms (fits, 1:23 culled); 200 → 141 ms (fails, 1:6.3); 300 → 469 ms
+   (fails, 1:3.2). **100 u is the only budget-fitting radius at 400 bots**; each step up
+   roughly triples send cost. This is the gameplay-vs-capacity price list the strategy
+   asked for: wider awareness is affordable only by trading player count or by real
+   parallelism.
+5. **Fairness inversion PERSISTS and rotation did not fix it.** Earliest-joined bots
+   (first quartile) suffer p50 RTT 2776–3785 ms while last-quartile see 43–67 ms — a
+   40–65× penalty, consistent across every run. Since the rotation equalizes send
+   *order* each tick, the penalty is almost certainly **not** send-order; likely
+   loader-side (earliest bots accumulating receive backlog) or a per-session endpoint
+   effect. Needs a dedicated probe before any fairness claim — do not assume rotation
+   helps.
+
+**Clean-rerun confirmation (same date).** The full matrix was re-run from scratch against
+the staged `phase3a` image and completed cleanly — every Follow-up F conclusion held. The
+**`send:wall` ratio** (send-phase sum ÷ broadcast wall) landed at **0.88–0.97 across all
+parallel runs** — the crispest possible confirmation of the no-parallelism result (true
+parallelism would drive the ratio toward 1/workers; ≈0.9 means the wall *is* the serial
+sum). radius/500 → p99 94 ms, 100 overruns; radius/400 → p99 51 ms, 3 overruns (the
+ceiling); radius/600 → population collapsed (98 % disconnect, never sustained — the
+hard-ceiling signature); tiered/400 v2 → overruns 12–13 (halved), p99 277 ms (insufficient
+alone); NearRadius 200/300 → p99 137/275 ms (the quadratic dial holds). Fairness inversion
+reproduced (first-quartile ~1.8–2.3 s vs last-quartile ~50–200 ms p50) — though under the
+worst thrash (NearRadius 300) the order effect breaks down entirely, another sign it is a
+saturation artifact rather than a scheduling property.
+
+**Robustness bug found during the rerun:** `Replication__AdaptiveDegrade=off` — a
+plausible operator value — hard-crashes the gateway with an unhandled `FormatException`
+(exit 139), because the option binds to a .NET `bool` (only `true`/`false` accepted).
+This did **not** cause the earlier agent stalls (those were harness/infra/quota; the
+earlier gateways ran fine and produced valid data) — but startup config binding should
+validate-and-default, not crash the process. Filed as a background task.
+
+## Follow-up G — Phase 3 a′: thread-pool-dispatched fan-out MOVES the ceiling (same date)
+
+Branch `agent/parallel-send-dispatch` made the existing `SendWorkers>1` path genuinely
+dispatch its chunks to the thread pool (`Parallel.ForEachAsync`, `MaxDegreeOfParallelism
+= workers`), with per-socket locks + per-chunk-local accumulators for thread-safety;
+`SendWorkers=1` is byte-identical serial. Measured off-host on AM4 (radius/spread+wander,
+W=8/U=8 unless noted) with a **serial control** (W=1/U=1) to attribute the delta.
+
+| config | bots | tick p99 | overruns/100 | **broadcast wall p99** | send:wall | CPU cores | verdict |
+|---|---|---|---|---|---|---|---|
+| serial control | 500 | 68 ms | 100 | 68 ms | 0.81 | ~3.4→collapse | old failure; bots 496→200 |
+| parallel | 400 | 12.7 ms | 0 | 12.3 ms | 5.3 | 1.8–1.9 | headroom (was ~49 ms) |
+| parallel | 500 | 15.9 ms | 0 | 15.4 ms | 5.6 | 2.4–2.8 | **FITS — ceiling broken** |
+| parallel | 600 | 22.5 ms | 0 | 21.9 ms | 5.8 | 2.7–3.3 | holds |
+| parallel | 800 | 102 ms | 92–98 | 101 ms | 7.0 | high | cliff — O(N²) wins |
+| parallel tiered | 400 | 261 ms | 26–32 | 260 ms | 6.4 | 1.0–1.8 | NOT rescued |
+
+1. **The ceiling moved for the first time in this investigation: ~400 → ~600 bots
+   (radius/100), a ~50 % capacity gain.** radius/500 went from 100/100 overruns (serial,
+   p99 68 ms, bots collapsing 496→200) to **0 overruns** (parallel, p99 16 ms, all 500
+   sustained). radius/600 also holds (p99 22 ms). Capacity-per-volunteer-node rises
+   accordingly.
+
+2. **The `send:wall` ratio measures parallel speedup — and confirms the fix.
+   [Corrects Follow-up F's framing.]** It is send-summed-across-workers ÷ broadcast wall:
+   serial ≈ 1 (work = elapsed), perfect 8-way ≈ 8 (work spread over 8 threads → wall =
+   work/8). Measured: serial control **0.81**, parallel **5.3–7.0** = **5–7× effective
+   speedup, ~70–88 % efficiency.** (Follow-up F and the run brief mislabeled the target as
+   "toward 1/8"; the correct success signal is the ratio rising toward the worker count.
+   The wall-clock collapse 68 → 15 ms at 500 bots is unambiguous regardless.)
+
+3. **The win is cheaper than "CPU-bound" predicted — it overlaps I/O too.** CPU rose only
+   to ~2.8 cores while delivering 5.6× speedup; purely CPU-bound work would need ~5.6
+   cores. So a large part of the send phase was **socket-write latency** that serial
+   execution couldn't overlap and parallel execution gets nearly for free — refining
+   Follow-up F: the serial bottleneck was CPU serialization *and* un-overlapped I/O wait,
+   not CPU alone.
+
+4. **New ceiling 600–800; O(N²) fan-out is the ultimate wall.** At 800, send-summed hits
+   707 ms → even 8× parallelism (wall ~90–130 ms) can't fit the budget, and interest
+   itself rose to ~39 ms. Parallelism bought a constant factor (~the worker count), not an
+   asymptotic change. Past ~600–700 the lever is attacking O(N²) directly (tighter
+   interest, or serialize-once-per-entity payload sharing), not more threads.
+
+5. **Tiered/400 is NOT rescued, and reveals a second, distinct bottleneck.** p99 stayed
+   ~261 ms with ~30 overruns — and it used *less* CPU (1.0–1.8 cores) than radius under
+   the same parallel config. Lower CPU + no gain under parallelism ⇒ it is blocked on a
+   lock or serial section in the mid-band broadcast path, not on send throughput. A
+   separate investigation from the send fan-out.
+
+6. **The serial control validates the comparison** — it reproduces the historical
+   ~68–87 ms / 100-overrun serial failure (including the bot collapse), so the runs-1–3
+   improvement is the dispatch fix, not rig drift.
+
+7. **Fairness — partial retraction.** The loader's first-vs-last-quartile RTT split that
+   Follow-ups E/F read as a server fairness inversion is substantially a **loader
+   artifact**: each Node shard serially services 200 bots, so the earliest bots in that
+   loop see structurally different RTT regardless of server behavior. The server-side
+   rotation may be working; the "inversion" is not a trustworthy server signal. A real
+   fairness measurement needs a multi-process-per-bot loader.
+
+## Robustness bug found during the rerun (Phase-3a, same date)
+
+Setting up the Phase-3a matrix, a gateway launched with `Replication__AdaptiveDegrade=off`
+(a plausible operator value — `off`/`on` read as booleans everywhere else) **hard-crashed on
+startup**: an unhandled `FormatException` from the config bool-binder took the process down
+with exit 139 before the first tick. The same failure mode existed for every numeric knob
+(`SendWorkers=lots`, `BroadcastDeadlineMs=soon`, `NearRadius=close`, …): the raw
+`IConfiguration.GetValue<T>` binder throws rather than degrading when a present value can't be
+converted. A single mistyped env var could kill a volunteer-hosted shard on boot — unacceptable
+for the community-hosting posture.
+
+**Fix:** [`ReplicationOptions.FromConfiguration`](../src/Game.Simulation/World/ReplicationOptions.cs)
+now parses every key with explicit `TryParse`-and-fall-back-to-default semantics (the policy
+string already did this). An unrecognized value logs a clear warning naming the key, the bad
+value, and the expected shape, then substitutes the documented default — the process starts.
+Regression coverage in
+[`InterestManagerTests`](../tests/Game.Simulation.Tests/InterestManagerTests.cs) asserts that
+`AdaptiveDegrade=off` and a garbage `SendWorkers=lots` yield defaults, not an exception, and that
+the warning sink fires with the offending key/value.
+
 ## Next steps
 
 1. ~~Contention probe~~ — **done** (Follow-up A): no regression under local dGPU
@@ -341,12 +497,16 @@ off-host AM4; before-curve = Follow-up D):
 6. ~~Phase 2 — the send loop itself~~ — **done** (Follow-up E): cliff killed (worst
    tick 20.9 s → 250 ms via deadline shedding), overload now degrades linearly; ceiling
    unmoved at ~400; adaptive degrade missed (fix known); fairness inverted (open).
-7. **Phase 3 candidates, in evidence order:** (a) test the shared-`UdpClient`
-   hypothesis — per-worker UDP sockets / async batched sends; success = broadcast wall
-   falls toward sum/8 and the 500-bot band clears; (b) **per-client send budgets**
-   (ADR-0011) for the client-drowning regime past the interest ceiling; (c) adaptive
-   degrade v2, burst-aligned; (d) diagnose the inverted fairness split;
-   (e) serialize-once shared payload segments if (a) moves the wall onto CPU.
+7. **Phase 3 candidates, updated by Follow-up G:** (a′) ~~force thread-pool dispatch~~
+   **DONE — ceiling moved ~400→~600** (Follow-up G; 5–7× speedup). (b) ~~adaptive degrade
+   v2~~ **done**. **New priorities past the ~600 ceiling:** (f) **attack the O(N²) fan-out**
+   — this is now the ultimate wall (serialize-once-per-entity payload sharing, tighter
+   spatial interest tiers); more threads won't help past ~700. (g) **the tiered lock** —
+   tiered/400 uses *less* CPU than radius yet won't parallelize, so it's blocked on a
+   serial section in the mid-band path; find and remove it. (h) **per-client send budgets**
+   (ADR-0011) for the client-drowning regime past the interest ceiling. (i) **multi-process
+   loader** — the current single-Node-per-shard loader can't measure server fairness (its
+   RTT quartile split is a loader artifact; Follow-up G #7).
 8. **Dial-tuning for gameplay:** sweep `Replication__NearRadius` (100 → 200 → 300) and
    tier intervals to find the largest gameplay-acceptable policy that still fits the
    budget at target load — the rig makes this a table, not a debate.

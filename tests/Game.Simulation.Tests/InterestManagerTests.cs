@@ -354,6 +354,67 @@ public class InterestManagerTests
         Assert.Contains("far", visible); // Full ignores suppressMidBand entirely — no mid band to suppress
     }
 
+    // ── IsBurstTick (phase 3a: adaptive-degrade v2's burst-alignment convention) ──
+
+    [Theory]
+    [InlineData(0, true)]     // 0 % 4 == 0
+    [InlineData(4, true)]
+    [InlineData(8, true)]
+    [InlineData(1, false)]
+    [InlineData(3, false)]
+    [InlineData(5, false)]
+    public void IsBurstTickMatchesDefaultMidTickInterval(long tick, bool expected)
+    {
+        var (manager, _) = CreateManager(); // default MidTickInterval = 4
+        Assert.Equal(expected, manager.IsBurstTick(tick));
+    }
+
+    [Fact]
+    public void IsBurstTickUsesCustomMidTickInterval()
+    {
+        var options = new ReplicationOptions { MidTickInterval = 3 };
+        var (manager, _) = CreateManager(options);
+
+        Assert.True(manager.IsBurstTick(0));
+        Assert.True(manager.IsBurstTick(3));
+        Assert.True(manager.IsBurstTick(6));
+        Assert.False(manager.IsBurstTick(1));
+        Assert.False(manager.IsBurstTick(2));
+        Assert.False(manager.IsBurstTick(4));
+    }
+
+    [Fact]
+    public void IsBurstTickAgreesWithFilterForObserversIsMidTickDecision()
+    {
+        // IsBurstTick must reflect the SAME convention FilterForObserver uses internally to
+        // gate the mid band (tick % MidTickInterval == 0) — this test pins that agreement so
+        // the two can never silently drift apart.
+        var (manager, grid) = CreateManager();
+        grid.Update("observer", new Vec3(0, 0, 0));
+        grid.Update("mid", new Vec3(200, 0, 0)); // mid band (100-300)
+        var changed = new HashSet<string> { "mid" };
+        var players = new Dictionary<string, Player>();
+
+        for (long tick = 0; tick < 12; tick++)
+        {
+            var visible = manager.FilterForObserver("observer", changed, players, tick);
+            Assert.Equal(manager.IsBurstTick(tick), visible.Contains("mid"));
+        }
+    }
+
+    [Fact]
+    public void IsBurstTickIsFalseWhenMidTickIntervalIsZero()
+    {
+        // Guards the same MidTickInterval > 0 check FilterForObserver uses — a misconfigured
+        // 0 interval must never crash with a divide-by-zero, and must never claim every tick
+        // is a burst tick.
+        var options = new ReplicationOptions { MidTickInterval = 0 };
+        var (manager, _) = CreateManager(options);
+
+        Assert.False(manager.IsBurstTick(0));
+        Assert.False(manager.IsBurstTick(4));
+    }
+
     // ── ReplicationOptions.FromConfiguration ──
 
     [Fact]
@@ -480,5 +541,135 @@ public class InterestManagerTests
         var options = ReplicationOptions.FromConfiguration(config);
 
         Assert.True(options.AdaptiveDegrade);
+    }
+
+    [Fact]
+    public void ConfigurationDefaultsUdpSocketsToTodaysSingleSocketBehavior()
+    {
+        // UdpSockets=1 — the single bound receive socket also sends, exactly as before
+        // Replication:UdpSockets existed. See also SendWorkers/BroadcastDeadlineMs/
+        // AdaptiveDegrade above for the same "default preserves current behavior" contract.
+        var config = new ConfigurationBuilder().Build();
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(1, options.UdpSockets);
+    }
+
+    [Fact]
+    public void ConfigurationReadsUdpSockets()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:UdpSockets"] = "4" })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(4, options.UdpSockets);
+    }
+
+    [Fact]
+    public void ConfigurationReadsUdpSocketsZeroAsAuto()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:UdpSockets"] = "0" })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(0, options.UdpSockets); // resolved to an effective count by SendFanOut.ResolveUdpSocketCount
+    }
+
+    // ── Robustness: plausible-but-invalid operator values fall back to defaults, never throw ──
+    // Regression guard for the exit-139 startup crash hit during the 2026-07-12 Phase-3a rerun:
+    // the raw type-binder throws FormatException on values like "off"/"lots" that a bool/int
+    // binder can't parse. See docs/benchmark-host-capacity-2026-07-12.md.
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("on")]
+    [InlineData("yes")]
+    [InlineData("1")]
+    [InlineData("garbage")]
+    public void ConfigurationAdaptiveDegradeInvalidValueFallsBackToDefault(string raw)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:AdaptiveDegrade"] = raw })
+            .Build();
+
+        // Must not throw (was an unhandled FormatException that killed the process).
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(ReplicationOptions.DefaultAdaptiveDegrade, options.AdaptiveDegrade);
+    }
+
+    [Fact]
+    public void ConfigurationGarbageIntFallsBackToDefault()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Replication:SendWorkers"] = "lots",
+                ["Replication:BroadcastDeadlineMs"] = "soon",
+                ["Replication:MidTickInterval"] = "often",
+            })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(ReplicationOptions.DefaultSendWorkers, options.SendWorkers);
+        Assert.Equal(ReplicationOptions.DefaultBroadcastDeadlineMs, options.BroadcastDeadlineMs);
+        Assert.Equal(ReplicationOptions.DefaultMidTickInterval, options.MidTickInterval);
+    }
+
+    [Fact]
+    public void ConfigurationGarbageDoubleFallsBackToDefault()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Replication:NearRadius"] = "close",
+                ["Replication:MidRadius"] = "far",
+            })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(ReplicationOptions.DefaultNearRadius, options.NearRadius);
+        Assert.Equal(ReplicationOptions.DefaultMidRadius, options.MidRadius);
+    }
+
+    [Fact]
+    public void ConfigurationInvalidValueInvokesWarningSinkWithKeyAndValue()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:AdaptiveDegrade"] = "off" })
+            .Build();
+
+        var warnings = new List<string>();
+        var options = ReplicationOptions.FromConfiguration(config, warnings.Add);
+
+        Assert.Equal(ReplicationOptions.DefaultAdaptiveDegrade, options.AdaptiveDegrade);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("Replication:AdaptiveDegrade", warning);
+        Assert.Contains("off", warning);
+    }
+
+    [Fact]
+    public void ConfigurationValidValuesDoNotWarn()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Replication:AdaptiveDegrade"] = "true",
+                ["Replication:SendWorkers"] = "4",
+                ["Replication:NearRadius"] = "50",
+                ["Replication:Policy"] = "radius",
+            })
+            .Build();
+
+        var warnings = new List<string>();
+        ReplicationOptions.FromConfiguration(config, warnings.Add);
+
+        Assert.Empty(warnings);
     }
 }
