@@ -1,13 +1,13 @@
 # Public Telemetry API v0 Reference
 
-The Public Telemetry API v0 (part of Phase 3 of the community telemetry strategy) provides a read-only, versioned surface exposing Gateway tick, replication, session, and delivery metrics to the public internet. This API is designed to empower community members to build their own custom dashboards, overlays, bots, and analytics tools, ensuring server telemetry is not restricted solely to the operator team.
+The Public Telemetry API v0 (part of Phase 3 of the community telemetry strategy) provides a read-only, versioned surface exposing Gateway tick, replication, session, delivery, and gameplay-event metrics to the public internet. This API is designed to empower community members to build their own custom dashboards, overlays, bots, and analytics tools, ensuring server telemetry is not restricted solely to the operator team.
 
 > **⚠️ Stability Notice: EXPLICITLY UNSTABLE**
 > This API is currently at `api_version` "v0" and is explicitly marked as "unstable". This status is reflected on every response both as JSON fields (`"api_version": "v0"`, `"stability": "unstable"`) and via an `X-API-Stability: unstable` HTTP response header. The shape of every endpoint may change without notice until the schema settles. Do not build production integrations against this API yet.
 
 ## Privacy
 
-This API strictly adheres to a hard privacy rule: **no player IDs, names, or positions appear in ANY v0 response, ever.** Every endpoint returns only aggregated metrics or static/world-level facts. To ensure absolute compliance, this rule is enforced by an automated test suite that serializes every endpoint's response and asserts that connected players' identifiers never appear anywhere in the output.
+This API strictly adheres to a hard privacy rule: **no player IDs, names, or positions appear in ANY v0 response, ever.** Every endpoint returns only aggregated metrics or static/world-level facts. To ensure absolute compliance, this rule is enforced by an automated test suite that serializes every endpoint's response and asserts that connected players' identifiers never appear anywhere in the output. The gameplay-event feed (`GET /api/v0/telemetry/events`) — the one endpoint that surfaces discrete activity rather than aggregates — carries a second guard: its events are anonymized (no actor at all) and an optional exposure **delay** (`Telemetry:PublicEventsDelaySeconds`) can hold the public feed behind the "aggregated or delayed" line. See that endpoint below.
 
 ## CORS Policy
 
@@ -125,6 +125,29 @@ Returns static and world-level facts about active regions, including their ID, n
 }
 ```
 
+### GET /api/v0/telemetry/events
+
+Returns a DB-less feed of recent, anonymized gameplay events (currently `structure_placed`, `item_picked_up`, `item_stored`, and `interest_subscription_changed`) captured from the in-process gameplay handlers to support goal G4 (gameplay events as first-class telemetry). The capture layer is a bounded ring buffer (capacity 200, newest-first) that enforces a strict allow-list of public-safe event types, refusing identity, social, and connection events by construction. The response tracks ring `capacity`, the `count` of returned events, and a `dropped_since_start` honesty counter for events that have aged out of the ring since server start. Each event carries a `provenance` tier (server-derived events are `observed`; the other tiers are `reconstructed`, `verified`, and `community_awarded`). Only event types that have a live producer appear — today that is the four listed above; the feed grows as more producers are added.
+
+The feed is doubly privacy-guarded. First, events carry no actor data: there is no player ID, name, or position — only the event type, region, timestamp, provenance, and a non-identifying `detail` category. Second, an exposure **delay** lets the feed satisfy the strategy's rule that unauthenticated public feeds be aggregated or delayed: when `Telemetry:PublicEventsDelaySeconds` (env `Telemetry__PublicEventsDelaySeconds`) is positive, the endpoint returns only events at least that many seconds old. The repository currently ships `0` (live, no delay) for development and building; **public or unauthenticated deployments should set a delay (e.g. `30`).** The returned `delay_seconds` field reports the effective delay so clients know whether the feed is live or intentionally behind.
+
+```json
+{
+  "api_version": "v0",
+  "stability": "unstable",
+  "events": [
+    { "event_id": "evt-000004", "event_type": "interest_subscription_changed", "occurred_at": "2026-07-13T11:58:12.4+00:00", "region_id": "region-spawn", "detail": "+2/-1", "provenance": "observed" },
+    { "event_id": "evt-000003", "event_type": "item_stored", "occurred_at": "2026-07-13T11:57:40.1+00:00", "region_id": "region-spawn", "detail": "wood", "provenance": "observed" },
+    { "event_id": "evt-000002", "event_type": "item_picked_up", "occurred_at": "2026-07-13T11:57:05.9+00:00", "region_id": "region-spawn", "detail": "stone", "provenance": "observed" },
+    { "event_id": "evt-000001", "event_type": "structure_placed", "occurred_at": "2026-07-13T11:56:30.0+00:00", "region_id": "region-spawn", "detail": "wall", "provenance": "observed" }
+  ],
+  "count": 4,
+  "capacity": 200,
+  "dropped_since_start": 0,
+  "delay_seconds": 0
+}
+```
+
 ## Live Community View
 
 As part of Phase 4 of the telemetry strategy, a Live Community View is available at `GET /community`. This is a single, self-contained HTML page served directly by the Gateway that polls the API endpoints listed above every 2 seconds to provide a real-time, out-of-the-box telemetry dashboard for community members.
@@ -136,16 +159,18 @@ Future breaking changes to this telemetry surface will ship under new versioned 
 ## Availability
 
 Every v0 endpoint works without a database connection — they read `WorldState`, `TickMetrics`,
-`SessionManager`, and the in-process `LumberjacksTelemetry` tallies, none of which touch
-Postgres. The samples above were captured from exactly that: a `docker build --target gateway`
+`SessionManager`, and the in-process `LumberjacksTelemetry` and `GameplayEventFeed` tallies,
+none of which touch Postgres. The samples above were captured from exactly that: a `docker build --target gateway`
 image run with no `ConnectionStrings__GameDb` set, verifying the Gateway's existing
 graceful-degrade behavior (falls back to in-memory defaults, logs a warning) extends cleanly to
 this API.
 
 ## Source
 
-- Server / tick / delivery / regions: `src/Game.Simulation/Endpoints/TelemetryV0Endpoints.cs`
+- Server / tick / delivery / regions / events: `src/Game.Simulation/Endpoints/TelemetryV0Endpoints.cs`
 - Sessions (needs Gateway-only `SessionManager`): `src/Game.Gateway/Endpoints/TelemetryV0SessionsEndpoints.cs`
+- Gameplay-event feed (in-process ring, allow-list, exposure delay): `src/Game.ServiceDefaults/GameplayEventFeed.cs`
 - Shared envelope, CORS policy, `/api/v0/telemetry` route group: `src/Game.ServiceDefaults/PublicTelemetryV0.cs`
 - Community view: `src/Game.Gateway/Endpoints/CommunityViewEndpoints.cs`, `src/Game.Gateway/Community/community.html`
+- Events page (G4): `src/Game.Gateway/Endpoints/GameplayEventsEndpoints.cs`, `src/Game.Gateway/Community/events.html`
 - Privacy tests: `tests/Game.Simulation.Tests/TelemetryV0EndpointsTests.cs`, `tests/Game.Gateway.Tests/TelemetryV0SessionsEndpointsTests.cs`

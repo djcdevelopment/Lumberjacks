@@ -3,6 +3,7 @@ using Game.Contracts.Entities;
 using Game.Contracts.Events;
 using Game.Persistence;
 using Game.Persistence.Entities;
+using Game.ServiceDefaults;
 using Game.Simulation.World;
 using Microsoft.EntityFrameworkCore;
 
@@ -81,6 +82,10 @@ public class PlaceStructureHandler
 
         _logger.LogInformation("Structure {Id} ({Type}) placed by {Owner} in {Region}",
             structure.Id, structure.Type, structure.OwnerId, structure.RegionId);
+
+        // Public telemetry feed (G4): capture the public-safe, non-identifying projection at the
+        // in-process emission seam — structure category as detail, never the owner. Pre-persistence.
+        GameplayEventFeed.Capture(EventType.StructurePlaced, structure.RegionId, structure.Type);
 
         // Fire-and-forget side effects (event emission + progression)
         _ = EmitEventAsync(structure, request.GuildId);

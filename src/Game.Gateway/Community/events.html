@@ -1,485 +1,662 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lumberjacks — Gameplay Event Telemetry</title>
-    <style>
-        :root {
-            --bg-base: #0d1117;
-            --bg-surface: #161b22;
-            --bg-surface-hover: #21262d;
-            --text-main: #c9d1d9;
-            --text-muted: #8b949e;
-            --border-color: #30363d;
-            --banner-bg: #8a2a2a;
-            --banner-fg: #ffffff;
-            --brand: #58a6ff;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>Lumberjacks — Gameplay Event Telemetry</title>
+<style>
+  :root {
+    --bg-base: rgba(15,20,25,0.85);
+    --bg-panel: rgba(255,255,255,0.05);
+    --bg-panel-hover: rgba(255,255,255,0.08);
+    --border: rgba(255,255,255,0.1);
+    --text-main: #f3f4f6;
+    --text-muted: #9ca3af;
+    --text-dark: #1f2937;
+    --color-green: #4ade80;
+    --color-yellow: #facc15;
+    --color-red: #f87171;
+    --color-blue: #60a5fa;
+    --color-purple: #c084fc;
+    --color-orange: #fb923c;
+    --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --border-radius: 8px;
 
-        * {
-            box-sizing: border-box;
-        }
+    /* Category specific colors for subtle accents */
+    --cat-build: #2dd4bf;
+    --cat-inventory: #facc15;
+    --cat-world: #4ade80;
+    --cat-progression: #c084fc;
+    --cat-operational: #9ca3af;
+  }
 
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: var(--bg-base);
-            color: var(--text-main);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            line-height: 1.5;
-        }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-        .persistent-banner {
-            background-color: var(--banner-bg);
-            color: var(--banner-fg);
-            text-align: center;
-            padding: 12px;
-            font-weight: 600;
-            font-size: 0.95rem;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-            border-bottom: 1px solid #000;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
+  body {
+    background-color: transparent;
+    color: var(--text-main);
+    font-family: var(--font-family);
+    font-size: 13px;
+    line-height: 1.5;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    overflow: hidden;
+  }
 
-        .container {
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 32px 20px;
-        }
+  .dashboard-container {
+    width: 100%;
+    max-width: 1200px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-base);
+    border: 1px solid var(--border);
+    /* Inside dashboard shell, borders might be redundant, but good for self-containment */
+  }
 
-        header {
-            margin-bottom: 32px;
-        }
+  /* Header */
+  header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-panel);
+    flex-shrink: 0;
+  }
 
-        h1 {
-            margin: 0 0 8px 0;
-            font-size: 1.8rem;
-            font-weight: 600;
-        }
+  h1 {
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+  }
 
-        p.subtitle {
-            margin: 0;
-            color: var(--text-muted);
-            font-size: 0.95rem;
-        }
+  /* Delay indicator — the feed is delayed + anonymized, deliberately NOT a raw "LIVE" claim. */
+  .delay-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--color-blue);
+    background: rgba(96, 165, 250, 0.1);
+    padding: 4px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    white-space: nowrap;
+  }
 
-        .controls {
-            background: var(--bg-surface);
-            padding: 16px;
-            border-radius: 6px;
-            border: 1px solid var(--border-color);
-            margin-bottom: 32px;
-        }
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    background-color: var(--color-blue);
+    border-radius: 50%;
+    animation: pulse 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+  }
 
-        .controls-title {
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            color: var(--text-muted);
-            letter-spacing: 0.05em;
-            margin-bottom: 12px;
-            font-weight: 600;
-        }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.4); }
+  }
 
-        .filters {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
+  /* Stats Strip */
+  .stats-strip {
+    display: flex;
+    gap: 20px;
+    padding: 12px 20px;
+    background: rgba(0,0,0,0.2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
 
-        .filter-btn {
-            background-color: transparent;
-            color: var(--text-muted);
-            border: 1px solid var(--border-color);
-            padding: 6px 14px;
-            border-radius: 16px;
-            cursor: pointer;
-            font-size: 0.85rem;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
 
-        .filter-btn:hover {
-            border-color: var(--text-muted);
-        }
+  .stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
 
-        .filter-btn.active {
-            background-color: var(--text-main);
-            color: var(--bg-base);
-            border-color: var(--text-main);
-        }
+  .stat-value {
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
 
-        .timeline {
-            position: relative;
-            margin-left: 16px;
-            padding-left: 32px;
-            border-left: 2px solid var(--border-color);
-        }
+  .stat-value.warn { color: var(--color-yellow); }
 
-        .event-card {
-            background: var(--bg-surface);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 16px;
-            margin-bottom: 24px;
-            position: relative;
-            transition: background-color 0.2s;
-        }
+  /* Controls / Filters */
+  .controls {
+    padding: 12px 20px;
+    display: flex;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
 
-        .event-card:hover {
-            background: var(--bg-surface-hover);
-        }
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
-        .event-card::before {
-            content: '';
-            position: absolute;
-            left: -39px; /* offset for padding + border width */
-            top: 20px;
-            width: 12px;
-            height: 12px;
-            background: var(--border-color);
-            border-radius: 50%;
-            border: 2px solid var(--bg-base);
-        }
+  .filter-group label {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
 
-        .event-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-        }
+  select {
+    background-color: var(--bg-panel);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 14px;
+    padding-right: 28px;
+  }
 
-        .event-icon {
-            font-size: 1.2rem;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
+  select:focus { border-color: var(--text-muted); }
+  select option { background-color: #1f2937; color: #fff; }
 
-        .event-type {
-            font-weight: 600;
-            font-size: 1rem;
-        }
+  /* Error Banner */
+  .error-banner {
+    display: none; /* hidden by default */
+    background-color: rgba(248, 113, 113, 0.1);
+    color: var(--color-red);
+    padding: 10px 20px;
+    text-align: center;
+    font-weight: 500;
+    border-bottom: 1px solid rgba(248, 113, 113, 0.3);
+    flex-shrink: 0;
+  }
+  .error-banner.active { display: block; }
 
-        .event-time {
-            color: var(--text-muted);
-            font-size: 0.85rem;
-        }
+  /* Feed Area */
+  .feed-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+    position: relative;
+    background: rgba(0,0,0,0.1);
+  }
 
-        .badge {
-            font-size: 0.75rem;
-            padding: 2px 10px;
-            border-radius: 12px;
-            border: 1px solid currentColor;
-            margin-left: auto;
-            cursor: help;
-            font-weight: 600;
-        }
+  /* Custom Scrollbar */
+  .feed-container::-webkit-scrollbar { width: 8px; }
+  .feed-container::-webkit-scrollbar-track { background: transparent; }
+  .feed-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+  .feed-container::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
 
-        .event-body {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-            font-size: 0.9rem;
-        }
+  .event-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+  }
 
-        .detail {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
+  .event-row {
+    display: grid;
+    grid-template-columns: 28px minmax(150px, 1.5fr) minmax(100px, 1fr) minmax(100px, 1fr) 80px auto;
+    gap: 16px;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background-color: transparent;
+    transition: background-color 0.15s;
+  }
 
-        .detail-label {
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
+  .event-row:hover { background-color: var(--bg-panel-hover); }
 
-        .detail-value {
-            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-            color: var(--text-main);
-        }
+  .ev-icon {
+    font-size: 16px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 28px;
+    height: 28px;
+    background: var(--bg-panel);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
 
-        .actor-label {
-            color: #d2a8ff;
-        }
-        
-        .weapon-label {
-            color: #ff7b72;
-        }
+  .ev-primary {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+  }
 
-        .event-id-row {
-            margin-top: 12px;
-            padding-top: 12px;
-            border-top: 1px dashed var(--border-color);
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-        }
+  .ev-label {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-        .empty-state {
-            padding: 40px;
-            text-align: center;
-            color: var(--text-muted);
-            background: var(--bg-surface);
-            border: 1px dashed var(--border-color);
-            border-radius: 6px;
-        }
-    </style>
+  .ev-detail {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ev-region {
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ev-time {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    cursor: help;
+  }
+
+  /* Provenance Pills */
+  .prov-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  .prov-observed { background: rgba(74, 222, 128, 0.15); color: var(--color-green); border: 1px solid rgba(74, 222, 128, 0.2); }
+  .prov-reconstructed { background: rgba(96, 165, 250, 0.15); color: var(--color-blue); border: 1px solid rgba(96, 165, 250, 0.2); }
+  .prov-verified { background: rgba(192, 132, 252, 0.15); color: var(--color-purple); border: 1px solid rgba(192, 132, 252, 0.2); }
+  .prov-community_awarded { background: rgba(251, 146, 60, 0.15); color: var(--color-orange); border: 1px solid rgba(251, 146, 60, 0.2); }
+
+  /* Empty State */
+  .empty-state {
+    display: none;
+    height: 100%;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: var(--text-muted);
+    padding: 40px 20px;
+    text-align: center;
+  }
+  .empty-state.active { display: flex; }
+
+  .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.5; }
+
+  /* Footer */
+  footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-panel);
+    color: var(--text-muted);
+    font-size: 11px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  /* Responsive Adjustments */
+  @media (max-width: 800px) {
+    .event-row {
+      grid-template-columns: 28px 1fr 80px auto;
+      gap: 12px;
+    }
+    .ev-region { display: none; } /* Hide region on smaller screens to save space */
+  }
+
+  @media (max-width: 500px) {
+    .stats-strip { flex-wrap: wrap; }
+    .event-row {
+      grid-template-columns: 28px 1fr auto;
+      grid-template-rows: auto auto;
+      gap: 8px;
+    }
+    .ev-time { grid-column: 2 / 4; grid-row: 2; text-align: left; }
+    .ev-prov-container { grid-column: 3; grid-row: 1; }
+  }
+</style>
 </head>
 <body>
-<!-- DESIGN NOTE: This page mirrors the existing achievements provenance model (Observed/Reconstructed/Verified/Community-awarded) because the strategy's core discipline is "evidence immutable, interpretation separate". Gameplay events ARE evidence, so presenting them with the same provenance vocabulary as the achievements view keeps ONE mental model across the whole telemetry surface instead of inventing a second visual language for what is conceptually the same idea (a claim backed by a traceable source). -->
 
-<div class="persistent-banner">
-    Sample data — backend pending
-</div>
+<!--
+  Gameplay Event Telemetry (G4). This page is a THIN CLIENT of the real, DB-less endpoint
+  GET /api/v0/telemetry/events (in-process ring buffer). There is NO sample/fallback data:
+  if the fetch fails the page shows the error banner and whatever real rows it last held —
+  it never fabricates events. The feed is delayed (server-side exposure delay) and anonymized
+  (no player id / name / position ever leaves the server), so the header badge reflects the
+  delay rather than claiming "LIVE". Only 4 of the 18 vocabulary types have live producers
+  today (structure_placed, item_picked_up, item_stored, interest_subscription_changed); the
+  dictionary carries all 18 for forward-compat, so a sparse feed is correct, not a bug.
+-->
 
-<div class="container">
-    <header>
-        <h1>Lumberjacks — Gameplay Event Telemetry</h1>
-        <p class="subtitle">Chronological evidence timeline of gameplay actions across active regions.</p>
-    </header>
-
-    <div class="controls">
-        <div class="controls-title">Filter by Event Type</div>
-        <div class="filters" id="filter-container">
-            <!-- Filter buttons injected via JS -->
-        </div>
+<div class="dashboard-container">
+  <header>
+    <h1>Gameplay Event Telemetry</h1>
+    <div class="delay-indicator" id="delay-indicator" title="This feed is delayed and anonymized — not a raw real-time stream.">
+      <div class="live-dot"></div>
+      <span id="delay-label">DELAYED</span>
     </div>
+  </header>
 
-    <div class="timeline" id="timeline">
-        <!-- Timeline items injected via JS -->
+  <div class="stats-strip">
+    <div class="stat-item">
+      <span class="stat-label">In Buffer</span>
+      <span class="stat-value" id="stat-count">-</span>
     </div>
+    <div class="stat-item">
+      <span class="stat-label">Buffer Capacity</span>
+      <span class="stat-value" id="stat-capacity">-</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Dropped (Since Start)</span>
+      <span class="stat-value" id="stat-dropped">-</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Last Updated</span>
+      <span class="stat-value" id="stat-updated">-</span>
+    </div>
+  </div>
+
+  <div class="error-banner" id="error-banner">
+    ⚠️ Telemetry endpoint unreachable. Retrying...
+  </div>
+
+  <div class="controls">
+    <div class="filter-group">
+      <label for="filter-category">Category</label>
+      <select id="filter-category">
+        <option value="all">All Categories</option>
+        <option value="Build">Build</option>
+        <option value="Inventory">Inventory</option>
+        <option value="World">World</option>
+        <option value="Progression">Progression</option>
+        <option value="Operational">Operational</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filter-provenance">Provenance</label>
+      <select id="filter-provenance">
+        <option value="all">All Tiers</option>
+        <option value="observed">Observed</option>
+        <option value="reconstructed">Reconstructed</option>
+        <option value="verified">Verified</option>
+        <option value="community_awarded">Community Awarded</option>
+      </select>
+    </div>
+  </div>
+
+  <main class="feed-container" aria-live="polite" aria-atomic="false">
+    <ul class="event-list" id="event-list"></ul>
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">📡</div>
+      <div id="empty-text">No gameplay events captured yet.</div>
+    </div>
+  </main>
+
+  <footer id="footer-note">
+    API v0 (Unstable) · Feed is anonymized — no player identities or positions are ever exposed.
+  </footer>
 </div>
 
 <script>
-/**
- * INTENDED FUTURE ENDPOINT:
- * 
- * GET /api/v0/telemetry/events
- * 
- * Expected JSON response:
- * {
- *   "api_version": "v0",
- *   "stability": "unstable",
- *   "events": [
- *     {
- *       "event_id": "evt-...",
- *       "event_type": "killing_blow",
- *       "occurred_at": "2026-07-12T21:58:03Z",
- *       "actor_label": "Player-3F9C",
- *       "region_id": "region-spawn",
- *       "weapon": "iron_axe",
- *       "provenance": "observed"
- *     }
- *   ]
- * }
- */
+(function() {
+  'use strict';
 
-// Vocabulary strictly mirroring the achievements provenance model.
-const PROVENANCE = {
-    observed: {
-        label: 'Observed',
-        color: '#58a6ff',
-        bg: 'rgba(88,166,255,0.12)',
-        title: 'Directly derived from authoritative server events.',
-    },
-    reconstructed: {
-        label: 'Reconstructed',
-        color: '#d29922',
-        bg: 'rgba(210,153,34,0.12)',
-        title: 'Inferred from aggregate/derived data, not a single event.',
-    },
-    verified: {
-        label: 'Verified',
-        color: '#3fb950',
-        bg: 'rgba(63,185,80,0.12)',
-        title: 'Confirmed by an independent second signal.',
-    },
-    community_awarded: {
-        label: 'Community-awarded',
-        color: '#d2a8ff',
-        bg: 'rgba(210,168,255,0.12)',
-        title: 'Explicitly granted by members/stewards; attributable.',
+  // --- Configuration & Mappings ---
+  const POLL_INTERVAL = 2000;
+  const ENDPOINT = '/api/v0/telemetry/events';
+
+  const EVENT_DICT = {
+    // Build
+    'structure_placed': { label: 'Structure Placed', icon: '🔨', cat: 'Build', color: 'var(--cat-build)' },
+    'structure_removed': { label: 'Structure Removed', icon: '🧨', cat: 'Build', color: 'var(--cat-build)' },
+    // Inventory
+    'item_picked_up': { label: 'Item Picked Up', icon: '🎒', cat: 'Inventory', color: 'var(--cat-inventory)' },
+    'item_stored': { label: 'Item Stored', icon: '📦', cat: 'Inventory', color: 'var(--cat-inventory)' },
+    'container_opened': { label: 'Container Opened', icon: '🔓', cat: 'Inventory', color: 'var(--cat-inventory)' },
+    // World
+    'road_segment_maintained': { label: 'Road Maintained', icon: '🚧', cat: 'World', color: 'var(--cat-world)' },
+    'settlement_signature_updated': { label: 'Settlement Updated', icon: '🏘️', cat: 'World', color: 'var(--cat-world)' },
+    'player_discovered_landmark': { label: 'Landmark Discovered', icon: '🗺️', cat: 'World', color: 'var(--cat-world)' },
+    'player_followed_road_segment': { label: 'Road Followed', icon: '🥾', cat: 'World', color: 'var(--cat-world)' },
+    'player_entered_region': { label: 'Region Entered', icon: '📍', cat: 'World', color: 'var(--cat-world)' },
+    // Progression
+    'challenge_started': { label: 'Challenge Started', icon: '🎯', cat: 'Progression', color: 'var(--cat-progression)' },
+    'challenge_completed': { label: 'Challenge Completed', icon: '🏆', cat: 'Progression', color: 'var(--cat-progression)' },
+    'guild_objective_progressed': { label: 'Guild Objective Progress', icon: '📈', cat: 'Progression', color: 'var(--cat-progression)' },
+    'guild_objective_completed': { label: 'Guild Objective Completed', icon: '✨', cat: 'Progression', color: 'var(--cat-progression)' },
+    'reward_granted': { label: 'Reward Granted', icon: '🎁', cat: 'Progression', color: 'var(--cat-progression)' },
+    // Operational
+    'region_activated': { label: 'Region Activated', icon: '🟢', cat: 'Operational', color: 'var(--cat-operational)' },
+    'region_deactivated': { label: 'Region Deactivated', icon: '🔴', cat: 'Operational', color: 'var(--cat-operational)' },
+    'interest_subscription_changed': { label: 'Subscription Changed', icon: '📡', cat: 'Operational', color: 'var(--cat-operational)' }
+  };
+
+  const PROV_DICT = {
+    'observed': 'Observed',
+    'reconstructed': 'Reconstructed',
+    'verified': 'Verified',
+    'community_awarded': 'Awarded'
+  };
+
+  // --- State ---
+  let rawEvents = [];
+  let filterCat = 'all';
+  let filterProv = 'all';
+  let hasLoadedOnce = false;   // distinguishes "no data yet" from a genuine empty feed
+
+  // --- DOM Elements ---
+  const elList = document.getElementById('event-list');
+  const elEmpty = document.getElementById('empty-state');
+  const elEmptyText = document.getElementById('empty-text');
+  const elError = document.getElementById('error-banner');
+
+  const elStatCount = document.getElementById('stat-count');
+  const elStatCap = document.getElementById('stat-capacity');
+  const elStatDrop = document.getElementById('stat-dropped');
+  const elStatUpdate = document.getElementById('stat-updated');
+
+  const elDelayLabel = document.getElementById('delay-label');
+  const elFooter = document.getElementById('footer-note');
+
+  const selCat = document.getElementById('filter-category');
+  const selProv = document.getElementById('filter-provenance');
+
+  // --- Utilities ---
+  function escapeHTML(str) {
+    if (typeof str !== 'string') return '';
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag] || tag));
+  }
+
+  function getRelativeTime(isoString) {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return 'unknown';
+    const seconds = Math.floor((new Date() - d) / 1000);
+
+    if (seconds < 0) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  function formatAbsoluteTime(isoString) {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleString();
+  }
+
+  // Reflect the server-side exposure delay in the badge + footer honesty note. The feed is
+  // never claimed as raw "LIVE" while a delay is in effect; delay===0 (delay disabled, e.g.
+  // local testing) legitimately reads LIVE; an absent value falls back to a neutral "DELAYED".
+  function updateDelayUI(delaySeconds) {
+    if (typeof delaySeconds === 'number' && delaySeconds > 0) {
+      elDelayLabel.textContent = `RECENT · ${delaySeconds}s DELAY`;
+      elFooter.textContent = `API v0 (Unstable) · Feed is delayed ~${delaySeconds}s and anonymized — no player identities or positions are ever exposed.`;
+    } else if (delaySeconds === 0) {
+      elDelayLabel.textContent = 'LIVE · NO DELAY';
+      elFooter.textContent = 'API v0 (Unstable) · Feed is anonymized — no player identities or positions are ever exposed.';
+    } else {
+      elDelayLabel.textContent = 'DELAYED';
+      elFooter.textContent = 'API v0 (Unstable) · Feed is delayed and anonymized — no player identities or positions are ever exposed.';
     }
-};
+  }
 
-const EVENT_TYPES = {
-    first_hit: { id: 'first_hit', label: 'First Hit', icon: '🎯' },
-    killing_blow: { id: 'killing_blow', label: 'Killing Blow', icon: '⚔️' },
-    weapon_usage: { id: 'weapon_usage', label: 'Weapon Usage', icon: '🗡️' },
-    projectile: { id: 'projectile', label: 'Projectile', icon: '🏹' },
-    trigger: { id: 'trigger', label: 'Trigger', icon: '⚙️' }
-};
-
-// Fallback data satisfying the constraints (15-20 events, newest first, anonymized).
-const SAMPLE_DATA = [
-    { event_id: "evt-020", event_type: "killing_blow", occurred_at: "2026-07-12T21:58:03Z", actor_label: "Player-3F9C", region_id: "region-spawn", weapon: "iron_axe", provenance: "observed" },
-    { event_id: "evt-019", event_type: "first_hit", occurred_at: "2026-07-12T21:58:01Z", actor_label: "Player-3F9C", region_id: "region-spawn", weapon: "iron_axe", provenance: "observed" },
-    { event_id: "evt-018", event_type: "trigger", occurred_at: "2026-07-12T21:57:15Z", actor_label: "Player-A1B2", region_id: "region-gate", weapon: null, provenance: "observed" },
-    { event_id: "evt-017", event_type: "projectile", occurred_at: "2026-07-12T21:56:44Z", actor_label: "Player-99DE", region_id: "region-north", weapon: "shortbow", provenance: "reconstructed" },
-    { event_id: "evt-016", event_type: "weapon_usage", occurred_at: "2026-07-12T21:56:42Z", actor_label: "Player-99DE", region_id: "region-north", weapon: "shortbow", provenance: "observed" },
-    { event_id: "evt-015", event_type: "killing_blow", occurred_at: "2026-07-12T21:55:10Z", actor_label: "Player-77XQ", region_id: "region-south", weapon: "steel_sword", provenance: "verified" },
-    { event_id: "evt-014", event_type: "first_hit", occurred_at: "2026-07-12T21:55:05Z", actor_label: "Player-77XQ", region_id: "region-south", weapon: "steel_sword", provenance: "observed" },
-    { event_id: "evt-013", event_type: "trigger", occurred_at: "2026-07-12T21:52:30Z", actor_label: "Player-BB44", region_id: "region-dungeon", weapon: null, provenance: "reconstructed" },
-    { event_id: "evt-012", event_type: "weapon_usage", occurred_at: "2026-07-12T21:51:12Z", actor_label: "Player-C001", region_id: "region-spawn", weapon: "wooden_club", provenance: "observed" },
-    { event_id: "evt-011", event_type: "killing_blow", occurred_at: "2026-07-12T21:49:55Z", actor_label: "Player-11Z1", region_id: "region-east", weapon: "magic_missile", provenance: "community_awarded" },
-    { event_id: "evt-010", event_type: "projectile", occurred_at: "2026-07-12T21:49:54Z", actor_label: "Player-11Z1", region_id: "region-east", weapon: "magic_missile", provenance: "observed" },
-    { event_id: "evt-009", event_type: "first_hit", occurred_at: "2026-07-12T21:49:50Z", actor_label: "Player-11Z1", region_id: "region-east", weapon: "magic_missile", provenance: "observed" },
-    { event_id: "evt-008", event_type: "weapon_usage", occurred_at: "2026-07-12T21:49:48Z", actor_label: "Player-11Z1", region_id: "region-east", weapon: "magic_missile", provenance: "observed" },
-    { event_id: "evt-007", event_type: "trigger", occurred_at: "2026-07-12T21:45:22Z", actor_label: "Player-3F9C", region_id: "region-spawn", weapon: null, provenance: "observed" },
-    { event_id: "evt-006", event_type: "killing_blow", occurred_at: "2026-07-12T21:43:10Z", actor_label: "Player-A1B2", region_id: "region-gate", weapon: "halberd", provenance: "reconstructed" },
-    { event_id: "evt-005", event_type: "first_hit", occurred_at: "2026-07-12T21:43:02Z", actor_label: "Player-A1B2", region_id: "region-gate", weapon: "halberd", provenance: "observed" },
-    { event_id: "evt-004", event_type: "weapon_usage", occurred_at: "2026-07-12T21:43:00Z", actor_label: "Player-A1B2", region_id: "region-gate", weapon: "halberd", provenance: "observed" },
-    { event_id: "evt-003", event_type: "projectile", occurred_at: "2026-07-12T21:41:15Z", actor_label: "Player-99DE", region_id: "region-north", weapon: "shortbow", provenance: "observed" },
-    { event_id: "evt-002", event_type: "weapon_usage", occurred_at: "2026-07-12T21:41:13Z", actor_label: "Player-99DE", region_id: "region-north", weapon: "shortbow", provenance: "observed" },
-    { event_id: "evt-001", event_type: "trigger", occurred_at: "2026-07-12T21:40:00Z", actor_label: "Player-99DE", region_id: "region-north", weapon: null, provenance: "observed" }
-];
-
-let eventData = [];
-let activeFilters = new Set(Object.keys(EVENT_TYPES));
-
-// Defense-in-depth HTML escaping
-function escapeHtml(unsafe) {
-    if (unsafe === null || unsafe === undefined) return '';
-    const textNode = document.createTextNode(String(unsafe));
-    const div = document.createElement('div');
-    div.appendChild(textNode);
-    return div.innerHTML;
-}
-
-function formatDate(isoString) {
+  // --- Core Logic ---
+  async function fetchTelemetry() {
     try {
-        const d = new Date(isoString);
-        return d.toLocaleString(undefined, { 
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-            year: 'numeric', month: 'short', day: 'numeric',
-            timeZoneName: 'short'
-        });
-    } catch {
-        return escapeHtml(isoString);
-    }
-}
+      const res = await fetch(ENDPOINT);
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
 
-function renderFilters() {
-    const container = document.getElementById('filter-container');
+      // Update data state (real events only — there is no fallback dataset).
+      rawEvents = Array.isArray(data.events) ? data.events : [];
+      hasLoadedOnce = true;
+
+      // Update stats
+      elStatCount.textContent = typeof data.count === 'number' ? data.count : rawEvents.length;
+      elStatCap.textContent = typeof data.capacity === 'number' ? data.capacity : '-';
+
+      const dropped = typeof data.dropped_since_start === 'number' ? data.dropped_since_start : 0;
+      elStatDrop.textContent = dropped;
+      if (dropped > 0) elStatDrop.classList.add('warn');
+      else elStatDrop.classList.remove('warn');
+
+      updateDelayUI(data.delay_seconds);
+
+      const now = new Date();
+      elStatUpdate.textContent = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+
+      elError.classList.remove('active');
+      render();
+    } catch (err) {
+      console.error('Telemetry fetch failed:', err);
+      elError.classList.add('active');
+      // Do NOT fabricate data on error: keep whatever real rows we last held (may be none).
+      // The banner communicates the failure; the feed never shows invented events.
+    }
+  }
+
+  function render() {
+    // Apply filters
+    const filtered = rawEvents.filter(ev => {
+      const meta = EVENT_DICT[ev.event_type] || {};
+      const catMatch = filterCat === 'all' || meta.cat === filterCat;
+      const provMatch = filterProv === 'all' || ev.provenance === filterProv;
+      return catMatch && provMatch;
+    });
+
+    // Handle Empty State — distinguish a genuinely empty feed from a filtered-empty view.
+    if (filtered.length === 0) {
+      elList.innerHTML = '';
+      if (rawEvents.length > 0) {
+        elEmptyText.textContent = 'No events match the current filters.';
+      } else if (hasLoadedOnce) {
+        elEmptyText.textContent = 'No gameplay events captured yet.';
+      } else {
+        elEmptyText.textContent = 'Loading gameplay events…';
+      }
+      elEmpty.classList.add('active');
+      return;
+    }
+    elEmpty.classList.remove('active');
+
+    // Build DOM (using strings mapped safely)
     let html = '';
-    
-    Object.values(EVENT_TYPES).forEach(type => {
-        const isActive = activeFilters.has(type.id) ? 'active' : '';
-        html += `<button class="filter-btn ${isActive}" data-type="${type.id}">
-                    <span>${type.icon}</span> ${escapeHtml(type.label)}
-                 </button>`;
-    });
-    
-    container.innerHTML = html;
-    
-    // Bind click events
-    const buttons = container.querySelectorAll('.filter-btn');
-    buttons.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const type = e.currentTarget.getAttribute('data-type');
-            if (activeFilters.has(type)) {
-                activeFilters.delete(type);
-            } else {
-                activeFilters.add(type);
-            }
-            renderFilters();
-            renderTimeline();
-        });
-    });
-}
+    for (let i = 0; i < filtered.length; i++) {
+      const ev = filtered[i];
+      const typeStr = ev.event_type || 'unknown';
+      const meta = EVENT_DICT[typeStr] || { label: typeStr, icon: '❔', cat: 'Unknown', color: 'var(--text-muted)' };
 
-function renderTimeline() {
-    const container = document.getElementById('timeline');
-    const filteredEvents = eventData.filter(ev => activeFilters.has(ev.event_type));
-    
-    if (filteredEvents.length === 0) {
-        container.innerHTML = `<div class="empty-state">No events match the selected filters.</div>`;
-        return;
+      const safeLabel = escapeHTML(meta.label);
+      const safeDetail = ev.detail ? escapeHTML(ev.detail) : '';
+      const safeRegion = ev.region_id ? escapeHTML(ev.region_id) : '-';
+      const safeTimeRel = getRelativeTime(ev.occurred_at);
+      const safeTimeAbs = formatAbsoluteTime(ev.occurred_at);
+
+      const provRaw = ev.provenance || 'unknown';
+      const provLabel = PROV_DICT[provRaw] || provRaw;
+      const provClass = `prov-${provRaw.replace(/[^a-z_]/g, '')}`;
+
+      html += `
+        <li class="event-row">
+          <div class="ev-icon" style="color: ${meta.color}" aria-hidden="true" title="Category: ${meta.cat}">${meta.icon}</div>
+          <div class="ev-primary">
+            <span class="ev-label">${safeLabel}</span>
+            ${safeDetail ? `<span class="ev-detail">${safeDetail}</span>` : ''}
+          </div>
+          <div class="ev-region" title="Region ID">${safeRegion}</div>
+          <div class="ev-time" title="${safeTimeAbs}">${safeTimeRel}</div>
+          <div class="ev-prov-container">
+            <span class="prov-pill ${provClass}">${escapeHTML(provLabel)}</span>
+          </div>
+        </li>
+      `;
     }
 
-    let html = '';
-    filteredEvents.forEach(ev => {
-        const typeInfo = EVENT_TYPES[ev.event_type] || { label: ev.event_type, icon: '❓' };
-        const provInfo = PROVENANCE[ev.provenance] || PROVENANCE.observed;
-        
-        let weaponHtml = '';
-        if (ev.weapon) {
-            weaponHtml = `
-                <div class="detail">
-                    <span class="detail-label">Weapon</span>
-                    <span class="detail-value weapon-label">${escapeHtml(ev.weapon)}</span>
-                </div>
-            `;
-        }
+    elList.innerHTML = html;
+  }
 
-        html += `
-            <div class="event-card">
-                <div class="event-header">
-                    <span class="event-icon" aria-hidden="true">${typeInfo.icon}</span>
-                    <span class="event-type">${escapeHtml(typeInfo.label)}</span>
-                    <span class="event-time">${formatDate(ev.occurred_at)}</span>
-                    <span class="badge" 
-                          style="color: ${provInfo.color}; background-color: ${provInfo.bg}; border-color: ${provInfo.color}" 
-                          title="${escapeHtml(provInfo.title)}">
-                        ${escapeHtml(provInfo.label)}
-                    </span>
-                </div>
-                <div class="event-body">
-                    <div class="detail">
-                        <span class="detail-label">Actor</span>
-                        <span class="detail-value actor-label">${escapeHtml(ev.actor_label)}</span>
-                    </div>
-                    <div class="detail">
-                        <span class="detail-label">Region</span>
-                        <span class="detail-value">${escapeHtml(ev.region_id)}</span>
-                    </div>
-                    ${weaponHtml}
-                </div>
-                <div class="event-id-row">
-                    Event ID: ${escapeHtml(ev.event_id)}
-                </div>
-            </div>
-        `;
-    });
+  // --- Event Listeners ---
+  selCat.addEventListener('change', (e) => {
+    filterCat = e.target.value;
+    render();
+  });
 
-    container.innerHTML = html;
-}
+  selProv.addEventListener('change', (e) => {
+    filterProv = e.target.value;
+    render();
+  });
 
-async function init() {
-    renderFilters();
-
-    try {
-        // Honesty Rule: attempt to fetch from the actual API first.
-        const res = await fetch('/api/v0/telemetry/events');
-        if (!res.ok) {
-            throw new Error(`HTTP Error ${res.status}`);
-        }
-        const data = await res.json();
-        if (data && Array.isArray(data.events)) {
-            eventData = data.events;
-        } else {
-            throw new Error("Invalid payload structure");
-        }
-    } catch (error) {
-        console.warn("Real telemetry feed fetch failed, falling back to sample data.", error);
-        eventData = SAMPLE_DATA;
+  // Keep relative times updated even if no new data arrives
+  setInterval(() => {
+    if (rawEvents.length > 0 && !elError.classList.contains('active')) {
+      render();
     }
-    
-    renderTimeline();
-}
+  }, 10000);
 
-// Bootstrap
-document.addEventListener('DOMContentLoaded', init);
+  // --- Init ---
+  // Initial (pre-fetch) render shows the calm loading/empty state — never sample rows.
+  render();
+  // Start polling
+  fetchTelemetry();
+  setInterval(fetchTelemetry, POLL_INTERVAL);
 
+})();
 </script>
 </body>
 </html>
