@@ -3,6 +3,7 @@ using Game.Contracts.Entities;
 using Game.Contracts.Events;
 using Game.Persistence;
 using Game.Persistence.Entities;
+using Game.ServiceDefaults;
 using Game.Simulation.World;
 using Microsoft.EntityFrameworkCore;
 
@@ -56,6 +57,10 @@ public class InventoryHandler
         await db.SaveChangesAsync();
 
         _logger.LogInformation("Player {PlayerId} picked up {ItemType} x{Qty}", playerId, item.ItemType, item.Quantity);
+
+        // Public telemetry feed (G4): capture the public-safe projection — item category only,
+        // never the player — at the in-process seam, before the out-of-process EventLog POST.
+        GameplayEventFeed.Capture(EventType.ItemPickedUp, item.RegionId, item.ItemType);
 
         // Emit event
         _ = EmitEventAsync(EventType.ItemPickedUp, playerId, item.RegionId, new
@@ -113,6 +118,9 @@ public class InventoryHandler
 
         _logger.LogInformation("Player {PlayerId} stored {ItemType} x{Qty} in container {ContainerId}",
             playerId, itemType, quantity, containerId);
+
+        // Public telemetry feed (G4): item category only, never the player. Pre-persistence seam.
+        GameplayEventFeed.Capture(EventType.ItemStored, container.RegionId, itemType);
 
         // Emit event
         _ = EmitEventAsync(EventType.ItemStored, playerId, container.RegionId, new

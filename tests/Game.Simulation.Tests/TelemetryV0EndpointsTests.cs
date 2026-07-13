@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Game.Contracts.Entities;
+using Game.Contracts.Events;
+using Game.ServiceDefaults;
 using Game.Simulation.Endpoints;
 using Game.Simulation.World;
 using Microsoft.Extensions.Configuration;
@@ -195,5 +197,204 @@ public class TelemetryV0EndpointsTests
             foreach (var coord in sentinelCoords)
                 Assert.DoesNotContain(coord, json);
         }
+    }
+
+    // ── Events feed (G4) ──
+
+    private static readonly DateTimeOffset FixedNow =
+        new(2026, 07, 13, 12, 00, 00, TimeSpan.Zero);
+
+    private static CapturedEvent Ev(string id, string type, DateTimeOffset at, string? region = "region-spawn",
+        string? detail = null, string provenance = "observed") =>
+        new(id, type, at, region, detail, provenance);
+
+    [Fact]
+    public void EventsInfoCarriesEnvelopeAndFeedMetadata()
+    {
+        var snapshot = new FeedSnapshot(
+            new[] { Ev("evt-000002", EventType.ItemPickedUp, FixedNow.AddMinutes(-5), detail: "wood") },
+            Capacity: 200,
+            DroppedSinceStart: 7);
+
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(snapshot, TimeSpan.Zero, FixedNow));
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal("v0", root.GetProperty("api_version").GetString());
+        Assert.Equal("unstable", root.GetProperty("stability").GetString());
+        Assert.Equal(200, root.GetProperty("capacity").GetInt32());
+        Assert.Equal(7, root.GetProperty("dropped_since_start").GetInt32());
+        Assert.Equal(0, root.GetProperty("delay_seconds").GetInt32());
+        Assert.Equal(1, root.GetProperty("count").GetInt32());
+
+        var evt = root.GetProperty("events")[0];
+        Assert.Equal("evt-000002", evt.GetProperty("event_id").GetString());
+        Assert.Equal(EventType.ItemPickedUp, evt.GetProperty("event_type").GetString());
+        Assert.True(evt.TryGetProperty("occurred_at", out _));
+        Assert.Equal("region-spawn", evt.GetProperty("region_id").GetString());
+        Assert.Equal("wood", evt.GetProperty("detail").GetString());
+        Assert.Equal("observed", evt.GetProperty("provenance").GetString());
+    }
+
+    [Fact]
+    public void EventsInfoEmptyFeedReturnsEmptyArrayNotError()
+    {
+        var snapshot = new FeedSnapshot(Array.Empty<CapturedEvent>(), 200, 0);
+
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(snapshot, TimeSpan.Zero, FixedNow));
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("events").ValueKind);
+        Assert.Equal(0, root.GetProperty("events").GetArrayLength());
+        Assert.Equal(0, root.GetProperty("count").GetInt32());
+    }
+
+    [Fact]
+    public void EventsFeedSnapshotIsNewestFirstAndEndpointPreservesOrder()
+    {
+        GameplayEventFeed.Reset();
+        GameplayEventFeed.Capture(EventType.StructurePlaced, "region-spawn", "wall", "observed", FixedNow.AddMinutes(-3));
+        GameplayEventFeed.Capture(EventType.ItemPickedUp, "region-spawn", "stone", "observed", FixedNow.AddMinutes(-2));
+        GameplayEventFeed.Capture(EventType.ItemStored, "region-spawn", "stone", "observed", FixedNow.AddMinutes(-1));
+
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(GameplayEventFeed.Snapshot(), TimeSpan.Zero, FixedNow));
+
+        using var doc = JsonDocument.Parse(json);
+        var events = doc.RootElement.GetProperty("events");
+        Assert.Equal(3, events.GetArrayLength());
+        // Newest capture first.
+        Assert.Equal(EventType.ItemStored, events[0].GetProperty("event_type").GetString());
+        Assert.Equal(EventType.ItemPickedUp, events[1].GetProperty("event_type").GetString());
+        Assert.Equal(EventType.StructurePlaced, events[2].GetProperty("event_type").GetString());
+        // Opaque monotonic event_id format.
+        Assert.Matches(@"^evt-\d{6}$", events[0].GetProperty("event_id").GetString()!);
+    }
+
+    [Fact]
+    public void EventsInfoExposureDelayHidesEventsNewerThanTheDelay()
+    {
+        // One event just 5s old (younger than the 30s delay → hidden), one 60s old (older → shown).
+        var snapshot = new FeedSnapshot(
+            new[]
+            {
+                Ev("evt-000002", EventType.ItemStored, FixedNow.AddSeconds(-5), detail: "iron"),   // newest first
+                Ev("evt-000001", EventType.StructurePlaced, FixedNow.AddSeconds(-60), detail: "wall"),
+            },
+            200, 0);
+
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(snapshot, TimeSpan.FromSeconds(30), FixedNow));
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal(30, root.GetProperty("delay_seconds").GetInt32());
+        Assert.Equal(1, root.GetProperty("count").GetInt32());
+        var events = root.GetProperty("events");
+        Assert.Equal(1, events.GetArrayLength());
+        Assert.Equal("evt-000001", events[0].GetProperty("event_id").GetString());
+        // The too-recent event must not appear.
+        Assert.DoesNotContain("evt-000002", json);
+    }
+
+    [Fact]
+    public void CaptureRefusesExcludedIdentityEventTypes()
+    {
+        GameplayEventFeed.Reset();
+        Assert.False(GameplayEventFeed.IsPublicEventType(EventType.PlayerConnected));
+
+        // Excluded identity/social types are silently dropped by the capture layer.
+        GameplayEventFeed.Capture(EventType.PlayerConnected, "region-spawn", "should-not-appear");
+        GameplayEventFeed.Capture(EventType.PlayerDisconnected, "region-spawn", "should-not-appear");
+        GameplayEventFeed.Capture(EventType.PlayerJoinedGuild, "region-spawn", "should-not-appear");
+        // One allowed type does land.
+        GameplayEventFeed.Capture(EventType.StructurePlaced, "region-spawn", "wall");
+
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(GameplayEventFeed.Snapshot(), TimeSpan.Zero, FixedNow));
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal(1, root.GetProperty("count").GetInt32());
+        Assert.Equal(EventType.StructurePlaced, root.GetProperty("events")[0].GetProperty("event_type").GetString());
+        Assert.DoesNotContain(EventType.PlayerConnected, json);
+        Assert.DoesNotContain(EventType.PlayerDisconnected, json);
+        Assert.DoesNotContain("should-not-appear", json);
+    }
+
+    [Fact]
+    public void FeedRingDropsOldestPastCapacityAndCountsDrops()
+    {
+        GameplayEventFeed.Reset();
+        const int overfill = GameplayEventFeed.Capacity + 5;
+        for (var i = 0; i < overfill; i++)
+            GameplayEventFeed.Capture(EventType.ItemPickedUp, "region-spawn", "wood", "observed", FixedNow.AddSeconds(-i));
+
+        var snapshot = GameplayEventFeed.Snapshot();
+        Assert.Equal(GameplayEventFeed.Capacity, snapshot.Events.Count);
+        Assert.Equal(5, snapshot.DroppedSinceStart);
+
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(snapshot, TimeSpan.Zero, FixedNow));
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal(GameplayEventFeed.Capacity, root.GetProperty("count").GetInt32());
+        Assert.Equal(GameplayEventFeed.Capacity, root.GetProperty("capacity").GetInt32());
+        Assert.Equal(5, root.GetProperty("dropped_since_start").GetInt32());
+    }
+
+    [Fact]
+    public void ResolveEventsDelayDefaultsTo30AndZeroDisables()
+    {
+        var empty = new ConfigurationBuilder().Build();
+        Assert.Equal(TimeSpan.FromSeconds(30), TelemetryV0Endpoints.ResolveEventsDelay(empty));
+
+        var disabled = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Telemetry:PublicEventsDelaySeconds"] = "0",
+            }).Build();
+        Assert.Equal(TimeSpan.Zero, TelemetryV0Endpoints.ResolveEventsDelay(disabled));
+
+        var custom = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Telemetry:PublicEventsDelaySeconds"] = "90",
+            }).Build();
+        Assert.Equal(TimeSpan.FromSeconds(90), TelemetryV0Endpoints.ResolveEventsDelay(custom));
+    }
+
+    // ── Privacy (hard rule) extended to the /events feed ──
+
+    [Fact]
+    public void EventsFeedResponseNeverLeaksPlayerIdentifiersOrPositions()
+    {
+        const string playerAId = "player-alpha-3f9c1e";
+        const string playerAName = "SneakyLumberjackAlpha";
+        const string playerBId = "player-bravo-7d2a08";
+        const string playerBName = "SneakyLumberjackBravo";
+
+        // A live world with sentinel-named players at a sentinel position exists alongside the feed.
+        _ = WorldWithPlayers((playerAId, playerAName), (playerBId, playerBName));
+
+        // Capture several events as the real producers would — non-identifying category detail only.
+        GameplayEventFeed.Reset();
+        GameplayEventFeed.Capture(EventType.StructurePlaced, "region-spawn", "wall", "observed", FixedNow.AddMinutes(-4));
+        GameplayEventFeed.Capture(EventType.ItemPickedUp, "region-spawn", "wood", "observed", FixedNow.AddMinutes(-3));
+        GameplayEventFeed.Capture(EventType.ItemStored, "region-spawn", "wood", "observed", FixedNow.AddMinutes(-2));
+        GameplayEventFeed.Capture(EventType.InterestSubscriptionChanged, "region-spawn", "+2/-1", "observed", FixedNow.AddMinutes(-1));
+
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(GameplayEventFeed.Snapshot(), TimeSpan.Zero, FixedNow));
+
+        var sentinelCoords = new[]
+        {
+            SentinelPosition.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            SentinelPosition.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            SentinelPosition.Z.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        Assert.DoesNotContain(playerAId, json);
+        Assert.DoesNotContain(playerAName, json);
+        Assert.DoesNotContain(playerBId, json);
+        Assert.DoesNotContain(playerBName, json);
+        foreach (var coord in sentinelCoords)
+            Assert.DoesNotContain(coord, json);
     }
 }

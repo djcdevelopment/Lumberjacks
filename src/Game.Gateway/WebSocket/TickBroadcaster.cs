@@ -426,6 +426,14 @@ public class TickBroadcaster : ITickBroadcaster
 
     private async Task EmitInterestSubscriptionEventAsync(SubscriptionChange change, long tick)
     {
+        // Public telemetry feed (G4): capture a public-safe projection at the in-process seam,
+        // before the out-of-process EventLog POST. detail is the tier-transition magnitude
+        // (+added/-removed counts) — never the observer id or the added/removed player-id lists.
+        GameplayEventFeed.Capture(
+            EventType.InterestSubscriptionChanged,
+            change.RegionId,
+            $"+{change.Added.Count}/-{change.Removed.Count}");
+
         try
         {
             var client = _httpFactory!.CreateClient();

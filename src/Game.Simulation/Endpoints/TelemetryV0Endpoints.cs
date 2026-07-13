@@ -39,6 +39,28 @@ public static class TelemetryV0Endpoints
         group.MapGet("/delivery", () => Results.Ok(BuildDeliveryInfo()));
 
         group.MapGet("/regions", (WorldState world) => Results.Ok(BuildRegionsInfo(world)));
+
+        group.MapGet("/events", (IConfiguration config) =>
+        {
+            var delay = ResolveEventsDelay(config);
+            return Results.Ok(BuildEventsInfo(GameplayEventFeed.Snapshot(), delay, DateTimeOffset.UtcNow));
+        });
+    }
+
+    /// <summary>Config key for the public /events exposure delay, in seconds (env: Telemetry__PublicEventsDelaySeconds).</summary>
+    public const string EventsDelayConfigKey = "Telemetry:PublicEventsDelaySeconds";
+
+    /// <summary>Default exposure delay when unconfigured: the unauthed feed serves events at least 30s old.</summary>
+    public const int DefaultEventsDelaySeconds = 30;
+
+    /// <summary>
+    /// Reads the exposure delay from configuration (default <see cref="DefaultEventsDelaySeconds"/>); a
+    /// value of 0 (or negative) disables the delay so the feed is effectively live.
+    /// </summary>
+    public static TimeSpan ResolveEventsDelay(IConfiguration config)
+    {
+        var seconds = config.GetValue(EventsDelayConfigKey, DefaultEventsDelaySeconds);
+        return TimeSpan.FromSeconds(Math.Max(0, seconds));
     }
 
     /// <summary>
@@ -114,4 +136,42 @@ public static class TelemetryV0Endpoints
             tick_rate = r.TickRate,
         }).ToList(),
     };
+
+    /// <summary>
+    /// The public-safe gameplay event feed (G4) wrapped in the v0 envelope. Pure function of a
+    /// point-in-time <see cref="GameplayEventFeed.Snapshot"/>, the exposure <paramref name="delay"/>,
+    /// and the current time — no DB, no HttpContext, so it's unit-tested directly.
+    ///
+    /// Applies the exposure delay: only events whose <c>occurred_at</c> is at or before
+    /// <paramref name="now"/> minus <paramref name="delay"/> are returned. The snapshot is already
+    /// newest-first, so the filtered slice preserves that order. <c>count</c> reflects the returned
+    /// (post-delay) array, while <c>capacity</c> and <c>dropped_since_start</c> describe the live ring.
+    /// </summary>
+    public static object BuildEventsInfo(FeedSnapshot snapshot, TimeSpan delay, DateTimeOffset now)
+    {
+        var cutoff = now - delay;
+        var visible = snapshot.Events
+            .Where(e => e.OccurredAt <= cutoff)
+            .Select(e => new
+            {
+                event_id = e.EventId,
+                event_type = e.EventType,
+                occurred_at = e.OccurredAt,
+                region_id = e.RegionId,
+                detail = e.Detail,
+                provenance = e.Provenance,
+            })
+            .ToList();
+
+        return new
+        {
+            api_version = PublicTelemetryV0.ApiVersion,
+            stability = PublicTelemetryV0.Stability,
+            events = visible,
+            count = visible.Count,
+            capacity = snapshot.Capacity,
+            dropped_since_start = snapshot.DroppedSinceStart,
+            delay_seconds = (int)delay.TotalSeconds,
+        };
+    }
 }
