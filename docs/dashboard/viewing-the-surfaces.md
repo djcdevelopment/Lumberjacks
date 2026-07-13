@@ -57,6 +57,20 @@ the last good values — they never fabricate data.
 
 ## 2a. GCP P7 deployment
 
+### OMEN-only view (recommended for now)
+
+To view the live GCP data from OMEN without exposing another public listener, run the
+loopback proxy:
+
+```powershell
+cd C:\work\Lumberjacks\tools\omen-dashboard
+docker compose up -d
+Start-Process http://127.0.0.1:8080/community
+```
+
+It binds only to `127.0.0.1:8080`, forwards the read-only dashboard/API routes to GCP,
+and blocks `/valheim/*`, Operator API, WebSocket control, and non-GET telemetry calls.
+
 The current combined Valheim + Lumberjacks deployment is GCP P7:
 
 ```text
