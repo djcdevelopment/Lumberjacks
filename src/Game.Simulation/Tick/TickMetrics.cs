@@ -77,6 +77,10 @@ public sealed class TickMetrics : IDisposable
     // Set once at startup by the broadcaster (post-auto-resolve — see SendFanOut.ResolveWorkerCount).
     private int _effectiveSendWorkers = 1;
 
+    // Set once at startup by the broadcaster (post-auto-resolve — see SendFanOut.ResolveUdpSocketCount).
+    // Phase 3a: the effective Replication:UdpSockets count UdpTransport is using.
+    private int _effectiveUdpSockets = 1;
+
     // Set once at startup by the broadcaster; "unknown" until then.
     private string _replicationPolicy = "unknown";
 
@@ -121,6 +125,12 @@ public sealed class TickMetrics : IDisposable
     /// (Replication:SendWorkers after auto-resolution — see SendFanOut.ResolveWorkerCount).
     /// </summary>
     public void SetSendWorkers(int workers) => _effectiveSendWorkers = workers;
+
+    /// <summary>
+    /// Called once at startup by the broadcaster to tag the EFFECTIVE UDP send-socket count
+    /// (Replication:UdpSockets after auto-resolution — see SendFanOut.ResolveUdpSocketCount).
+    /// </summary>
+    public void SetUdpSockets(int sockets) => _effectiveUdpSockets = sockets;
 
     /// <summary>
     /// Called by the tick broadcaster (on ticks where it runs) with the number of sessions
@@ -219,7 +229,7 @@ public sealed class TickMetrics : IDisposable
 
         var replication = new ReplicationWindowStats(
             _replicationPolicy, _windowSent, _windowCulled,
-            _effectiveSendWorkers, _windowDeadlineAborts, _windowDegradedTicks);
+            _effectiveSendWorkers, _effectiveUdpSockets, _windowDeadlineAborts, _windowDegradedTicks);
 
         _lastWindow = new TickTimingSnapshot(
             WindowEndTick: tick,
@@ -234,7 +244,7 @@ public sealed class TickMetrics : IDisposable
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Tick timing (last {Count} ticks): total p50={TotalP50:F2}ms p99={TotalP99:F2}ms max={TotalMax:F2}ms overruns={Overruns} (budget {BudgetMs}ms) | interval p99={IntervalP99:F1}ms | sim p99={SimP99:F2}ms hash p99={HashP99:F2}ms broadcast p99={BroadcastP99:F2}ms (interest p99={InterestP99:F2}ms send p99={SendP99:F2}ms) housekeeping p99={HousekeepingP99:F2}ms | repl policy={Policy} sent={Sent} culled={Culled} sendWorkers={SendWorkers} deadlineAborts={DeadlineAborts} degradedTicks={DegradedTicks}",
+                "Tick timing (last {Count} ticks): total p50={TotalP50:F2}ms p99={TotalP99:F2}ms max={TotalMax:F2}ms overruns={Overruns} (budget {BudgetMs}ms) | interval p99={IntervalP99:F1}ms | sim p99={SimP99:F2}ms hash p99={HashP99:F2}ms broadcast p99={BroadcastP99:F2}ms (interest p99={InterestP99:F2}ms send p99={SendP99:F2}ms) housekeeping p99={HousekeepingP99:F2}ms | repl policy={Policy} sent={Sent} culled={Culled} sendWorkers={SendWorkers} udpSockets={UdpSockets} deadlineAborts={DeadlineAborts} degradedTicks={DegradedTicks}",
                 n,
                 phases["total"].P50Ms, phases["total"].P99Ms, phases["total"].MaxMs,
                 _windowOverruns, TickBudgetMs,
@@ -243,7 +253,7 @@ public sealed class TickMetrics : IDisposable
                 phases["broadcast"].P99Ms, phases["interest"].P99Ms, phases["send"].P99Ms,
                 phases["housekeeping"].P99Ms,
                 replication.Policy, replication.Sent, replication.Culled,
-                replication.SendWorkers, replication.DeadlineAborts, replication.DegradedTicks);
+                replication.SendWorkers, replication.UdpSockets, replication.DeadlineAborts, replication.DegradedTicks);
         }
 
         _sampleCount = 0;
@@ -273,21 +283,24 @@ public sealed record PhaseStats(double P50Ms, double P99Ms, double MaxMs);
 /// every observer/tick in the window. Sent = updates actually dispatched; Culled = updates
 /// evaluated by InterestManager but dropped by the active policy.
 ///
-/// SendWorkers/DeadlineAborts/DegradedTicks are the send-loop rework (phase 2) knobs:
-/// SendWorkers is the EFFECTIVE (post-auto-resolve) Replication:SendWorkers value, constant
-/// for the process's lifetime, not really a "window" stat but exposed here alongside the
-/// others it explains. DeadlineAborts sums Replication:BroadcastDeadlineMs aborts across the
-/// window; DegradedTicks counts how many of the window's ticks ran with
-/// Replication:AdaptiveDegrade active. Under SendWorkers>1, the "send"/"interest" phase
-/// timings above (from RecordBroadcastPhases) are SUMS across concurrent worker chunks, not
-/// wall time — the "broadcast" phase (measured once around the whole call, in TickLoop) is
-/// the actual tick-budget truth. The gap between the broadcast wall time and the
-/// interest+send sum is the parallelism-efficiency signal: a wide gap means the workers
-/// meaningfully overlapped; a near-zero gap means little real concurrency was achieved.
+/// SendWorkers/UdpSockets/DeadlineAborts/DegradedTicks are the send-loop rework (phase 2) and
+/// per-worker-socket (phase 3a) knobs: SendWorkers is the EFFECTIVE (post-auto-resolve)
+/// Replication:SendWorkers value; UdpSockets is the EFFECTIVE (post-auto-resolve)
+/// Replication:UdpSockets value (see SendFanOut.ResolveUdpSocketCount) — both constant for the
+/// process's lifetime, not really "window" stats but exposed here alongside the others they
+/// explain. DeadlineAborts sums Replication:BroadcastDeadlineMs aborts across the window;
+/// DegradedTicks counts how many of the window's ticks ran with Replication:AdaptiveDegrade
+/// active. Under SendWorkers>1, the "send"/"interest" phase timings above (from
+/// RecordBroadcastPhases) are SUMS across concurrent worker chunks, not wall time — the
+/// "broadcast" phase (measured once around the whole call, in TickLoop) is the actual
+/// tick-budget truth. The gap between the broadcast wall time and the interest+send sum is the
+/// parallelism-efficiency signal: a wide gap means the workers meaningfully overlapped; a
+/// near-zero gap means little real concurrency was achieved (the phase-3a UdpSockets
+/// experiment exists to test whether a shared UdpClient explains a near-zero gap).
 /// </summary>
 public sealed record ReplicationWindowStats(
     string Policy, long Sent, long Culled,
-    int SendWorkers, long DeadlineAborts, int DegradedTicks);
+    int SendWorkers, int UdpSockets, long DeadlineAborts, int DegradedTicks);
 
 /// <summary>Per-phase tick timing stats for the most recent completed window (~5s).</summary>
 public sealed record TickTimingSnapshot(
