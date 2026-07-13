@@ -109,14 +109,52 @@ public static class TelemetryV0Endpoints
         tick_timing = metrics?.LastWindow,
     };
 
-    /// <summary>Delivery-path and session-transition counters — both are aggregate tallies only.</summary>
+    /// <summary>
+    /// Delivery-path, session-transition, and UDP packet-outcome counters — all aggregate
+    /// tallies only. The <c>udp_packets</c> block carries the per-outcome counts
+    /// (received/invalid/unknown_session/send_error) plus a derived <c>reject_rate</c>. NOTE:
+    /// <c>reject_rate</c> is a SERVER-SIDE reject/error rate over packets the server actually
+    /// received — it is NOT network packet loss (unobservable server-side; true client-measured
+    /// loss lives in synthclient's <c>loss_rate</c>).
+    /// </summary>
     public static object BuildDeliveryInfo() => new
     {
         api_version = PublicTelemetryV0.ApiVersion,
         stability = PublicTelemetryV0.Stability,
         delivery = LumberjacksTelemetry.SnapshotDelivery(),
         transitions = LumberjacksTelemetry.SnapshotTransitions(),
+        udp_packets = BuildUdpPacketsInfo(LumberjacksTelemetry.SnapshotUdpPackets()),
     };
+
+    /// <summary>
+    /// Shapes a UDP packet-outcome snapshot into the <c>udp_packets</c> block: every outcome
+    /// count as-is, a <c>total</c>, and a derived <c>reject_rate</c> =
+    /// (invalid + unknown_session + send_error) / total, guarding divide-by-zero (0 packets →
+    /// 0.0). Pure function of the snapshot so it's directly unit-testable. Aggregates only — no
+    /// identifiers. This is a reject/error rate, NOT network loss (see <see cref="BuildDeliveryInfo"/>).
+    /// </summary>
+    public static object BuildUdpPacketsInfo(IReadOnlyDictionary<string, long> udp)
+    {
+        long Count(string outcome) => udp.TryGetValue(outcome, out var v) ? v : 0;
+
+        var received = Count("received");
+        var invalid = Count("invalid");
+        var unknownSession = Count("unknown_session");
+        var sendError = Count("send_error");
+        var total = received + invalid + unknownSession + sendError;
+        var rejected = invalid + unknownSession + sendError;
+        var rejectRate = total == 0 ? 0.0 : (double)rejected / total;
+
+        return new
+        {
+            received,
+            invalid,
+            unknown_session = unknownSession,
+            send_error = sendError,
+            total,
+            reject_rate = rejectRate,
+        };
+    }
 
     /// <summary>Per-region static world facts — id, name, live player_count, bounds, tick_rate.</summary>
     public static object BuildRegionsInfo(WorldState world) => new

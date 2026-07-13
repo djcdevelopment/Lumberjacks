@@ -129,6 +129,10 @@ Console.WriteLine(JsonSerializer.Serialize(summary, new JsonSerializerOptions { 
 var p50Ms = Round(Pct(50));
 var p99Ms = Round(Pct(99));
 
+// Explicit RTT bucket boundaries (ms). OTel's default histogram buckets top out around 10s and
+// are useless for millisecond-scale RTT, so we pin sensible boundaries via a metrics View below.
+double[] rttBucketBoundaries = { 5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 500 };
+
 using (var meter = new Meter("synthclient"))
 {
     var gaugeTags = new KeyValuePair<string, object?>[]
@@ -144,12 +148,27 @@ using (var meter = new Meter("synthclient"))
     meter.CreateObservableGauge(
         "synthclient.loss_rate", () => new Measurement<double>(lossRate, gaugeTags), unit: "1");
 
+    // Full RTT distribution as a real histogram (complements the pre-computed percentile gauges):
+    // every raw RTT sample is recorded here, tagged the same region+transport as the gauges, so a
+    // dashboard can derive arbitrary percentiles / heatmaps server-side rather than trusting the
+    // probe's own p50/p99.
+    var rttHistogram = meter.CreateHistogram<double>(
+        "synthclient.rtt_ms", unit: "ms", description: "Per-sample synthetic-client RTT distribution.");
+
     using var meterProvider = Sdk.CreateMeterProviderBuilder()
         .AddMeter("synthclient")
+        // Override the default (seconds-scale) histogram buckets for the RTT instrument only.
+        .AddView(
+            "synthclient.rtt_ms",
+            new ExplicitBucketHistogramConfiguration { Boundaries = rttBucketBoundaries })
         .AddOtlpExporter()
         .Build();
 
-    // Trigger a collection of the observable gauges and push them to the exporter,
+    // Record every RTT sample into the histogram before flushing.
+    foreach (var sample in allRtt)
+        rttHistogram.Record(sample, gaugeTags);
+
+    // Trigger a collection of the observable gauges + histogram and push them to the exporter,
     // then let the using-dispose flush/shut down the provider cleanly.
     meterProvider?.ForceFlush(5000);
 }
