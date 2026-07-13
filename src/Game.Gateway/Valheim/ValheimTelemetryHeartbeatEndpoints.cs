@@ -46,5 +46,15 @@ public static class ValheimTelemetryHeartbeatEndpoints
         app.MapGet("/api/v0/telemetry/cutover", (ValheimTelemetryHeartbeatService service) =>
             Results.Ok(service.CutoverSnapshot()))
             .RequireCors(PublicTelemetryV0.CorsPolicyName);
+
+        app.MapGet("/api/v0/valheim/enrollment/{manifestId}", (string manifestId, ValheimTelemetryHeartbeatService service) =>
+        {
+            if (string.IsNullOrWhiteSpace(manifestId))
+            {
+                return Results.BadRequest(new { error = "manifestId is required" });
+            }
+
+            return Results.Ok(service.EnrollmentSnapshot(manifestId));
+        }).RequireCors(PublicTelemetryV0.CorsPolicyName);
     }
 }

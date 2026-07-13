@@ -84,6 +84,33 @@ public sealed class ValheimTelemetryHeartbeatService
             };
         }
     }
+
+    public object EnrollmentSnapshot(string manifestId)
+    {
+        lock (_gate)
+        {
+            var stale = _lastSeen is null || DateTimeOffset.UtcNow - _lastSeen > TimeSpan.FromSeconds(15);
+            var mode = _latest?.CutoverMode ?? "native";
+            return new
+            {
+                manifest_id = manifestId,
+                state = stale ? "stale" : "advertised",
+                mode,
+                server_instance_id = _latest?.InstanceId,
+                mod_version = _latest?.ModVersion,
+                required_transport = "lumberjacks-progressive",
+                native_fallback_allowed = true,
+                coverage_gate = new
+                {
+                    total = _latest?.CoverageTotal,
+                    lumberjacks = _latest?.CoverageLumberjacks,
+                    native_only = _latest?.CoverageNativeOnly,
+                    complete = _latest?.CoverageTotal is > 0 && _latest.CoverageNativeOnly == 0,
+                },
+                last_seen = _lastSeen,
+            };
+        }
+    }
 }
 
 public sealed record ValheimTelemetryHeartbeat

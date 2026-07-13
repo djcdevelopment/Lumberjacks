@@ -56,6 +56,9 @@ Raw API behind them (same-origin, `GET` from any origin, DB-less):
 Lumberjacks mode (`native`, `mirrored`, or `lumberjacks-primary`) and coverage counters.
 An absent coverage value means the mod is reporting status but has not yet installed the
 full-traffic coverage probe; it must not be read as 100% cutover.
+`/api/v0/valheim/enrollment/{manifestId}` exposes the read-only enrollment manifest and
+the same coverage gate. It advertises progressive transport; it does not authorize
+Lumberjacks-primary mode by itself.
 
 The pages poll every 2 s. If a poll fails they show a "reconnecting / stale" chip and keep
 the last good values — they never fabricate data.
