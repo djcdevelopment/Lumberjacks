@@ -459,6 +459,26 @@ W=8/U=8 unless noted) with a **serial control** (W=1/U=1) to attribute the delta
    rotation may be working; the "inversion" is not a trustworthy server signal. A real
    fairness measurement needs a multi-process-per-bot loader.
 
+## Robustness bug found during the rerun (Phase-3a, same date)
+
+Setting up the Phase-3a matrix, a gateway launched with `Replication__AdaptiveDegrade=off`
+(a plausible operator value — `off`/`on` read as booleans everywhere else) **hard-crashed on
+startup**: an unhandled `FormatException` from the config bool-binder took the process down
+with exit 139 before the first tick. The same failure mode existed for every numeric knob
+(`SendWorkers=lots`, `BroadcastDeadlineMs=soon`, `NearRadius=close`, …): the raw
+`IConfiguration.GetValue<T>` binder throws rather than degrading when a present value can't be
+converted. A single mistyped env var could kill a volunteer-hosted shard on boot — unacceptable
+for the community-hosting posture.
+
+**Fix:** [`ReplicationOptions.FromConfiguration`](../src/Game.Simulation/World/ReplicationOptions.cs)
+now parses every key with explicit `TryParse`-and-fall-back-to-default semantics (the policy
+string already did this). An unrecognized value logs a clear warning naming the key, the bad
+value, and the expected shape, then substitutes the documented default — the process starts.
+Regression coverage in
+[`InterestManagerTests`](../tests/Game.Simulation.Tests/InterestManagerTests.cs) asserts that
+`AdaptiveDegrade=off` and a garbage `SendWorkers=lots` yield defaults, not an exception, and that
+the warning sink fires with the offending key/value.
+
 ## Next steps
 
 1. ~~Contention probe~~ — **done** (Follow-up A): no regression under local dGPU

@@ -91,7 +91,8 @@ public class TickBroadcaster : ITickBroadcaster
         TickMetrics? metrics = null)
     {
         _sessions = sessions;
-        var replicationOptions = ReplicationOptions.FromConfiguration(config);
+        var replicationOptions = ReplicationOptions.FromConfiguration(
+            config, warning => logger.LogWarning("Replication config: {Warning}", warning));
         _interest = new InterestManager(world.SpatialGrid, replicationOptions);
         _udpTransport = udpTransport;
         _logger = logger;

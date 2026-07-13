@@ -578,4 +578,98 @@ public class InterestManagerTests
 
         Assert.Equal(0, options.UdpSockets); // resolved to an effective count by SendFanOut.ResolveUdpSocketCount
     }
+
+    // ── Robustness: plausible-but-invalid operator values fall back to defaults, never throw ──
+    // Regression guard for the exit-139 startup crash hit during the 2026-07-12 Phase-3a rerun:
+    // the raw type-binder throws FormatException on values like "off"/"lots" that a bool/int
+    // binder can't parse. See docs/benchmark-host-capacity-2026-07-12.md.
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("on")]
+    [InlineData("yes")]
+    [InlineData("1")]
+    [InlineData("garbage")]
+    public void ConfigurationAdaptiveDegradeInvalidValueFallsBackToDefault(string raw)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:AdaptiveDegrade"] = raw })
+            .Build();
+
+        // Must not throw (was an unhandled FormatException that killed the process).
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(ReplicationOptions.DefaultAdaptiveDegrade, options.AdaptiveDegrade);
+    }
+
+    [Fact]
+    public void ConfigurationGarbageIntFallsBackToDefault()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Replication:SendWorkers"] = "lots",
+                ["Replication:BroadcastDeadlineMs"] = "soon",
+                ["Replication:MidTickInterval"] = "often",
+            })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(ReplicationOptions.DefaultSendWorkers, options.SendWorkers);
+        Assert.Equal(ReplicationOptions.DefaultBroadcastDeadlineMs, options.BroadcastDeadlineMs);
+        Assert.Equal(ReplicationOptions.DefaultMidTickInterval, options.MidTickInterval);
+    }
+
+    [Fact]
+    public void ConfigurationGarbageDoubleFallsBackToDefault()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Replication:NearRadius"] = "close",
+                ["Replication:MidRadius"] = "far",
+            })
+            .Build();
+
+        var options = ReplicationOptions.FromConfiguration(config);
+
+        Assert.Equal(ReplicationOptions.DefaultNearRadius, options.NearRadius);
+        Assert.Equal(ReplicationOptions.DefaultMidRadius, options.MidRadius);
+    }
+
+    [Fact]
+    public void ConfigurationInvalidValueInvokesWarningSinkWithKeyAndValue()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Replication:AdaptiveDegrade"] = "off" })
+            .Build();
+
+        var warnings = new List<string>();
+        var options = ReplicationOptions.FromConfiguration(config, warnings.Add);
+
+        Assert.Equal(ReplicationOptions.DefaultAdaptiveDegrade, options.AdaptiveDegrade);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("Replication:AdaptiveDegrade", warning);
+        Assert.Contains("off", warning);
+    }
+
+    [Fact]
+    public void ConfigurationValidValuesDoNotWarn()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Replication:AdaptiveDegrade"] = "true",
+                ["Replication:SendWorkers"] = "4",
+                ["Replication:NearRadius"] = "50",
+                ["Replication:Policy"] = "radius",
+            })
+            .Build();
+
+        var warnings = new List<string>();
+        ReplicationOptions.FromConfiguration(config, warnings.Add);
+
+        Assert.Empty(warnings);
+    }
 }
