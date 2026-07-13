@@ -238,6 +238,7 @@
     <header>
         <h1>Lumberjacks — Live Community View</h1>
         <div id="deployment-status" style="font-size:.78rem;color:var(--text-dim);margin-top:4px">Deployment: loading...</div>
+        <div id="valheim-status" style="font-size:.78rem;color:var(--text-dim);margin-top:2px">Valheim: waiting for heartbeat...</div>
         <div class="badges">
             <div id="apiBadgeContainer"></div>
             <div class="status-indicator">
@@ -717,8 +718,17 @@
                 el.textContent = `Deployment: ${d.environment} - ${d.lumberjacks_version}`;
             } catch (_) { el.textContent = 'Deployment: unavailable'; }
         }
+        async function pollValheim() {
+            const el = document.getElementById('valheim-status');
+            try {
+                const d = await fetch('/api/v0/telemetry/valheim').then(r => r.ok ? r.json() : Promise.reject(r.status));
+                el.textContent = d.stale ? 'Valheim: heartbeat stale' : `Valheim: ${d.heartbeat?.server_state || 'ready'} - ${d.heartbeat?.peer_count ?? 0} peers`;
+            } catch (_) { el.textContent = 'Valheim: telemetry unavailable'; }
+        }
         pollDeployment();
+        pollValheim();
         setInterval(pollDeployment, POLL_INTERVAL_MS);
+        setInterval(pollValheim, POLL_INTERVAL_MS);
         setInterval(pollAll, POLL_INTERVAL_MS);
 
         // Handle resize for sparkline redraw to prevent stretching logic issues
