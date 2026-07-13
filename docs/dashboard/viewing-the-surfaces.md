@@ -74,7 +74,8 @@ badge. Verify the identity directly before a session:
 curl -s http://8.231.129.249:4000/api/v0/telemetry/deployment
 ```
 
-The expected current identity is `environment=gcp-p7`, Lumberjacks `686fea9`, and
+The expected current identity is `environment=gcp-p7`, Lumberjacks
+`686fea91d6a7a3ed214a2e0fbe9a43383e401409`, and
 ComfyNetworkSense `0.5.18`. Keep `/valheim/*` and Operator API on the restricted P7
 control surface; do not expose them through a public dashboard proxy.
 
