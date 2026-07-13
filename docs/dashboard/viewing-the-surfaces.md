@@ -55,6 +55,37 @@ Raw API behind them (same-origin, `GET` from any origin, DB-less):
 The pages poll every 2 s. If a poll fails they show a "reconnecting / stale" chip and keep
 the last good values — they never fabricate data.
 
+## 2a. GCP P7 deployment
+
+The current combined Valheim + Lumberjacks deployment is GCP P7:
+
+```text
+http://8.231.129.249:4000/community
+http://8.231.129.249:4000/networksense
+http://8.231.129.249:4000/events
+http://8.231.129.249:4000/testing
+```
+
+These are the same pages as the local surfaces, but they fetch from the deployed
+Gateway. Each page shows the environment and deployed revisions in its deployment
+badge. Verify the identity directly before a session:
+
+```bash
+curl -s http://8.231.129.249:4000/api/v0/telemetry/deployment
+```
+
+The expected current identity is `environment=gcp-p7`, Lumberjacks `686fea9`, and
+ComfyNetworkSense `0.5.18`. Keep `/valheim/*` and Operator API on the restricted P7
+control surface; do not expose them through a public dashboard proxy.
+
+For the admin console, forward Operator API through IAP and keep the Vite app local:
+
+```bash
+gcloud compute ssh comfy-lumberjacks-p7 --project lumberjacks-exp-20260711-djc \
+  --zone us-west1-b --tunnel-through-iap -- -L 14004:127.0.0.1:4004
+API_TARGET=http://127.0.0.1:14004 npm run dev -w @game/admin-web
+```
+
 ## 3. Dev-admin operator console (`:5173`)
 
 A separate Vite app (not in Compose). Start it alongside the stack:
