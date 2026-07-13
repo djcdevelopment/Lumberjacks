@@ -75,6 +75,7 @@ The ADRs record decisions, not a perfect chronological build log.
 - [Architecture principles](architecture-principles.md)
 - [Repository layout](repo-layout.md)
 - [Getting started](getting-started.md)
+- [GitHub integration strategy](github-integration-strategy.md)
 - [Google Cloud migration strategy](google-cloud-migration-strategy.md)
 - [Google Cloud Stage 1 runbook](google-cloud-stage1-runbook.md)
 - [Azure deployment runbook](azure-deployment-runbook.md)
