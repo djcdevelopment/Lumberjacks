@@ -1,5 +1,6 @@
 using Game.Contracts.Entities;
 using Game.Contracts.Events;
+using Game.ServiceDefaults;
 using Game.Simulation.World;
 
 namespace Game.Simulation.Handlers;
@@ -102,6 +103,10 @@ public class PlayerHandler
             .Concat(structureEntities)
             .Concat(naturalResourceEntities)
             .ToList();
+
+        // Public telemetry feed (G4): a player entered a region — capture the region id ONLY,
+        // at the in-process seam. Never the player id/name or spawn position. Pre-persistence.
+        GameplayEventFeed.Capture(EventType.PlayerEnteredRegion, regionId: request.RegionId, detail: null, provenance: "observed");
 
         // Fire-and-forget: emit player_connected event
         _ = EmitPlayerEventAsync(EventType.PlayerConnected, request.PlayerId, request.RegionId,
