@@ -169,6 +169,29 @@ The feed is doubly privacy-guarded. First, events carry no actor data: there is 
 }
 ```
 
+### GET /api/v0/telemetry/valheim
+
+Returns the latest sanitized heartbeat from the ComfyNetworkSense dedicated-server mod.
+The response is aggregate-only: it contains no Steam IDs, player names, positions, or
+object identifiers. `stale` is true until a heartbeat arrives and again after 15 seconds
+without one. Heartbeat ingestion is `POST /valheim/telemetry/heartbeat` and is protected
+by `X-Lumberjacks-Telemetry-Key` when `VALHEIM_TELEMETRY_KEY` is configured on the Gateway.
+
+```json
+{
+  "stability": "unstable",
+  "stale": false,
+  "last_seen": "2026-07-13T12:00:19.4942635+00:00",
+  "heartbeat": {
+    "mod_version": "0.5.19",
+    "server_role": "dedicated",
+    "server_state": "ready",
+    "peer_count": 0,
+    "sample_timestamp_utc": "2026-07-13T12:00:19.4930280Z"
+  }
+}
+```
+
 ## Live Community View
 
 As part of Phase 4 of the telemetry strategy, a Live Community View is available at `GET /community`. This is a single, self-contained HTML page served directly by the Gateway that polls the API endpoints listed above every 2 seconds to provide a real-time, out-of-the-box telemetry dashboard for community members.
