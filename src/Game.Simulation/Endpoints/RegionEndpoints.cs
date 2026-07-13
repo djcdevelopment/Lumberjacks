@@ -1,6 +1,8 @@
 using Game.Contracts.Entities;
+using Game.Contracts.Events;
 using Game.Persistence;
 using Game.Persistence.Entities;
+using Game.ServiceDefaults;
 using Game.Simulation.World;
 using Microsoft.EntityFrameworkCore;
 
@@ -49,6 +51,10 @@ public static class RegionEndpoints
 
             world.Regions[id] = region;
 
+            // Public telemetry feed (G4): a region became active — capture the region id only,
+            // at the in-process seam. No actor, no detail. Pre-persistence.
+            GameplayEventFeed.Capture(EventType.RegionActivated, regionId: region.Id, detail: null, provenance: "observed");
+
             // Persist to Postgres
             await using var db = await dbFactory.CreateDbContextAsync();
             db.Regions.Add(new RegionEntity
@@ -81,6 +87,10 @@ public static class RegionEndpoints
                 return Results.BadRequest(new { error = "Cannot delete region with active players", player_count = region.PlayerCount });
 
             world.Regions.TryRemove(id, out _);
+
+            // Public telemetry feed (G4): a region was deactivated/removed — region id only,
+            // at the in-process seam. No actor, no detail. Pre-persistence.
+            GameplayEventFeed.Capture(EventType.RegionDeactivated, regionId: id, detail: null, provenance: "observed");
 
             // Remove from Postgres
             await using var db = await dbFactory.CreateDbContextAsync();

@@ -3,7 +3,9 @@ using Game.Contracts.Entities;
 using Game.Contracts.Events;
 using Game.ServiceDefaults;
 using Game.Simulation.Endpoints;
+using Game.Simulation.Handlers;
 using Game.Simulation.World;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
@@ -396,5 +398,73 @@ public class TelemetryV0EndpointsTests
         Assert.DoesNotContain(playerBName, json);
         foreach (var coord in sentinelCoords)
             Assert.DoesNotContain(coord, json);
+    }
+
+    // ── G4 producers added in v0.20.1: region_activated, region_deactivated, player_entered_region ──
+
+    /// <summary>Stub IHttpClientFactory — the Join path's fire-and-forget EventLog POST fails silently.</summary>
+    private sealed class StubHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new();
+    }
+
+    [Fact]
+    public void PlayerJoinCapturesPlayerEnteredRegionWithRegionIdOnly()
+    {
+        // Exercise the REAL producer seam: PlayerHandler.Join captures at the in-process emission point.
+        GameplayEventFeed.Reset();
+        var world = new WorldState(); // seeds region-spawn
+        var handler = new PlayerHandler(
+            world,
+            new StubHttpClientFactory(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<PlayerHandler>.Instance);
+
+        const string sentinelPlayerId = "player-zeta-9c3f1a";
+        var result = handler.Join(new JoinRequest { PlayerId = sentinelPlayerId, RegionId = "region-spawn" });
+        Assert.True(result.Success);
+
+        var snapshot = GameplayEventFeed.Snapshot();
+        var entered = Assert.Single(snapshot.Events, e => e.EventType == EventType.PlayerEnteredRegion);
+        Assert.Equal("region-spawn", entered.RegionId);
+        Assert.Null(entered.Detail);              // region id ONLY — never the player or spawn position
+        Assert.Equal("observed", entered.Provenance);
+
+        // Privacy: the joining player's id/name/position must not leak into the feed response.
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(snapshot, TimeSpan.Zero, FixedNow));
+        Assert.DoesNotContain(sentinelPlayerId, json);
+        Assert.DoesNotContain(world.Players[sentinelPlayerId].Name, json);
+    }
+
+    [Fact]
+    public void RegionActivatedProducerCapturesRegionIdAndNullDetail()
+    {
+        // Mirrors the RegionEndpoints POST /regions seam: region id only, no actor, no detail.
+        GameplayEventFeed.Reset();
+        GameplayEventFeed.Capture(EventType.RegionActivated, regionId: "region-north", detail: null, provenance: "observed");
+
+        var snapshot = GameplayEventFeed.Snapshot();
+        var evt = Assert.Single(snapshot.Events, e => e.EventType == EventType.RegionActivated);
+        Assert.Equal("region-north", evt.RegionId);
+        Assert.Null(evt.Detail);
+        Assert.Equal("observed", evt.Provenance);
+
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(snapshot, TimeSpan.Zero, FixedNow));
+        Assert.Equal(EventType.RegionActivated, JsonDocument.Parse(json).RootElement
+            .GetProperty("events")[0].GetProperty("event_type").GetString());
+    }
+
+    [Fact]
+    public void RegionDeactivatedProducerCapturesRegionIdAndNullDetail()
+    {
+        // Mirrors the RegionEndpoints DELETE /regions/{id} seam: region id only, no actor, no detail.
+        GameplayEventFeed.Reset();
+        GameplayEventFeed.Capture(EventType.RegionDeactivated, regionId: "region-north", detail: null, provenance: "observed");
+
+        var snapshot = GameplayEventFeed.Snapshot();
+        var evt = Assert.Single(snapshot.Events, e => e.EventType == EventType.RegionDeactivated);
+        Assert.Equal("region-north", evt.RegionId);
+        Assert.Null(evt.Detail);
+        Assert.Equal("observed", evt.Provenance);
     }
 }
