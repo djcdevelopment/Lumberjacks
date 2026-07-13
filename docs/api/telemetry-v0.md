@@ -91,14 +91,35 @@ Returns session aggregates only: the total connected session count, broken down 
 
 ### GET /api/v0/telemetry/delivery
 
-Returns cumulative networking counters since server start. The `delivery` map contains message delivery-path outcomes (e.g., udp, binary_ws, json_ws), where keys appear once at least one message has taken that path. The `transitions` map counts session lifecycle events (created, resumed, detached). *Note: As with the sessions endpoint, the captured JSON sample below is from an idle local run where no clients have connected since startup, hence the empty objects.*
+Returns cumulative networking counters since server start. The `delivery` map contains message delivery-path outcomes (e.g., udp, binary_ws, json_ws), where keys appear once at least one message has taken that path. The `transitions` map counts session lifecycle events (created, resumed, detached).
+
+The `udp_packets` block tallies the outcome of every inbound UDP packet the server processed (plus outbound send failures), with a derived `reject_rate`:
+
+- `received` — valid packet mapped to a known session.
+- `invalid` — packet too small to be a valid framed datagram.
+- `unknown_session` — packet carried a bad/unknown UDP token (dropped).
+- `send_error` — an outbound datagram send threw.
+- `total` — sum of the four outcomes above.
+- `reject_rate` — `(invalid + unknown_session + send_error) / total`, guarded so 0 packets yields `0.0` (not `NaN`).
+
+> **Honesty note:** `reject_rate` is a **server-side reject/error rate over packets the server actually received** — it is **NOT** network packet loss. A UDP server cannot observe datagrams that never arrived, so true packet loss is unobservable server-side; it is measured client-side and reported as `loss_rate` by the synthclient probe (see `tools/synthclient`).
+
+*Note: As with the sessions endpoint, the captured JSON sample below is from an idle local run where no clients have connected since startup, hence the empty `delivery`/`transitions` objects and all-zero `udp_packets`.*
 
 ```json
 {
   "api_version": "v0",
   "stability": "unstable",
   "delivery": {},
-  "transitions": {}
+  "transitions": {},
+  "udp_packets": {
+    "received": 0,
+    "invalid": 0,
+    "unknown_session": 0,
+    "send_error": 0,
+    "total": 0,
+    "reject_rate": 0.0
+  }
 }
 ```
 

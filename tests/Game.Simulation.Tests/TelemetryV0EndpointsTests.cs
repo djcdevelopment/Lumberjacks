@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Game.Contracts.Entities;
+using Game.ServiceDefaults;
 using Game.Simulation.Endpoints;
 using Game.Simulation.World;
 using Microsoft.Extensions.Configuration;
@@ -123,7 +124,7 @@ public class TelemetryV0EndpointsTests
     // ── Delivery info ──
 
     [Fact]
-    public void DeliveryInfoWrapsDeliveryAndTransitionSnapshots()
+    public void DeliveryInfoWrapsDeliveryTransitionAndUdpSnapshots()
     {
         var json = ToJson(TelemetryV0Endpoints.BuildDeliveryInfo());
 
@@ -132,6 +133,99 @@ public class TelemetryV0EndpointsTests
         Assert.Equal("v0", root.GetProperty("api_version").GetString());
         Assert.Equal(JsonValueKind.Object, root.GetProperty("delivery").ValueKind);
         Assert.Equal(JsonValueKind.Object, root.GetProperty("transitions").ValueKind);
+
+        var udp = root.GetProperty("udp_packets");
+        Assert.Equal(JsonValueKind.Object, udp.ValueKind);
+        // The block always carries the full outcome set + total + derived reject_rate.
+        Assert.True(udp.TryGetProperty("received", out _));
+        Assert.True(udp.TryGetProperty("invalid", out _));
+        Assert.True(udp.TryGetProperty("unknown_session", out _));
+        Assert.True(udp.TryGetProperty("send_error", out _));
+        Assert.True(udp.TryGetProperty("total", out _));
+        Assert.True(udp.TryGetProperty("reject_rate", out _));
+    }
+
+    // ── UDP packet-outcome block (D-06): reject/error rate, NOT network loss ──
+
+    [Fact]
+    public void UdpPacketsInfoComputesRejectRateOverAllReceivedPackets()
+    {
+        // received=90, rejected = invalid(4) + unknown_session(5) + send_error(1) = 10; total=100.
+        var snapshot = new Dictionary<string, long>
+        {
+            ["received"] = 90,
+            ["invalid"] = 4,
+            ["unknown_session"] = 5,
+            ["send_error"] = 1,
+        };
+
+        var json = ToJson(TelemetryV0Endpoints.BuildUdpPacketsInfo(snapshot));
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal(90, root.GetProperty("received").GetInt64());
+        Assert.Equal(4, root.GetProperty("invalid").GetInt64());
+        Assert.Equal(5, root.GetProperty("unknown_session").GetInt64());
+        Assert.Equal(1, root.GetProperty("send_error").GetInt64());
+        Assert.Equal(100, root.GetProperty("total").GetInt64());
+        Assert.Equal(0.10, root.GetProperty("reject_rate").GetDouble(), 10);
+    }
+
+    [Fact]
+    public void UdpPacketsInfoMissingOutcomesTreatedAsZero()
+    {
+        // Only 'received' has ever been recorded — every reject outcome absent from the dict.
+        var snapshot = new Dictionary<string, long> { ["received"] = 7 };
+
+        var json = ToJson(TelemetryV0Endpoints.BuildUdpPacketsInfo(snapshot));
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal(7, root.GetProperty("received").GetInt64());
+        Assert.Equal(0, root.GetProperty("invalid").GetInt64());
+        Assert.Equal(0, root.GetProperty("unknown_session").GetInt64());
+        Assert.Equal(0, root.GetProperty("send_error").GetInt64());
+        Assert.Equal(7, root.GetProperty("total").GetInt64());
+        Assert.Equal(0.0, root.GetProperty("reject_rate").GetDouble(), 10);
+    }
+
+    [Fact]
+    public void UdpPacketsInfoZeroPacketsYieldsZeroRejectRateNotNaN()
+    {
+        // Empty snapshot (no UDP traffic since startup) must guard divide-by-zero → 0.0, not NaN.
+        var json = ToJson(TelemetryV0Endpoints.BuildUdpPacketsInfo(new Dictionary<string, long>()));
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal(0, root.GetProperty("total").GetInt64());
+        var rejectRate = root.GetProperty("reject_rate").GetDouble();
+        Assert.Equal(0.0, rejectRate);
+        Assert.False(double.IsNaN(rejectRate));
+    }
+
+    [Fact]
+    public void RecordUdpPacketFeedsSnapshotTally()
+    {
+        // Static, process-cumulative tally: assert on the DELTA so the test is robust to any
+        // ordering/parallelism (no other unit test records UDP outcomes).
+        long Before(string k) => LumberjacksTelemetry.SnapshotUdpPackets().TryGetValue(k, out var v) ? v : 0;
+
+        var beforeReceived = Before("received");
+        var beforeInvalid = Before("invalid");
+        var beforeUnknown = Before("unknown_session");
+        var beforeSendErr = Before("send_error");
+
+        LumberjacksTelemetry.RecordUdpPacket("received");
+        LumberjacksTelemetry.RecordUdpPacket("received");
+        LumberjacksTelemetry.RecordUdpPacket("invalid");
+        LumberjacksTelemetry.RecordUdpPacket("unknown_session");
+        LumberjacksTelemetry.RecordUdpPacket("send_error");
+
+        var after = LumberjacksTelemetry.SnapshotUdpPackets();
+        Assert.Equal(beforeReceived + 2, after["received"]);
+        Assert.Equal(beforeInvalid + 1, after["invalid"]);
+        Assert.Equal(beforeUnknown + 1, after["unknown_session"]);
+        Assert.Equal(beforeSendErr + 1, after["send_error"]);
     }
 
     // ── Regions info ──

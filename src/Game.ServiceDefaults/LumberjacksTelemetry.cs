@@ -10,6 +10,7 @@ public static class LumberjacksTelemetry
     // live-metrics endpoints without a Cloud Monitoring round-trip.
     private static readonly ConcurrentDictionary<string, long> DeliveryTally = new();
     private static readonly ConcurrentDictionary<string, long> TransitionTally = new();
+    private static readonly ConcurrentDictionary<string, long> UdpPacketTally = new();
     public const string ActivitySourceName = "Lumberjacks.Gameplay";
     public const string MeterName = "Lumberjacks.Gameplay";
 
@@ -57,8 +58,11 @@ public static class LumberjacksTelemetry
         TransitionTally.AddOrUpdate("detached", 1, (_, v) => v + 1);
     }
 
-    public static void RecordUdpPacket(string outcome) =>
+    public static void RecordUdpPacket(string outcome)
+    {
         UdpPackets.Add(1, new KeyValuePair<string, object?>("outcome", outcome));
+        UdpPacketTally.AddOrUpdate(outcome, 1, (_, v) => v + 1);
+    }
 
     public static void RecordDelivery(string path)
     {
@@ -73,4 +77,12 @@ public static class LumberjacksTelemetry
     /// <summary>Point-in-time copy of session transition counts (created/resumed/detached).</summary>
     public static IReadOnlyDictionary<string, long> SnapshotTransitions() =>
         new Dictionary<string, long>(TransitionTally);
+
+    /// <summary>
+    /// Point-in-time copy of UDP packet-outcome counts, keyed by outcome
+    /// (received/invalid/unknown_session/send_error). These are outcomes over the packets the
+    /// server actually received — NOT network packet loss, which is unobservable server-side.
+    /// </summary>
+    public static IReadOnlyDictionary<string, long> SnapshotUdpPackets() =>
+        new Dictionary<string, long>(UdpPacketTally);
 }
