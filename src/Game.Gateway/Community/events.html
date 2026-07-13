@@ -361,6 +361,7 @@
 <div class="dashboard-container">
   <header>
     <h1>Gameplay Event Telemetry</h1>
+    <div id="deployment-status" style="font-size:.78rem;color:var(--text-muted);margin-top:4px">Deployment: loading...</div>
     <div class="delay-indicator" id="delay-indicator" title="This feed is delayed and anonymized — not a raw real-time stream.">
       <div class="live-dot"></div>
       <span id="delay-label">DELAYED</span>
@@ -654,6 +655,15 @@
   render();
   // Start polling
   fetchTelemetry();
+  async function fetchDeployment() {
+    const el = document.getElementById('deployment-status');
+    try {
+      const d = await fetch('/api/v0/telemetry/deployment').then(r => r.ok ? r.json() : Promise.reject(r.status));
+      el.textContent = `Deployment: ${d.environment} - ${d.lumberjacks_version}`;
+    } catch (_) { el.textContent = 'Deployment: unavailable'; }
+  }
+  fetchDeployment();
+  setInterval(fetchDeployment, POLL_INTERVAL);
   setInterval(fetchTelemetry, POLL_INTERVAL);
 
 })();

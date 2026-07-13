@@ -220,6 +220,7 @@
 
 <header>
     <h1>Lumberjacks — Local Testing Tools</h1>
+    <div id="deployment-status" style="font-size:.78rem;color:#94a3b8;margin-top:4px">Deployment: loading...</div>
     <div class="indicator-badge" id="gatewayIndicator">
         <div class="dot" id="gatewayDot"></div>
         <span id="gatewayText">Checking gateway...</span>
@@ -387,6 +388,15 @@
     
     // Initial poll and setup interval
     pollGateway();
+    async function pollDeployment() {
+        const el = document.getElementById('deployment-status');
+        try {
+            const d = await fetch('/api/v0/telemetry/deployment').then(r => r.ok ? r.json() : Promise.reject(r.status));
+            el.textContent = `Deployment: ${d.environment} - ${d.lumberjacks_version}`;
+        } catch (_) { el.textContent = 'Deployment: unavailable'; }
+    }
+    pollDeployment();
+    setInterval(pollDeployment, 5000);
     setInterval(pollGateway, 5000);
 </script>
 </body>

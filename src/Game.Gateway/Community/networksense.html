@@ -223,6 +223,7 @@
             </div>
             <div id="env-badge" class="badge">--</div>
         </div>
+        <div id="deployment-status" style="font-size:11px;opacity:.75;margin:4px 0 8px">Deployment: loading...</div>
 
         <!-- TICK TIMING -->
         <div id="panel-tick" class="panel">
@@ -573,6 +574,15 @@
         // Init
         drawSparkline();
         poll();
+        async function pollDeployment() {
+            const el = document.getElementById('deployment-status');
+            try {
+                const d = await fetch('/api/v0/telemetry/deployment').then(r => r.ok ? r.json() : Promise.reject(r.status));
+                el.textContent = `Deployment: ${d.environment} - ${d.lumberjacks_version}`;
+            } catch (_) { el.textContent = 'Deployment: unavailable'; }
+        }
+        pollDeployment();
+        setInterval(pollDeployment, POLL_INTERVAL);
         setInterval(poll, POLL_INTERVAL);
 
     </script>

@@ -237,6 +237,7 @@
 
     <header>
         <h1>Lumberjacks — Live Community View</h1>
+        <div id="deployment-status" style="font-size:.78rem;color:var(--text-dim);margin-top:4px">Deployment: loading...</div>
         <div class="badges">
             <div id="apiBadgeContainer"></div>
             <div class="status-indicator">
@@ -709,6 +710,15 @@
 
         // Init
         pollAll();
+        async function pollDeployment() {
+            const el = document.getElementById('deployment-status');
+            try {
+                const d = await fetch('/api/v0/telemetry/deployment').then(r => r.ok ? r.json() : Promise.reject(r.status));
+                el.textContent = `Deployment: ${d.environment} - ${d.lumberjacks_version}`;
+            } catch (_) { el.textContent = 'Deployment: unavailable'; }
+        }
+        pollDeployment();
+        setInterval(pollDeployment, POLL_INTERVAL_MS);
         setInterval(pollAll, POLL_INTERVAL_MS);
 
         // Handle resize for sparkline redraw to prevent stretching logic issues
