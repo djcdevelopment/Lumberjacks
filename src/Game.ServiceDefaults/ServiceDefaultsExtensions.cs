@@ -70,6 +70,17 @@ public static class ServiceDefaultsExtensions
                     .AllowAnyHeader()
                     .AllowAnyMethod();
             });
+
+            // Public telemetry API v0 (/api/v0/*) and the community view (/community):
+            // read-only, GET-only, any-origin by design — this is a public surface meant
+            // to be embedded in third-party dashboards, not the operator-only default
+            // policy above. No credentials, so AllowAnyOrigin is safe here.
+            options.AddPolicy(PublicTelemetryV0.CorsPolicyName, policy =>
+            {
+                policy.AllowAnyOrigin()
+                    .WithMethods("GET")
+                    .AllowAnyHeader();
+            });
         });
 
         builder.Services.AddHealthChecks();
