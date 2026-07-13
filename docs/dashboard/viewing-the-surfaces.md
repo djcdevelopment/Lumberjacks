@@ -50,7 +50,12 @@ Open in a browser — no login, served straight from the game Gateway. All data 
 | `http://localhost:4000/testing` | **G5 Local Testing Tools** — scenario cards (simulated) |
 
 Raw API behind them (same-origin, `GET` from any origin, DB-less):
-`http://localhost:4000/api/v0/telemetry/{server,tick,sessions,delivery,regions,events}`
+`http://localhost:4000/api/v0/telemetry/{server,tick,sessions,delivery,regions,events,valheim,cutover}`
+
+`/valheim` reports the sanitized Valheim heartbeat. `/cutover` reports the declared
+Lumberjacks mode (`native`, `mirrored`, or `lumberjacks-primary`) and coverage counters.
+An absent coverage value means the mod is reporting status but has not yet installed the
+full-traffic coverage probe; it must not be read as 100% cutover.
 
 The pages poll every 2 s. If a poll fails they show a "reconnecting / stale" chip and keep
 the last good values — they never fabricate data.
@@ -88,9 +93,9 @@ badge. Verify the identity directly before a session:
 curl -s http://8.231.129.249:4000/api/v0/telemetry/deployment
 ```
 
-The expected current identity is `environment=gcp-p7`, Lumberjacks
-`686fea91d6a7a3ed214a2e0fbe9a43383e401409`, and
-ComfyNetworkSense `0.5.18`. Keep `/valheim/*` and Operator API on the restricted P7
+The expected current identity is `environment=gcp-p7`. The dashboard's `/cutover` line is
+the source of truth for whether the live server is native, mirrored, or Lumberjacks-primary.
+Keep `/valheim/*` and Operator API on the restricted P7
 control surface; do not expose them through a public dashboard proxy.
 
 For the admin console, forward Operator API through IAP and keep the Vite app local:

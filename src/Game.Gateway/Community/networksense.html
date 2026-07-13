@@ -225,6 +225,7 @@
         </div>
         <div id="deployment-status" style="font-size:11px;opacity:.75;margin:4px 0 8px">Deployment: loading...</div>
         <div id="valheim-status" style="font-size:11px;opacity:.75;margin:0 0 8px">Valheim: waiting for heartbeat...</div>
+        <div id="cutover-status" style="font-size:11px;opacity:.75;margin:0 0 8px">Cutover: waiting for coverage...</div>
 
         <!-- TICK TIMING -->
         <div id="panel-tick" class="panel">
@@ -589,10 +590,21 @@
                 el.textContent = d.stale ? 'Valheim: heartbeat stale' : `Valheim: ${d.heartbeat?.server_state || 'ready'} - ${d.heartbeat?.peer_count ?? 0} peers`;
             } catch (_) { el.textContent = 'Valheim: telemetry unavailable'; }
         }
+        async function pollCutover() {
+            const el = document.getElementById('cutover-status');
+            try {
+                const d = await fetch('/api/v0/telemetry/cutover').then(r => r.ok ? r.json() : Promise.reject(r.status));
+                if (d.stale) { el.textContent = 'Cutover: stale'; return; }
+                const coverage = d.coverage_percent == null ? 'coverage pending' : `${d.coverage_percent}% gameplay coverage`;
+                el.textContent = `Cutover: ${d.mode || 'unknown'} - ${coverage} - native-only ${d.coverage_native_only ?? 'n/a'}`;
+            } catch (_) { el.textContent = 'Cutover: telemetry unavailable'; }
+        }
         pollDeployment();
         pollValheim();
+        pollCutover();
         setInterval(pollDeployment, POLL_INTERVAL);
         setInterval(pollValheim, POLL_INTERVAL);
+        setInterval(pollCutover, POLL_INTERVAL);
         setInterval(poll, POLL_INTERVAL);
 
     </script>

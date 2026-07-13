@@ -239,6 +239,7 @@
         <h1>Lumberjacks — Live Community View</h1>
         <div id="deployment-status" style="font-size:.78rem;color:var(--text-dim);margin-top:4px">Deployment: loading...</div>
         <div id="valheim-status" style="font-size:.78rem;color:var(--text-dim);margin-top:2px">Valheim: waiting for heartbeat...</div>
+        <div id="cutover-status" style="font-size:.78rem;color:var(--text-dim);margin-top:2px">Cutover: waiting for coverage...</div>
         <div class="badges">
             <div id="apiBadgeContainer"></div>
             <div class="status-indicator">
@@ -725,10 +726,21 @@
                 el.textContent = d.stale ? 'Valheim: heartbeat stale' : `Valheim: ${d.heartbeat?.server_state || 'ready'} - ${d.heartbeat?.peer_count ?? 0} peers`;
             } catch (_) { el.textContent = 'Valheim: telemetry unavailable'; }
         }
+        async function pollCutover() {
+            const el = document.getElementById('cutover-status');
+            try {
+                const d = await fetch('/api/v0/telemetry/cutover').then(r => r.ok ? r.json() : Promise.reject(r.status));
+                if (d.stale) { el.textContent = 'Cutover: stale'; return; }
+                const coverage = d.coverage_percent == null ? 'coverage pending' : `${d.coverage_percent}% gameplay coverage`;
+                el.textContent = `Cutover: ${d.mode || 'unknown'} - ${coverage} - native-only ${d.coverage_native_only ?? 'n/a'}`;
+            } catch (_) { el.textContent = 'Cutover: telemetry unavailable'; }
+        }
         pollDeployment();
         pollValheim();
+        pollCutover();
         setInterval(pollDeployment, POLL_INTERVAL_MS);
         setInterval(pollValheim, POLL_INTERVAL_MS);
+        setInterval(pollCutover, POLL_INTERVAL_MS);
         setInterval(pollAll, POLL_INTERVAL_MS);
 
         // Handle resize for sparkline redraw to prevent stretching logic issues

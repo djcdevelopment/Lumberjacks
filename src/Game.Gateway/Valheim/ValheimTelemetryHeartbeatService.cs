@@ -28,6 +28,8 @@ public sealed class ValheimTelemetryHeartbeatService
                 last_seen = _lastSeen,
                 heartbeat = _latest is null ? null : new
                 {
+                    cutover_mode = _latest.CutoverMode,
+                    enrollment_manifest_id = _latest.EnrollmentManifestId,
                     mod_version = _latest.ModVersion,
                     instance_id = _latest.InstanceId,
                     server_role = _latest.ServerRole,
@@ -42,8 +44,43 @@ public sealed class ValheimTelemetryHeartbeatService
                     injection_applied = _latest.InjectionApplied,
                     injection_rendered = _latest.InjectionRendered,
                     injection_rejected = _latest.InjectionRejected,
+                    coverage_total = _latest.CoverageTotal,
+                    coverage_lumberjacks = _latest.CoverageLumberjacks,
+                    coverage_native_only = _latest.CoverageNativeOnly,
+                    native_fallbacks = _latest.NativeFallbacks,
                     sample_timestamp_utc = _latest.TimestampUtc,
                 },
+            };
+        }
+    }
+
+    public object CutoverSnapshot()
+    {
+        lock (_gate)
+        {
+            var stale = _lastSeen is null || DateTimeOffset.UtcNow - _lastSeen > TimeSpan.FromSeconds(15);
+            var mode = _latest?.CutoverMode;
+            var coverageTotal = _latest?.CoverageTotal;
+            var coverageLumberjacks = _latest?.CoverageLumberjacks;
+            var nativeOnly = _latest?.CoverageNativeOnly;
+            var coveragePercent = coverageTotal is > 0 && coverageLumberjacks.HasValue
+                ? Math.Round(100d * coverageLumberjacks.Value / coverageTotal.Value, 2)
+                : (double?)null;
+
+            return new
+            {
+                state = stale ? "stale" : (mode ?? "unknown"),
+                stale,
+                mode,
+                enrollment_manifest_id = _latest?.EnrollmentManifestId,
+                coverage_total = coverageTotal,
+                coverage_lumberjacks = coverageLumberjacks,
+                coverage_native_only = nativeOnly,
+                coverage_percent = coveragePercent,
+                native_fallbacks = _latest?.NativeFallbacks,
+                last_seen = _lastSeen,
+                mod_version = _latest?.ModVersion,
+                instance_id = _latest?.InstanceId,
             };
         }
     }
@@ -51,6 +88,8 @@ public sealed class ValheimTelemetryHeartbeatService
 
 public sealed record ValheimTelemetryHeartbeat
 {
+    public string? CutoverMode { get; init; }
+    public string? EnrollmentManifestId { get; init; }
     public string? InstanceId { get; init; }
     public string? ModVersion { get; init; }
     public string? TimestampUtc { get; init; }
@@ -66,4 +105,8 @@ public sealed record ValheimTelemetryHeartbeat
     public long? InjectionApplied { get; init; }
     public long? InjectionRendered { get; init; }
     public long? InjectionRejected { get; init; }
+    public long? CoverageTotal { get; init; }
+    public long? CoverageLumberjacks { get; init; }
+    public long? CoverageNativeOnly { get; init; }
+    public long? NativeFallbacks { get; init; }
 }
