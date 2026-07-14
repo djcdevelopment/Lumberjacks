@@ -35,6 +35,17 @@ public static class ValheimTelemetryHeartbeatEndpoints
                 });
             }
 
+            if (heartbeat.CutoverMode == "lumberjacks-primary" &&
+                (heartbeat.CoverageTotal is not > 0 || heartbeat.CoverageNativeOnly is not 0))
+            {
+                return Results.Conflict(new
+                {
+                    error = "lumberjacks-primary requires positive coverage_total and zero coverage_native_only",
+                    coverage_total = heartbeat.CoverageTotal,
+                    coverage_native_only = heartbeat.CoverageNativeOnly,
+                });
+            }
+
             service.Record(heartbeat);
             return Results.Ok(new { ok = true, received_at = DateTimeOffset.UtcNow });
         });
