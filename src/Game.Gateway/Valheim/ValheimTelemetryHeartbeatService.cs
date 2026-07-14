@@ -48,6 +48,11 @@ public sealed class ValheimTelemetryHeartbeatService
                     coverage_lumberjacks = _latest.CoverageLumberjacks,
                     coverage_native_only = _latest.CoverageNativeOnly,
                     native_fallbacks = _latest.NativeFallbacks,
+                    zdo_probe_running = _latest.ZdoProbeRunning,
+                    zdo_probe_recv_rows = _latest.ZdoProbeRecvRows,
+                    zdo_probe_send_rows = _latest.ZdoProbeSendRows,
+                    zdo_probe_recv_calls = _latest.ZdoProbeRecvCalls,
+                    zdo_probe_create_sync_calls = _latest.ZdoProbeCreateSyncCalls,
                     sample_timestamp_utc = _latest.TimestampUtc,
                 },
             };
@@ -78,6 +83,9 @@ public sealed class ValheimTelemetryHeartbeatService
                 coverage_native_only = nativeOnly,
                 coverage_percent = coveragePercent,
                 native_fallbacks = _latest?.NativeFallbacks,
+                zdo_probe_running = _latest?.ZdoProbeRunning,
+                zdo_probe_recv_rows = _latest?.ZdoProbeRecvRows,
+                zdo_probe_send_rows = _latest?.ZdoProbeSendRows,
                 last_seen = _lastSeen,
                 mod_version = _latest?.ModVersion,
                 instance_id = _latest?.InstanceId,
@@ -136,4 +144,9 @@ public sealed record ValheimTelemetryHeartbeat
     public long? CoverageLumberjacks { get; init; }
     public long? CoverageNativeOnly { get; init; }
     public long? NativeFallbacks { get; init; }
+    public bool? ZdoProbeRunning { get; init; }
+    public long? ZdoProbeRecvRows { get; init; }
+    public long? ZdoProbeSendRows { get; init; }
+    public long? ZdoProbeRecvCalls { get; init; }
+    public long? ZdoProbeCreateSyncCalls { get; init; }
 }
