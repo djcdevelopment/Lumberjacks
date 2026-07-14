@@ -53,6 +53,12 @@ public sealed class ValheimTelemetryHeartbeatService
                     zdo_probe_send_rows = _latest.ZdoProbeSendRows,
                     zdo_probe_recv_calls = _latest.ZdoProbeRecvCalls,
                     zdo_probe_create_sync_calls = _latest.ZdoProbeCreateSyncCalls,
+                    zdo_authoritative_enabled = _latest.ZdoAuthoritativeEnabled,
+                    zdo_authoritative_applied = _latest.ZdoAuthoritativeApplied,
+                    zdo_authoritative_rejected = _latest.ZdoAuthoritativeRejected,
+                    zdo_authoritative_duplicates = _latest.ZdoAuthoritativeDuplicates,
+                    zdo_authoritative_retried = _latest.ZdoAuthoritativeRetried,
+                    zdo_authoritative_pending = _latest.ZdoAuthoritativePending,
                     sample_timestamp_utc = _latest.TimestampUtc,
                 },
             };
@@ -86,6 +92,12 @@ public sealed class ValheimTelemetryHeartbeatService
                 zdo_probe_running = _latest?.ZdoProbeRunning,
                 zdo_probe_recv_rows = _latest?.ZdoProbeRecvRows,
                 zdo_probe_send_rows = _latest?.ZdoProbeSendRows,
+                zdo_authoritative_enabled = _latest?.ZdoAuthoritativeEnabled,
+                zdo_authoritative_applied = _latest?.ZdoAuthoritativeApplied,
+                zdo_authoritative_rejected = _latest?.ZdoAuthoritativeRejected,
+                zdo_authoritative_duplicates = _latest?.ZdoAuthoritativeDuplicates,
+                zdo_authoritative_retried = _latest?.ZdoAuthoritativeRetried,
+                zdo_authoritative_pending = _latest?.ZdoAuthoritativePending,
                 last_seen = _lastSeen,
                 mod_version = _latest?.ModVersion,
                 instance_id = _latest?.InstanceId,
@@ -147,6 +159,12 @@ public sealed record ValheimTelemetryHeartbeat
     public bool? ZdoProbeRunning { get; init; }
     public long? ZdoProbeRecvRows { get; init; }
     public long? ZdoProbeSendRows { get; init; }
+    public bool? ZdoAuthoritativeEnabled { get; init; }
+    public long? ZdoAuthoritativeApplied { get; init; }
+    public long? ZdoAuthoritativeRejected { get; init; }
+    public long? ZdoAuthoritativeDuplicates { get; init; }
+    public long? ZdoAuthoritativeRetried { get; init; }
+    public long? ZdoAuthoritativePending { get; init; }
     public long? ZdoProbeRecvCalls { get; init; }
     public long? ZdoProbeCreateSyncCalls { get; init; }
 }
