@@ -54,6 +54,17 @@ public static class ValheimZdoRedirectEndpoints
             return Results.Ok(ToResponse(status));
         });
 
+        group.MapGet("/pending/{windowId}", (string windowId, int? limit, ValheimZdoRedirectService redirects) =>
+            Results.Ok(new { window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) }));
+
+        group.MapPost("/ack/{windowId}", (string windowId, long[] sequences, ValheimZdoRedirectService redirects) =>
+        {
+            if (sequences is null || sequences.Length == 0)
+                return Results.BadRequest(new { error = "sequences is required" });
+            var result = redirects.Acknowledge(windowId, sequences);
+            return Results.Ok(new { window_id = windowId, acknowledged = result.Acknowledged, unknown = result.Unknown });
+        });
+
         group.MapPost("/reset/{windowId}", (string windowId, ValheimZdoRedirectService redirects) =>
         {
             var existed = redirects.Reset(windowId);

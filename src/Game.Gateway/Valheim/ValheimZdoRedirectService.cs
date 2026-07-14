@@ -32,6 +32,7 @@ public sealed record ValheimZdoRedirectRequest
 }
 
 public sealed record ValheimZdoRedirectRecordResult(int Received, long Total);
+public sealed record ValheimZdoRedirectAckResult(int Acknowledged, int Unknown);
 
 public sealed record ValheimZdoRedirectWindowStatus(
     string WindowId,
@@ -82,6 +83,20 @@ public sealed class ValheimZdoRedirectService
             .Select(kv => kv.Value.ToStatus(kv.Key))
             .ToList();
 
+    public IReadOnlyList<ValheimZdoRedirectEnvelope> Pending(string windowId, int limit)
+    {
+        return _windows.TryGetValue(windowId, out var window)
+            ? window.Pending(Math.Clamp(limit, 1, 256))
+            : Array.Empty<ValheimZdoRedirectEnvelope>();
+    }
+
+    public ValheimZdoRedirectAckResult Acknowledge(string windowId, IReadOnlyList<long> sequences)
+    {
+        return _windows.TryGetValue(windowId, out var window)
+            ? window.Acknowledge(sequences)
+            : new(0, sequences.Count);
+    }
+
     /// <summary>Clears a single window. Returns whether it existed.</summary>
     public bool Reset(string windowId) => _windows.TryRemove(windowId, out _);
 
@@ -101,6 +116,7 @@ public sealed class ValheimZdoRedirectService
 
         private readonly object _gate = new();
         private readonly HashSet<long> _distinctSeq = new();
+        private readonly Dictionary<long, ValheimZdoRedirectEnvelope> _pending = new();
         private readonly Dictionary<int, long> _perPrefab = new();
         private readonly Dictionary<string, long> _perSource = new(StringComparer.Ordinal);
 
@@ -136,6 +152,7 @@ public sealed class ValheimZdoRedirectService
                     {
                         _duplicates++;
                     }
+
                     else if (_distinctSeq.Count < MaxTrackedSeq)
                     {
                         _distinctSeq.Add(seq);
@@ -147,6 +164,8 @@ public sealed class ValheimZdoRedirectService
                         _seqTrackingSaturated = true;
                     }
 
+                    _pending.TryAdd(seq, envelope);
+
                     if (string.IsNullOrEmpty(envelope.BodyB64))
                         _emptyBodyCount++;
 
@@ -156,6 +175,29 @@ public sealed class ValheimZdoRedirectService
                 }
 
                 return _receipts;
+            }
+        }
+
+        public IReadOnlyList<ValheimZdoRedirectEnvelope> Pending(int limit)
+        {
+            lock (_gate)
+            {
+                return _pending.OrderBy(kv => kv.Key).Take(limit).Select(kv => kv.Value).ToList();
+            }
+        }
+
+        public ValheimZdoRedirectAckResult Acknowledge(IReadOnlyList<long> sequences)
+        {
+            lock (_gate)
+            {
+                var acknowledged = 0;
+                var unknown = 0;
+                foreach (var sequence in sequences.Distinct())
+                {
+                    if (_pending.Remove(sequence)) acknowledged++;
+                    else unknown++;
+                }
+                return new(acknowledged, unknown);
             }
         }
 
