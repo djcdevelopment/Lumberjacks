@@ -72,10 +72,10 @@ from OMEN before Valheim or a dashboard browser:
 
 ```powershell
 & C:\work\comfy\infra\gcp\p7\scripts\start-gateway-tunnel.ps1
-Start-Process http://127.0.0.1:4000/community
+Start-Process http://127.0.0.1:14000/community
 ```
 
-The hidden SSH process binds only OMEN `127.0.0.1:4000` and forwards through IAP to
+The hidden SSH process binds only OMEN `127.0.0.1:14000` and forwards through IAP to
 GCP `127.0.0.1:4000`. No public HTTP/HTTPS listener is required. The same tunnel carries
 the enrolled Valheim client's authoritative polling, acknowledgements, and telemetry;
 the GCP Valheim server reaches Gateway directly over the private Compose network.
@@ -83,10 +83,10 @@ the GCP Valheim server reaches Gateway directly over the private Compose network
 The current combined Valheim + Lumberjacks deployment is GCP P7:
 
 ```text
-http://127.0.0.1:4000/community
-http://127.0.0.1:4000/networksense
-http://127.0.0.1:4000/events
-http://127.0.0.1:4000/testing
+http://127.0.0.1:14000/community
+http://127.0.0.1:14000/networksense
+http://127.0.0.1:14000/events
+http://127.0.0.1:14000/testing
 ```
 
 These are the same pages as the local surfaces, but they fetch from the deployed
@@ -94,7 +94,7 @@ Gateway. Each page shows the environment and deployed revisions in its deploymen
 badge. Verify the identity directly before a session:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:4000/api/v0/telemetry/deployment
+Invoke-RestMethod http://127.0.0.1:14000/api/v0/telemetry/deployment
 ```
 
 The expected current identity is `environment=gcp-p7`. The dashboard's `/cutover` line is
