@@ -201,6 +201,12 @@ by `X-Lumberjacks-Telemetry-Key` when `VALHEIM_TELEMETRY_KEY` is configured on t
 same ZDO was already at a strictly newer owner or data revision. Promotion requires
 `applied + superseded == distinct_seq`, all sequences acknowledged, a drained queue,
 one fresh enrolled consumer, zero terminal rejects, and zero sequence gaps.
+When `VALHEIM_ZDO_QUEUE_PATH` is configured, Gateway fsyncs length-prefixed receipt,
+acknowledgement, and reset records before changing its in-memory view. Startup replays
+that WAL and truncates an incomplete crash-torn tail. `durable_queue`,
+`persistence_healthy`, and `wal_bytes` expose the active durability state. Transport
+duplicates are suppressed by sequence and do not block promotion; saturation of the
+bounded sequence index does.
 
 ## Live Community View
 

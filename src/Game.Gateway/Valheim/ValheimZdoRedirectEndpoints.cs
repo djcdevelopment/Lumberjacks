@@ -44,6 +44,9 @@ public static class ValheimZdoRedirectEndpoints
         {
             return Results.Ok(new
             {
+                durable_queue = redirects.PersistenceEnabled,
+                persistence_healthy = redirects.PersistenceHealthy,
+                wal_bytes = redirects.WalBytes,
                 windows = redirects.GetAllStatuses().Select(ToResponse),
             });
         });

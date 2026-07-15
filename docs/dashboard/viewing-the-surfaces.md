@@ -67,39 +67,40 @@ the last good values — they never fabricate data.
 
 ### OMEN-only view (recommended for now)
 
-To view the live GCP data from OMEN without exposing another public listener, run the
-loopback proxy:
+GCP binds Gateway HTTP only to its own loopback interface. Start the SSH/IAP tunnel
+from OMEN before Valheim or a dashboard browser:
 
 ```powershell
-cd C:\work\Lumberjacks\tools\omen-dashboard
-docker compose up -d
-Start-Process http://127.0.0.1:8080/community
+& C:\work\comfy\infra\gcp\p7\scripts\start-gateway-tunnel.ps1
+Start-Process http://127.0.0.1:4000/community
 ```
 
-It binds only to `127.0.0.1:8080`, forwards the read-only dashboard/API routes to GCP,
-and blocks `/valheim/*`, Operator API, WebSocket control, and non-GET telemetry calls.
+The hidden SSH process binds only OMEN `127.0.0.1:4000` and forwards through IAP to
+GCP `127.0.0.1:4000`. No public HTTP/HTTPS listener is required. The same tunnel carries
+the enrolled Valheim client's authoritative polling, acknowledgements, and telemetry;
+the GCP Valheim server reaches Gateway directly over the private Compose network.
 
 The current combined Valheim + Lumberjacks deployment is GCP P7:
 
 ```text
-http://8.231.129.249:4000/community
-http://8.231.129.249:4000/networksense
-http://8.231.129.249:4000/events
-http://8.231.129.249:4000/testing
+http://127.0.0.1:4000/community
+http://127.0.0.1:4000/networksense
+http://127.0.0.1:4000/events
+http://127.0.0.1:4000/testing
 ```
 
 These are the same pages as the local surfaces, but they fetch from the deployed
 Gateway. Each page shows the environment and deployed revisions in its deployment
 badge. Verify the identity directly before a session:
 
-```bash
-curl -s http://8.231.129.249:4000/api/v0/telemetry/deployment
+```powershell
+Invoke-RestMethod http://127.0.0.1:4000/api/v0/telemetry/deployment
 ```
 
 The expected current identity is `environment=gcp-p7`. The dashboard's `/cutover` line is
 the source of truth for whether the live server is native, mirrored, or Lumberjacks-primary.
-Keep `/valheim/*` and Operator API on the restricted P7
-control surface; do not expose them through a public dashboard proxy.
+Keep the tunnel running for the session. If it exits, the client poller retries while
+Valheim's native fallback remains available; restart the tunnel with the same command.
 
 For the admin console, forward Operator API through IAP and keep the Vite app local:
 

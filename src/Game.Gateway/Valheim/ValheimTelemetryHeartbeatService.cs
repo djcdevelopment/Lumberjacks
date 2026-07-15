@@ -119,6 +119,9 @@ public sealed class ValheimTelemetryHeartbeatService
                 authoritative_window = new
                 {
                     window_id = windowId,
+                    durable_queue = redirects.PersistenceEnabled,
+                    persistence_healthy = redirects.PersistenceHealthy,
+                    wal_bytes = redirects.WalBytes,
                     receipts = redirect.Receipts,
                     acknowledged = redirect.Acknowledged,
                     pending = redirect.Pending,
@@ -148,7 +151,8 @@ public sealed class ValheimTelemetryHeartbeatService
         var consumer = consumers.GetWindowStatus(windowId);
         return redirect.DistinctSeq > 0 &&
             redirect.MissingSeq == 0 &&
-            redirect.Duplicates == 0 &&
+            !redirect.SeqTrackingSaturated &&
+            (!redirects.PersistenceEnabled || redirects.PersistenceHealthy) &&
             redirect.Pending == 0 &&
             redirect.Acknowledged == redirect.DistinctSeq &&
             consumer.ActiveConsumers == 1 &&

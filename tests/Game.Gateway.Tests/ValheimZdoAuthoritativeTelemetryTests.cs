@@ -74,6 +74,53 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
         Assert.True(heartbeat.IsAuthoritativeComplete(Window, redirects, consumers));
     }
 
+    [Fact]
+    public void DurableQueueReplaysReceiptsAcksAndRepairsATruncatedTail()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lumberjacks-zdo-wal-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "redirect.wal");
+        try
+        {
+            var writer = new ValheimZdoRedirectService(path);
+            writer.RecordEnvelopes(Window, "server", [Envelope(1), Envelope(2)]);
+            writer.Acknowledge(Window, [1]);
+            var validBytes = new FileInfo(path).Length;
+            using (var tail = new FileStream(path, FileMode.Append, FileAccess.Write))
+                tail.Write([0x7f, 0x01]);
+
+            var replayed = new ValheimZdoRedirectService(path);
+            var status = replayed.GetStatus(Window);
+            Assert.True(replayed.PersistenceEnabled);
+            Assert.True(replayed.PersistenceHealthy);
+            Assert.Equal(validBytes, replayed.WalBytes);
+            Assert.Equal(2, status.DistinctSeq);
+            Assert.Equal(1, status.Acknowledged);
+            Assert.Equal(1, status.Pending);
+
+            replayed.Reset(Window);
+            Assert.Equal(0, new ValheimZdoRedirectService(path).GetStatus(Window).Receipts);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PromotionAllowsSuppressedAtLeastOnceTransportDuplicates()
+    {
+        var heartbeat = new ValheimTelemetryHeartbeatService();
+        var redirects = new ValheimZdoRedirectService();
+        var consumers = new ValheimZdoConsumerTelemetryService();
+        redirects.RecordEnvelopes(Window, "server", [Envelope(1), Envelope(2)]);
+        redirects.RecordEnvelopes(Window, "server-retry", [Envelope(1)]);
+        redirects.Acknowledge(Window, [1, 2]);
+        consumers.Record(Consumer(applied: 2, acknowledged: 2));
+
+        Assert.Equal(1, redirects.GetStatus(Window).Duplicates);
+        Assert.True(heartbeat.IsAuthoritativeComplete(Window, redirects, consumers));
+    }
+
     private static ValheimZdoRedirectEnvelope Envelope(long seq) => new()
     {
         Seq = seq,
