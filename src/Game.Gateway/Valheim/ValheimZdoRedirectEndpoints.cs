@@ -55,7 +55,7 @@ public static class ValheimZdoRedirectEndpoints
         });
 
         group.MapGet("/pending/{windowId}", (string windowId, int? limit, ValheimZdoRedirectService redirects) =>
-            Results.Ok(new { window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) }));
+            Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) }));
 
         group.MapPost("/ack/{windowId}", (string windowId, long[] sequences, ValheimZdoRedirectService redirects) =>
         {
