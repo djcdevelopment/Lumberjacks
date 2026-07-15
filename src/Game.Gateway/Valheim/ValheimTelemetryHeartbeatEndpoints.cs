@@ -37,14 +37,11 @@ public static class ValheimTelemetryHeartbeatEndpoints
                 });
             }
 
-            if (heartbeat.CutoverMode == "lumberjacks-primary" &&
-                (heartbeat.CoverageTotal is not > 0 || heartbeat.CoverageNativeOnly is not 0 ||
-                 string.IsNullOrWhiteSpace(heartbeat.EnrollmentManifestId) ||
-                 !service.IsAuthoritativeComplete(heartbeat.EnrollmentManifestId, redirects, consumers)))
+            if (!service.CanAcceptPrimaryHeartbeat(heartbeat, redirects, consumers))
             {
                 return Results.Conflict(new
                 {
-                    error = "lumberjacks-primary requires full traffic coverage and a fully applied authoritative window",
+                    error = "lumberjacks-primary requires full traffic coverage and, while peers are connected, a fully applied authoritative window",
                     coverage_total = heartbeat.CoverageTotal,
                     coverage_native_only = heartbeat.CoverageNativeOnly,
                 });

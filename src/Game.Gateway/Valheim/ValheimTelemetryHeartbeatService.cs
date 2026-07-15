@@ -162,6 +162,21 @@ public sealed class ValheimTelemetryHeartbeatService
             consumer.Pending == 0;
     }
 
+    public bool CanAcceptPrimaryHeartbeat(ValheimTelemetryHeartbeat heartbeat,
+        ValheimZdoRedirectService redirects, ValheimZdoConsumerTelemetryService consumers)
+    {
+        if (heartbeat.CutoverMode != "lumberjacks-primary") return true;
+        if (heartbeat.CoverageTotal is not > 0 || heartbeat.CoverageNativeOnly is not 0 ||
+            string.IsNullOrWhiteSpace(heartbeat.EnrollmentManifestId)) return false;
+
+        // A primary server remains healthy and armed when it is empty. Requiring a
+        // fresh consumer in that state would reject every heartbeat and make the
+        // dashboard stale until a player joins. Connected peers still require the
+        // full apply/ack gate on every accepted primary heartbeat.
+        return heartbeat.PeerCount == 0 ||
+            IsAuthoritativeComplete(heartbeat.EnrollmentManifestId, redirects, consumers);
+    }
+
     public object EnrollmentSnapshot(string manifestId)
     {
         lock (_gate)

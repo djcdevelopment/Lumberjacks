@@ -121,6 +121,27 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
         Assert.True(heartbeat.IsAuthoritativeComplete(Window, redirects, consumers));
     }
 
+    [Fact]
+    public void EmptyPrimaryServerKeepsHeartbeatLiveWithoutAConsumer()
+    {
+        var heartbeat = new ValheimTelemetryHeartbeatService();
+        var redirects = new ValheimZdoRedirectService();
+        var consumers = new ValheimZdoConsumerTelemetryService();
+        var sample = new ValheimTelemetryHeartbeat
+        {
+            CutoverMode = "lumberjacks-primary",
+            EnrollmentManifestId = Window,
+            CoverageTotal = 10,
+            CoverageLumberjacks = 10,
+            CoverageNativeOnly = 0,
+            PeerCount = 0,
+        };
+
+        Assert.True(heartbeat.CanAcceptPrimaryHeartbeat(sample, redirects, consumers));
+        Assert.False(heartbeat.CanAcceptPrimaryHeartbeat(sample with { PeerCount = 1 }, redirects, consumers));
+        Assert.False(heartbeat.CanAcceptPrimaryHeartbeat(sample with { CoverageNativeOnly = 1 }, redirects, consumers));
+    }
+
     private static ValheimZdoRedirectEnvelope Envelope(long seq) => new()
     {
         Seq = seq,
