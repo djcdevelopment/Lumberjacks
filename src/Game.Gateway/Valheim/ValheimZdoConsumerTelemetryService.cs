@@ -9,6 +9,7 @@ public sealed record ValheimZdoConsumerHeartbeat
     public string? ModVersion { get; init; }
     public string? TimestampUtc { get; init; }
     public long Applied { get; init; }
+    public long Superseded { get; init; }
     public long Acknowledged { get; init; }
     public long Rejected { get; init; }
     public long Duplicates { get; init; }
@@ -20,6 +21,7 @@ public sealed record ValheimZdoConsumerWindowStatus(
     string WindowId,
     int ActiveConsumers,
     long Applied,
+    long Superseded,
     long Acknowledged,
     long Rejected,
     long Duplicates,
@@ -51,6 +53,7 @@ public sealed class ValheimZdoConsumerTelemetryService
             windowId,
             active.Count,
             active.Sum(sample => sample.Heartbeat.Applied),
+            active.Sum(sample => sample.Heartbeat.Superseded),
             active.Sum(sample => sample.Heartbeat.Acknowledged),
             active.Sum(sample => sample.Heartbeat.Rejected),
             active.Sum(sample => sample.Heartbeat.Duplicates),
@@ -69,6 +72,7 @@ public sealed class ValheimZdoConsumerTelemetryService
             stale = status.ActiveConsumers == 0,
             active_consumers = status.ActiveConsumers,
             applied = status.Applied,
+            superseded = status.Superseded,
             acknowledged = status.Acknowledged,
             rejected = status.Rejected,
             duplicates = status.Duplicates,

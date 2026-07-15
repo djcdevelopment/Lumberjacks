@@ -124,6 +124,7 @@ public sealed class ValheimTelemetryHeartbeatService
                     pending = redirect.Pending,
                     active_consumers = consumer.ActiveConsumers,
                     applied = consumer.Applied,
+                    superseded = consumer.Superseded,
                     consumer_acknowledged = consumer.Acknowledged,
                     rejected = consumer.Rejected,
                     duplicates = consumer.Duplicates,
@@ -151,7 +152,7 @@ public sealed class ValheimTelemetryHeartbeatService
             redirect.Pending == 0 &&
             redirect.Acknowledged == redirect.DistinctSeq &&
             consumer.ActiveConsumers == 1 &&
-            consumer.Applied == redirect.DistinctSeq &&
+            consumer.Applied + consumer.Superseded == redirect.DistinctSeq &&
             consumer.Acknowledged == redirect.DistinctSeq &&
             consumer.Rejected == 0 &&
             consumer.Pending == 0;

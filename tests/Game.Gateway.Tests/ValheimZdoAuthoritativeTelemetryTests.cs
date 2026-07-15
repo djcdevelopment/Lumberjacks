@@ -60,6 +60,20 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
         Assert.Equal("0.5.22", service.LatestModVersion());
     }
 
+    [Fact]
+    public void PromotionAcceptsExplicitlySupersededOlderRevisions()
+    {
+        var heartbeat = new ValheimTelemetryHeartbeatService();
+        var redirects = new ValheimZdoRedirectService();
+        var consumers = new ValheimZdoConsumerTelemetryService();
+        redirects.RecordEnvelopes(Window, "server", [Envelope(1), Envelope(2)]);
+        redirects.Acknowledge(Window, [1, 2]);
+
+        consumers.Record(Consumer(applied: 1, acknowledged: 2) with { Superseded = 1 });
+
+        Assert.True(heartbeat.IsAuthoritativeComplete(Window, redirects, consumers));
+    }
+
     private static ValheimZdoRedirectEnvelope Envelope(long seq) => new()
     {
         Seq = seq,

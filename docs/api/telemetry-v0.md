@@ -183,7 +183,7 @@ by `X-Lumberjacks-Telemetry-Key` when `VALHEIM_TELEMETRY_KEY` is configured on t
   "stale": false,
   "last_seen": "2026-07-13T12:00:19.4942635+00:00",
   "heartbeat": {
-    "mod_version": "0.5.19",
+    "mod_version": "0.5.24",
     "server_role": "dedicated",
     "server_state": "ready",
     "peer_count": 0,
@@ -191,6 +191,16 @@ by `X-Lumberjacks-Telemetry-Key` when `VALHEIM_TELEMETRY_KEY` is configured on t
   }
 }
 ```
+
+### Authoritative ZDO cutover telemetry
+
+`GET /api/v0/telemetry/cutover` includes `authoritative_window`, and
+`GET /api/v0/valheim/zdo-consumers/{windowId}` exposes the consumer-only view.
+`applied` counts envelopes whose exact owner/data revisions were observed after
+`RPC_ZDOData`; `superseded` counts obsolete envelopes safely reconciled because the
+same ZDO was already at a strictly newer owner or data revision. Promotion requires
+`applied + superseded == distinct_seq`, all sequences acknowledged, a drained queue,
+one fresh enrolled consumer, zero terminal rejects, and zero sequence gaps.
 
 ## Live Community View
 
