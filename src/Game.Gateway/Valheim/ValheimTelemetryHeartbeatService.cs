@@ -65,7 +65,7 @@ public sealed class ValheimTelemetryHeartbeatService
         }
     }
 
-    public object CutoverSnapshot()
+    public object CutoverSnapshot(ValheimZdoRedirectService redirects, ValheimZdoConsumerTelemetryService consumers)
     {
         lock (_gate)
         {
@@ -77,6 +77,10 @@ public sealed class ValheimTelemetryHeartbeatService
             var coveragePercent = coverageTotal is > 0 && coverageLumberjacks.HasValue
                 ? Math.Round(100d * coverageLumberjacks.Value / coverageTotal.Value, 2)
                 : (double?)null;
+            var windowId = _latest?.EnrollmentManifestId ?? string.Empty;
+            var redirect = redirects.GetStatus(windowId);
+            var consumer = consumers.GetWindowStatus(windowId);
+            var authoritativeComplete = IsAuthoritativeComplete(windowId, redirects, consumers);
 
             return new
             {
@@ -98,11 +102,45 @@ public sealed class ValheimTelemetryHeartbeatService
                 zdo_authoritative_duplicates = _latest?.ZdoAuthoritativeDuplicates,
                 zdo_authoritative_retried = _latest?.ZdoAuthoritativeRetried,
                 zdo_authoritative_pending = _latest?.ZdoAuthoritativePending,
+                authoritative_window = new
+                {
+                    window_id = windowId,
+                    receipts = redirect.Receipts,
+                    acknowledged = redirect.Acknowledged,
+                    pending = redirect.Pending,
+                    active_consumers = consumer.ActiveConsumers,
+                    applied = consumer.Applied,
+                    consumer_acknowledged = consumer.Acknowledged,
+                    rejected = consumer.Rejected,
+                    duplicates = consumer.Duplicates,
+                    retried = consumer.Retried,
+                    consumer_pending = consumer.Pending,
+                    complete = authoritativeComplete,
+                    last_seen = consumer.LastSeen,
+                },
                 last_seen = _lastSeen,
                 mod_version = _latest?.ModVersion,
                 instance_id = _latest?.InstanceId,
             };
         }
+    }
+
+    public bool IsAuthoritativeComplete(string windowId, ValheimZdoRedirectService redirects,
+        ValheimZdoConsumerTelemetryService consumers)
+    {
+        if (string.IsNullOrWhiteSpace(windowId)) return false;
+        var redirect = redirects.GetStatus(windowId);
+        var consumer = consumers.GetWindowStatus(windowId);
+        return redirect.DistinctSeq > 0 &&
+            redirect.MissingSeq == 0 &&
+            redirect.Duplicates == 0 &&
+            redirect.Pending == 0 &&
+            redirect.Acknowledged == redirect.DistinctSeq &&
+            consumer.ActiveConsumers == 1 &&
+            consumer.Applied == redirect.DistinctSeq &&
+            consumer.Acknowledged == redirect.DistinctSeq &&
+            consumer.Rejected == 0 &&
+            consumer.Pending == 0;
     }
 
     public object EnrollmentSnapshot(string manifestId)

@@ -596,7 +596,11 @@
                 const d = await fetch('/api/v0/telemetry/cutover').then(r => r.ok ? r.json() : Promise.reject(r.status));
                 if (d.stale) { el.textContent = 'Cutover: stale'; return; }
                 const coverage = d.coverage_percent == null ? 'coverage pending' : `${d.coverage_percent}% gameplay coverage`;
-                el.textContent = `Cutover: ${d.mode || 'unknown'} - ${coverage} - native-only ${d.coverage_native_only ?? 'n/a'}`;
+                const a = d.authoritative_window;
+                const authoritative = a?.receipts > 0
+                    ? `ZDO ${a.acknowledged}/${a.receipts} ack, ${a.applied} applied, ${a.pending} queued, ${a.rejected} rejected${a.complete ? ' ✓' : ''}`
+                    : 'authoritative window pending';
+                el.textContent = `Cutover: ${d.mode || 'unknown'} - ${coverage} - native-only ${d.coverage_native_only ?? 'n/a'} - ${authoritative}`;
             } catch (_) { el.textContent = 'Cutover: telemetry unavailable'; }
         }
         pollDeployment();

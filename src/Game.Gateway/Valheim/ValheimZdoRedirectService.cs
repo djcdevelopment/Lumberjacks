@@ -38,6 +38,8 @@ public sealed record ValheimZdoRedirectWindowStatus(
     string WindowId,
     long Receipts,
     long DistinctSeq,
+    long Acknowledged,
+    long Pending,
     long Duplicates,
     long? MinSeq,
     long? MaxSeq,
@@ -122,6 +124,7 @@ public sealed class ValheimZdoRedirectService
 
         private long _receipts;
         private long _duplicates;
+        private long _acknowledged;
         private long? _minSeq;
         private long? _maxSeq;
         private long _emptyBodyCount;
@@ -194,7 +197,11 @@ public sealed class ValheimZdoRedirectService
                 var unknown = 0;
                 foreach (var sequence in sequences.Distinct())
                 {
-                    if (_pending.Remove(sequence)) acknowledged++;
+                    if (_pending.Remove(sequence))
+                    {
+                        acknowledged++;
+                        _acknowledged++;
+                    }
                     else unknown++;
                 }
                 return new(acknowledged, unknown);
@@ -212,6 +219,8 @@ public sealed class ValheimZdoRedirectService
                     windowId,
                     _receipts,
                     distinctCount,
+                    _acknowledged,
+                    _pending.Count,
                     _duplicates,
                     _minSeq,
                     _maxSeq,
@@ -230,6 +239,8 @@ public sealed class ValheimZdoRedirectService
                 windowId,
                 Receipts: 0,
                 DistinctSeq: 0,
+                Acknowledged: 0,
+                Pending: 0,
                 Duplicates: 0,
                 MinSeq: null,
                 MaxSeq: null,

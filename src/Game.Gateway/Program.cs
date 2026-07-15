@@ -17,6 +17,7 @@ builder.Services.AddSingleton<MessageRouter>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<ValheimPriorityManifestService>();
 builder.Services.AddSingleton<ValheimZdoRedirectService>();
+builder.Services.AddSingleton<ValheimZdoConsumerTelemetryService>();
 builder.Services.AddSingleton<ValheimZdoInjectionService>();
 builder.Services.AddSingleton<ValheimHandshakeService>();
 builder.Services.AddSingleton<ValheimTelemetryHeartbeatService>();

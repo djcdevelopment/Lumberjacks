@@ -10,7 +10,9 @@ public static class ValheimTelemetryHeartbeatEndpoints
 
         group.MapPost("/heartbeat", (HttpRequest request,
             ValheimTelemetryHeartbeat heartbeat,
-            ValheimTelemetryHeartbeatService service) =>
+            ValheimTelemetryHeartbeatService service,
+            ValheimZdoRedirectService redirects,
+            ValheimZdoConsumerTelemetryService consumers) =>
         {
             var expected = Environment.GetEnvironmentVariable("VALHEIM_TELEMETRY_KEY");
             if (!string.IsNullOrWhiteSpace(expected) &&
@@ -36,11 +38,13 @@ public static class ValheimTelemetryHeartbeatEndpoints
             }
 
             if (heartbeat.CutoverMode == "lumberjacks-primary" &&
-                (heartbeat.CoverageTotal is not > 0 || heartbeat.CoverageNativeOnly is not 0))
+                (heartbeat.CoverageTotal is not > 0 || heartbeat.CoverageNativeOnly is not 0 ||
+                 string.IsNullOrWhiteSpace(heartbeat.EnrollmentManifestId) ||
+                 !service.IsAuthoritativeComplete(heartbeat.EnrollmentManifestId, redirects, consumers)))
             {
                 return Results.Conflict(new
                 {
-                    error = "lumberjacks-primary requires positive coverage_total and zero coverage_native_only",
+                    error = "lumberjacks-primary requires full traffic coverage and a fully applied authoritative window",
                     coverage_total = heartbeat.CoverageTotal,
                     coverage_native_only = heartbeat.CoverageNativeOnly,
                 });
@@ -54,8 +58,9 @@ public static class ValheimTelemetryHeartbeatEndpoints
             Results.Ok(service.Snapshot()))
             .RequireCors(PublicTelemetryV0.CorsPolicyName);
 
-        app.MapGet("/api/v0/telemetry/cutover", (ValheimTelemetryHeartbeatService service) =>
-            Results.Ok(service.CutoverSnapshot()))
+        app.MapGet("/api/v0/telemetry/cutover", (ValheimTelemetryHeartbeatService service,
+            ValheimZdoRedirectService redirects, ValheimZdoConsumerTelemetryService consumers) =>
+            Results.Ok(service.CutoverSnapshot(redirects, consumers)))
             .RequireCors(PublicTelemetryV0.CorsPolicyName);
 
         app.MapGet("/api/v0/valheim/enrollment/{manifestId}", (string manifestId, ValheimTelemetryHeartbeatService service) =>

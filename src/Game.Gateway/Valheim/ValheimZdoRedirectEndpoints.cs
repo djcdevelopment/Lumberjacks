@@ -57,6 +57,28 @@ public static class ValheimZdoRedirectEndpoints
         group.MapGet("/pending/{windowId}", (string windowId, int? limit, ValheimZdoRedirectService redirects) =>
             Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) }));
 
+        group.MapPost("/consumer", (ValheimZdoConsumerHeartbeat heartbeat,
+            ValheimZdoConsumerTelemetryService consumers) =>
+        {
+            if (string.IsNullOrWhiteSpace(heartbeat.WindowId) ||
+                string.IsNullOrWhiteSpace(heartbeat.ConsumerId) ||
+                string.IsNullOrWhiteSpace(heartbeat.ModVersion) ||
+                string.IsNullOrWhiteSpace(heartbeat.TimestampUtc))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "window_id, consumer_id, mod_version, and timestamp_utc are required",
+                });
+            }
+
+            consumers.Record(heartbeat);
+            return Results.Ok(new { ok = true, received_at = DateTimeOffset.UtcNow });
+        });
+
+        app.MapGet("/api/v0/valheim/zdo-consumers/{windowId}", (string windowId,
+            ValheimZdoConsumerTelemetryService consumers) => Results.Ok(consumers.Snapshot(windowId)))
+            .RequireCors(Game.ServiceDefaults.PublicTelemetryV0.CorsPolicyName);
+
         group.MapPost("/ack/{windowId}", (string windowId, long[] sequences, ValheimZdoRedirectService redirects) =>
         {
             if (sequences is null || sequences.Length == 0)
@@ -93,6 +115,8 @@ public static class ValheimZdoRedirectEndpoints
         window_id = status.WindowId,
         receipts = status.Receipts,
         distinct_seq = status.DistinctSeq,
+        acknowledged = status.Acknowledged,
+        pending = status.Pending,
         duplicates = status.Duplicates,
         min_seq = status.MinSeq,
         max_seq = status.MaxSeq,
