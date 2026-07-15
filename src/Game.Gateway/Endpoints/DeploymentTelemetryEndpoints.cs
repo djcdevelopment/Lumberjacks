@@ -1,4 +1,5 @@
 using Game.ServiceDefaults;
+using Game.Gateway.Valheim;
 
 namespace Game.Gateway.Endpoints;
 
@@ -10,7 +11,7 @@ public static class DeploymentTelemetryEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/v0/telemetry/deployment", () =>
+        app.MapGet("/api/v0/telemetry/deployment", (ValheimTelemetryHeartbeatService heartbeat) =>
         {
             var version = Environment.GetEnvironmentVariable("LUMBERJACKS_VERSION")
                 ?? Environment.GetEnvironmentVariable("OTEL_SERVICE_VERSION")
@@ -28,7 +29,9 @@ public static class DeploymentTelemetryEndpoints
                 service = "lumberjacks-gateway",
                 environment,
                 lumberjacks_version = version,
-                comfy_network_sense_version = Environment.GetEnvironmentVariable("COMFY_NETWORKSENSE_VERSION") ?? "unknown",
+                comfy_network_sense_version = heartbeat.LatestModVersion()
+                    ?? Environment.GetEnvironmentVariable("COMFY_NETWORKSENSE_VERSION")
+                    ?? "unknown",
                 observed_at = DateTimeOffset.UtcNow,
             });
         }).RequireCors(PublicTelemetryV0.CorsPolicyName);

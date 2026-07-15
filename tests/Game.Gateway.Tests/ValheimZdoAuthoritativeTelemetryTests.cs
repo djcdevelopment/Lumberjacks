@@ -44,6 +44,22 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
         Assert.False(heartbeat.IsAuthoritativeComplete(Window, redirects, consumers));
     }
 
+    [Fact]
+    public void LatestModVersionTracksTheRunningValheimHeartbeat()
+    {
+        var service = new ValheimTelemetryHeartbeatService();
+        Assert.Null(service.LatestModVersion());
+
+        service.Record(new ValheimTelemetryHeartbeat
+        {
+            InstanceId = "server-test",
+            ModVersion = "0.5.22",
+            TimestampUtc = DateTimeOffset.UtcNow.ToString("O"),
+        });
+
+        Assert.Equal("0.5.22", service.LatestModVersion());
+    }
+
     private static ValheimZdoRedirectEnvelope Envelope(long seq) => new()
     {
         Seq = seq,

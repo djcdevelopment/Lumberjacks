@@ -16,6 +16,20 @@ public sealed class ValheimTelemetryHeartbeatService
         }
     }
 
+    /// <summary>
+    /// Returns the mod version reported by the running Valheim instance. Deployment
+    /// telemetry uses this ahead of its cold-start environment fallback so updating
+    /// the plugin never requires a Gateway restart (and therefore cannot discard an
+    /// in-flight authoritative queue merely to refresh a dashboard label).
+    /// </summary>
+    public string? LatestModVersion()
+    {
+        lock (_gate)
+        {
+            return string.IsNullOrWhiteSpace(_latest?.ModVersion) ? null : _latest.ModVersion;
+        }
+    }
+
     public object Snapshot()
     {
         lock (_gate)
