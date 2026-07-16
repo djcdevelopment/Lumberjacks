@@ -74,9 +74,15 @@ public static class ValheimZdoRedirectEndpoints
             });
         });
 
-        group.MapGet("/pending/{windowId}", (string windowId, int? limit, ValheimZdoRedirectService redirects) =>
-            Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) }))
-            .RequireRateLimiting("consumer");
+        // A consumer poll is the seat gate's sign of life for this window — see
+        // ValheimWindowActivityService. Recorded on the request, not inside the ZDO service, so the
+        // hot path is untouched.
+        group.MapGet("/pending/{windowId}", (string windowId, int? limit,
+            ValheimZdoRedirectService redirects, ValheimWindowActivityService activity) =>
+        {
+            activity.Touch(windowId, DateTime.UtcNow);
+            return Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) });
+        }).RequireRateLimiting("consumer");
 
         group.MapPost("/consumer", (ValheimZdoConsumerHeartbeat heartbeat,
             ValheimZdoConsumerTelemetryService consumers) =>
@@ -100,10 +106,12 @@ public static class ValheimZdoRedirectEndpoints
             ValheimZdoConsumerTelemetryService consumers) => Results.Ok(consumers.Snapshot(windowId)))
             .RequireCors(Game.ServiceDefaults.PublicTelemetryV0.CorsPolicyName);
 
-        group.MapPost("/ack/{windowId}", (string windowId, long[] sequences, ValheimZdoRedirectService redirects) =>
+        group.MapPost("/ack/{windowId}", (string windowId, long[] sequences,
+            ValheimZdoRedirectService redirects, ValheimWindowActivityService activity) =>
         {
             if (sequences is null || sequences.Length == 0)
                 return Results.BadRequest(new { error = "sequences is required" });
+            activity.Touch(windowId, DateTime.UtcNow);
             var result = redirects.Acknowledge(windowId, sequences);
             return Results.Ok(new { window_id = windowId, acknowledged = result.Acknowledged, unknown = result.Unknown });
         }).RequireRateLimiting("consumer");

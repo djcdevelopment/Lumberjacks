@@ -46,6 +46,31 @@ public sealed record ValheimHandshakeServerContext
     public IReadOnlyList<string> PermittedHosts { get; init; } = Array.Empty<string>();
     public IReadOnlyList<long> ConnectedUids { get; init; } = Array.Empty<long>();
 
+    /// <summary>
+    /// Lumberjacks seat gate: concurrent seats this window admits. The volunteer pilot is one seat
+    /// (VOLUNTEER-ENDPOINT.md: "Admit only one client while P7 still uses the shared p7-primary-v1
+    /// queue"), so 1 is the default — including for a window that materializes on first contact
+    /// without an operator ever configuring it. 0 disables the gate.
+    ///
+    /// This is NOT the native <see cref="MaxPlayers"/> check: that one emulates vanilla's
+    /// <c>GetNrOfPlayers() >= 10</c> against an operator-supplied <see cref="CurrentPlayers"/> that
+    /// nothing keeps current. The seat gate counts what the Gateway itself admitted.
+    /// </summary>
+    public int SeatCapacity { get; init; } = 1;
+
+    /// <summary>
+    /// How long a seat survives with no sign of life from its holder — see
+    /// <see cref="ValheimWindowActivityService"/> for why liveness, not a plain timer, drives this.
+    ///
+    /// 60s is chosen against the failure that actually bites: the sole volunteer crashing and
+    /// wanting back in (plan §5.4). Their session uid is regenerated per game process, so a rejoin
+    /// cannot be recognised as the same player and must wait out the lease. Relaunching Valheim
+    /// takes longer than 60s, so in practice the seat is already free when they return. The cost of
+    /// the short lease is that a holder whose consumer stalls for a full minute could have their
+    /// seat taken — which requires a second player to exist, and today there is one volunteer.
+    /// </summary>
+    public int SeatLeaseSeconds { get; init; } = 60;
+
     // Server-PeerInfo reply fields (the emulated world).
     public long ServerUid { get; init; } = 1;
     public string VersionString { get; init; } = "0.221.12";
@@ -149,6 +174,18 @@ public sealed class ValheimHandshakeService
     public const int MaxPlayers = 10;
 
     private readonly ConcurrentDictionary<string, Window> _windows = new(StringComparer.Ordinal);
+    private readonly ValheimWindowActivityService? _activity;
+    private readonly Func<DateTime> _nowUtc;
+
+    /// <param name="activity">Consumer liveness for the seat gate. Null ⇒ seats expire on their
+    /// grant alone, which is the pre-stage-2 behaviour and is what unit tests get by default.</param>
+    /// <param name="nowUtc">Injected so seat-lease expiry is testable without sleeping.</param>
+    public ValheimHandshakeService(
+        ValheimWindowActivityService? activity = null, Func<DateTime>? nowUtc = null)
+    {
+        _activity = activity;
+        _nowUtc = nowUtc ?? (() => DateTime.UtcNow);
+    }
 
     public (bool Ok, string Error) Configure(string windowId, ValheimHandshakeServerContext context)
     {
@@ -176,7 +213,8 @@ public sealed class ValheimHandshakeService
         if (error is not null)
             return (false, error, null);
         var window = _windows.GetOrAdd(windowId, static _ => new Window());
-        return (true, string.Empty, window.SubmitPeerInfo(submission));
+        return (true, string.Empty, window.SubmitPeerInfo(
+            submission, _nowUtc(), _activity?.LastActivityUtc(windowId)));
     }
 
     public ValheimHandshakeWindowStatus GetStatus(string windowId) =>
@@ -188,12 +226,19 @@ public sealed class ValheimHandshakeService
         _windows.OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .Select(kv => kv.Value.Status(kv.Key)).ToList();
 
-    public bool Reset(string windowId) => _windows.TryRemove(windowId, out _);
+    public bool Reset(string windowId)
+    {
+        // Liveness goes with the window: a surviving mark would hold a seat in a window that was
+        // just reset to empty.
+        _activity?.Clear(windowId);
+        return _windows.TryRemove(windowId, out _);
+    }
 
     public int ResetAll()
     {
         var count = _windows.Count;
         _windows.Clear();
+        _activity?.ClearAll();
         return count;
     }
 
@@ -261,6 +306,10 @@ public sealed class ValheimHandshakeService
         private DateTime? _firstUtc;
         private DateTime? _lastUtc;
 
+        /// <summary>Uids currently holding a seat, and when each was last granted or refreshed.
+        /// Bounded by SeatCapacity, so this cannot grow the way _connectedUids does.</summary>
+        private readonly Dictionary<long, DateTime> _seats = new();
+
         public void Configure(ValheimHandshakeServerContext context)
         {
             lock (_gate)
@@ -269,6 +318,9 @@ public sealed class ValheimHandshakeService
                 _connectedUids.Clear();
                 foreach (var uid in context.ConnectedUids)
                     _connectedUids.Add(uid);
+                // Reconfiguring re-states the world; a seat held under the old context would be a
+                // reservation for a server that no longer exists.
+                _seats.Clear();
             }
         }
 
@@ -283,11 +335,12 @@ public sealed class ValheimHandshakeService
             }
         }
 
-        public ValheimHandshakeGateResult SubmitPeerInfo(ValheimPeerInfoSubmission s)
+        public ValheimHandshakeGateResult SubmitPeerInfo(
+            ValheimPeerInfoSubmission s, DateTime nowUtc, DateTime? lastActivityUtc)
         {
             lock (_gate)
             {
-                var result = Evaluate(s);
+                var result = Evaluate(s, nowUtc, lastActivityUtc);
                 Touch();
 
                 if (result.Accept)
@@ -297,6 +350,7 @@ public sealed class ValheimHandshakeService
                     {
                         _steadyState++;
                         _connectedUids.Add(s.Uid); // now IsConnected(uid) for the next attempt
+                        TakeSeat(s.Uid, nowUtc);
                     }
                 }
                 else
@@ -318,8 +372,11 @@ public sealed class ValheimHandshakeService
         }
 
         /// <summary>The ordered gate — the checks run in the exact decompile order; the first
-        /// failure returns its code. Mirrors RPC_PeerInfo:835-926.</summary>
-        private ValheimHandshakeGateResult Evaluate(ValheimPeerInfoSubmission s)
+        /// failure returns its code. Mirrors RPC_PeerInfo:835-926. The Lumberjacks seat gate (H)
+        /// runs only after all six native checks, so a client vanilla would have rejected still
+        /// gets vanilla's own code and label rather than a Lumberjacks one.</summary>
+        private ValheimHandshakeGateResult Evaluate(
+            ValheimPeerInfoSubmission s, DateTime nowUtc, DateTime? lastActivityUtc)
         {
             // A — network version (RPC_PeerInfo:835)
             if (s.NetVersion != _context.NetworkVersion)
@@ -348,12 +405,64 @@ public sealed class ValheimHandshakeService
             if (_connectedUids.Contains(s.Uid))
                 return Reject(ValheimConnectionStatus.ErrorAlreadyConnected, "duplicate");
 
+            // H — Lumberjacks seat reservation. NOT a native check: it has no decompile line and
+            // runs last so the native verdict always wins first. Surfaces as ErrorFull because that
+            // is the only native code whose meaning matches ("the server has no room for you") —
+            // the player sees vanilla's full-server screen, and the reason rides failed_check into
+            // the server log for the operator (plan §6: only the int reaches the client).
+            if (SeatUnavailableFor(s.Uid, nowUtc, lastActivityUtc))
+                return Reject(ValheimConnectionStatus.ErrorFull, "capacity_reserved");
+
             // All pass ⇒ server replies PeerInfo and AddPeer(zdoMan)/AddPeer(routedRpc) (:975-976).
             var reply = new ValheimServerPeerInfo(
                 _context.ServerUid, _context.VersionString, _context.NetworkVersion,
                 _context.WorldName, _context.Seed, _context.SeedName, _context.WorldUid,
                 _context.WorldGenVersion, _context.NetTime);
             return new ValheimHandshakeGateResult(true, true, null, null, null, reply);
+        }
+
+        /// <summary>
+        /// True when every seat is spoken for by someone other than <paramref name="uid"/>.
+        ///
+        /// Expiry is passive — evaluated here, on the request that cares — so there is no sweeper
+        /// thread and no lock beyond the one SubmitPeerInfo already holds. A seat counts as live
+        /// while EITHER its own grant OR the window's consumer traffic is inside the lease: the
+        /// grant covers the gap between the verdict and the consumer's first poll, and the consumer
+        /// traffic covers the rest of the session. Window-scoped liveness cannot say WHICH holder
+        /// is alive, which is exactly good enough at one seat and is why SeatCapacity > 1 is
+        /// honoured for counting but not really meaningful yet.
+        /// </summary>
+        private bool SeatUnavailableFor(long uid, DateTime nowUtc, DateTime? lastActivityUtc)
+        {
+            if (_context.SeatCapacity <= 0)
+                return false;
+
+            var lease = TimeSpan.FromSeconds(Math.Max(1, _context.SeatLeaseSeconds));
+            var activityIsLive = lastActivityUtc is DateTime seen && nowUtc - seen < lease;
+
+            var held = 0;
+            foreach (var (holder, grantedUtc) in _seats)
+            {
+                if (holder == uid)
+                    return false; // already ours — a re-handshake refreshes rather than competes
+                if (activityIsLive || nowUtc - grantedUtc < lease)
+                    held++;
+            }
+            return held >= _context.SeatCapacity;
+        }
+
+        private void TakeSeat(long uid, DateTime nowUtc)
+        {
+            if (_context.SeatCapacity <= 0)
+                return;
+            // Drop leases that lapsed before recording ours, so the dictionary tracks the seats
+            // actually held rather than every uid ever admitted (the bug _connectedUids has).
+            var lease = TimeSpan.FromSeconds(Math.Max(1, _context.SeatLeaseSeconds));
+            var stale = _seats.Where(kv => kv.Key != uid && nowUtc - kv.Value >= lease)
+                .Select(kv => kv.Key).ToList();
+            foreach (var lapsed in stale)
+                _seats.Remove(lapsed);
+            _seats[uid] = nowUtc;
         }
 
         private bool IsAllowed(string host, string name)

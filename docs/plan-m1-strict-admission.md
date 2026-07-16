@@ -160,18 +160,27 @@ work, because a one-seat gate needs a count, not a name.
    the packet is the opaque `steamSessionTicket` byte[], which the mod reads past
    and never decodes (`HandshakeResponderPatches.cs:45`). The roster key does not
    exist on the wire; identity admission moves to stage 3 wholesale.
-4. **No liveness signal — the seat has no release event.** `_connectedUids` only
-   ever grows (`ValheimHandshakeService.cs:299`); nothing reports a disconnect.
-   Latent bug today: a client that crashes and reconnects *without restarting
-   Valheim* keeps its session `uid` and is rejected `ErrorAlreadyConnected`
-   (gate G) until the window is reset. The only liveness signal available is the
-   telemetry heartbeat's `peer_count` — live-computed, whole-server
-   (`TelemetryCoordinator.cs:483,503`) — but it carries no `window_id`, only a
-   per-boot `instance_id` (`:487`), so it correlates to a handshake window only
-   while exactly one server reports: the assumption multi-volunteer enrollment
-   exists to end. Stage 2 mitigation: seat state in-memory with a passive TTL, so
-   a stuck seat self-heals rather than persisting. Stage-3 mod-cut candidate: add
-   `window_id` to the telemetry heartbeat and make `peer_count` the seat truth.
+4. **Resolved in stage 2 — consumer poll/ack is the liveness signal.** Nothing
+   reports a disconnect, and `_connectedUids` only ever grows
+   (`ValheimHandshakeService.cs:299`), so a seat on a fixed timer is wrong in both
+   directions: too short frees it mid-session, too long locks the sole volunteer
+   out after a crash and lets a ghost accept (§5.5) hold the seat for the full
+   lease. An earlier revision of this entry claimed the only live signal was the
+   telemetry heartbeat's `peer_count`, which carries no `window_id` (only a
+   per-boot `instance_id`, `TelemetryCoordinator.cs:487`) and so would have needed
+   a mod cut. **That was wrong.** The authoritative consumer's own poll/ack traffic
+   is already window-keyed — `/valheim/zdo-redirect/pending/{windowId}` and
+   `/ack/{windowId}` (`ValheimZdoRedirectService.cs:118,125`) — and the frozen
+   0.5.31 mod already sends it. `ValheimWindowActivityService` records it; a seat
+   is live while its grant OR the window's consumer traffic is inside
+   `SeatLeaseSeconds` (default 60). A holder who is really there refreshes it
+   continuously; one who crashed or never landed stops instantly. Gateway-only, no
+   mod cut. Remaining limits: liveness is window-scoped, so it cannot say *which*
+   holder is alive (fine at one seat, the reason `SeatCapacity > 1` counts but is
+   not yet meaningful), and a holder who runs no consumer is invisible to it. The
+   separate `_connectedUids` growth bug stands — a client that crashes and
+   reconnects *without restarting Valheim* keeps its session `uid` and is rejected
+   `ErrorAlreadyConnected` (gate G) until the window is reset.
 5. **A Gateway accept is overturnable, and the Gateway never learns.** The mod
    hardcodes `ticketValid: true` (`HandshakeResponderPatches.cs:50`) — it never
    verifies the ticket; vanilla runs the real `VerifySessionTicket(ticket, peerID)`
@@ -191,6 +200,27 @@ work, because a one-seat gate needs a count, not a name.
    source of truth: environment file vs release bundle) cannot be gated on until
    the mod sends its own release identity, which it does not
    (`HandshakeResponderPatches.cs:34,39`). Decide it as part of the stage-3 cut.
+10. **Stage-3 prerequisite: the handshake blocks the server's main thread, and
+    the stall was unbounded.** The Harmony prefix runs on the dedicated server's
+    main thread and `Decide` → `PostForBody` does a synchronous raw-socket
+    round-trip inside it, so every join freezes the *whole server* — all players,
+    not just the joiner — for the round-trip. `ReceiveTimeout` is per-`Read`, not
+    for the loop, so a peer trickling one byte under each timeout held the read
+    loop (and the main thread) open **forever** — over plain HTTP, with no TLS.
+    That the consumer's read loop in the same repo bounds itself with
+    `MaxResponseBytes` while this one did not marks it as an oversight, not a
+    tradeoff. Fixed in the mod source (uncommitted, rides this cut):
+    `ResponseDeadlineMs`/`MaxResponseBytes` bound the loop by wall clock and size,
+    making the worst case finite (~`HttpTimeoutMs` connect + `ResponseDeadlineMs`
+    read ≈ 4s). **This is a prerequisite, not a nice-to-have:** stage 3 makes this
+    path fail-*closed*, and doing that on an unbounded stall is strictly worse — a
+    hung or degraded Gateway would then freeze the server *and* reject everyone.
+    Blocking is inherent to a Harmony prefix (it must return `bool`; it cannot
+    await), so the bound is the floor, not the fix. The real options for later:
+    async-then-kick (rejected players briefly enter the world), or a
+    pre-authenticated signed ticket the server validates locally with zero I/O in
+    the join path — the latter is the only design with no network on the join path
+    at all, and stage 3 already opens the mod.
 
 10. **Resolved in code, pending on P7 — the v1 migration could seed a roster that
     breaks its own invariant.** `MigrateV1` keyed enrollments by enrollment id and
