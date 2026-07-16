@@ -401,8 +401,8 @@ public class TelemetryV0EndpointsTests
         GameplayEventFeed.Capture(EventType.PlayerConnected, "region-spawn", "should-not-appear");
         GameplayEventFeed.Capture(EventType.PlayerDisconnected, "region-spawn", "should-not-appear");
         GameplayEventFeed.Capture(EventType.PlayerJoinedGuild, "region-spawn", "should-not-appear");
-        // One allowed type does land.
-        GameplayEventFeed.Capture(EventType.StructurePlaced, "region-spawn", "wall");
+        // One allowed type does land. Backdated so the FixedNow cutoff in BuildEventsInfo sees it.
+        GameplayEventFeed.Capture(EventType.StructurePlaced, "region-spawn", "wall", "observed", FixedNow.AddMinutes(-1));
 
         var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(GameplayEventFeed.Snapshot(), TimeSpan.Zero, FixedNow));
 
@@ -524,7 +524,10 @@ public class TelemetryV0EndpointsTests
         Assert.Equal("observed", entered.Provenance);
 
         // Privacy: the joining player's id/name/position must not leak into the feed response.
-        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(snapshot, TimeSpan.Zero, FixedNow));
+        // Real UtcNow here (not FixedNow): Join stamps the capture with the live clock, and the
+        // event must actually serialize for these DoesNotContain checks to be non-vacuous.
+        var json = ToJson(TelemetryV0Endpoints.BuildEventsInfo(snapshot, TimeSpan.Zero, DateTimeOffset.UtcNow));
+        Assert.Contains(EventType.PlayerEnteredRegion, json); // event really serialized — leak checks below are non-vacuous
         Assert.DoesNotContain(sentinelPlayerId, json);
         Assert.DoesNotContain(world.Players[sentinelPlayerId].Name, json);
     }
@@ -534,7 +537,7 @@ public class TelemetryV0EndpointsTests
     {
         // Mirrors the RegionEndpoints POST /regions seam: region id only, no actor, no detail.
         GameplayEventFeed.Reset();
-        GameplayEventFeed.Capture(EventType.RegionActivated, regionId: "region-north", detail: null, provenance: "observed");
+        GameplayEventFeed.Capture(EventType.RegionActivated, regionId: "region-north", detail: null, provenance: "observed", occurredAt: FixedNow.AddMinutes(-1));
 
         var snapshot = GameplayEventFeed.Snapshot();
         var evt = Assert.Single(snapshot.Events, e => e.EventType == EventType.RegionActivated);
