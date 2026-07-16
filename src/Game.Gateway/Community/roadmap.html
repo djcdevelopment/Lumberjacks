@@ -349,7 +349,7 @@
       <div class="headline">ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-16T03:20:00-07:00</span>
+        <span>Updated 2026-07-16T11:44:30.100Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -823,7 +823,7 @@
   </div>
             <p class="proof-denominator">83,220 of 83,220 eligible ZDO revisions in the declared strict single-client window closed through Lumberjacks; this is not a denominator for all Valheim networking.</p>
             <div class="metric-grid"><div class="metric"><span>Eligible revisions in declared window</span><strong>83,220</strong></div><div class="metric"><span>Durable receipts</span><strong>83,220</strong></div><div class="metric"><span>Exact applications</span><strong>72,946</strong></div><div class="metric"><span>Safe supersessions</span><strong>10,274</strong></div><div class="metric"><span>Acknowledgements</span><strong>83,220</strong></div><div class="metric"><span>Pending</span><strong>0</strong></div><div class="metric"><span>Eligible native-only sends</span><strong>0</strong></div><div class="metric"><span>Priority tagged</span><strong>83,220 (100%)</strong></div><div class="metric"><span>Observed reject / duplicate / retry</span><strong>0 / 0 / 0</strong></div><div class="metric"><span>Poll / ACK / telemetry failures</span><strong>0 / 0 / 0</strong></div><div class="metric"><span>Peer-ready → first apply</span><strong>6.721 s</strong></div><div class="metric"><span>Peer-ready → complete</span><strong>102.114 s</strong></div></div>
-            <div class="publication"><strong>Publication · local_pending_m0</strong>The evidence is validated and hash-recorded locally. Its previous mutable GitHub `main` link was removed because the file is not yet tracked there; M0 must publish and link an immutable repository revision before this becomes public closing evidence.</div>
+            <div class="publication"><strong>Publication · local_pending_m0</strong>The sanitized publication set is staged at Comfy revision 433f1cc (tracked, hash-bound, and secret-scan clean); it becomes public closing evidence when pushed and linked immutably after the A4 drill passes.</div>
           </article>
           <article class="no-go-card">
             <h3>Known no-go findings</h3>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260716032000-publish-m0-a3-bundle-receipt-and-fieldlab-catalo">
+        <div class="journal"><article class="journal-entry" id="note-20260716114430-stage-m0-a5-publication-set-and-fix-byte-stabili">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-16T11:44:30.100Z">2026-07-16T11:44:30.100Z</time>
+        <span class="pill note-kind">implementation</span>
+        <span>Lumberjacks + Comfy</span>
+        <span>M0</span>
+      </div>
+      <h3>Stage M0/A5 publication set and fix byte-stability defect</h3>
+      <p><strong>Impact:</strong> Staged the sanitized gold FieldLab run packet in the Comfy repository and committed the A5 publication receipt. Fixed a latent A3 byte-stability defect where line-ending normalization caused checkout hash mismatches by explicitly marking the hash-bound evidence set with -text. A5 closure remains pending until the A4 drill passes, the owner pushes the Comfy revision to the remote, and the roadmap publication status flips.</p>
+      <details><summary>Verification (3)</summary><ul><li>The staged publication set hashes match the M0/A5 receipt, including the byte-identical acceptance snapshot.</li><li>A two-pass secret scan (deterministic regex and independent semantic LLM review) confirmed the publication set is clean, with the deployment IPv4 redacted as &lt;gcp-public-ip&gt;.</li><li>The .gitattributes fix makes Git blob bytes, working-tree bytes, and recorded SHA-256 hashes identical for all six hash-bound files regardless of checkout configuration.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>docs/roadmap/m0-a5-publication-receipt.json</code> <code>Comfy fieldlab/evidence/p7-gold-run-20260716-011112-authoritative-priority-cutover/ (PUBLICATION.md + report.md + acceptance-snapshot.json)</code> <code>Comfy fieldlab/.gitattributes</code> <code>Comfy commits e9f9fe3 + 433f1cc</code></div>
+      <div class="containing-commit">Recorded by Codex · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260716032000-publish-m0-a3-bundle-receipt-and-fieldlab-catalo">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">

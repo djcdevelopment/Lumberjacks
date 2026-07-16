@@ -36,8 +36,8 @@ describes the current repository, not an aspirational roadmap.
 - [Tree-felling lab plan](../plan-tree-felling-lab.md)
 - [World-generation lab plan](../plan-worldgen-lab.md)
 - [Valheim + Lumberjacks P7 overview](valheim-lumberjacks-p7-overview.md)
-- Versioned P7 victory evidence: `C:\work\comfy\fieldlab\evidence\p7-primary-v1-authoritative-priority-zdo-20260716-v0531.md`
-- P7 victory report: `C:\work\comfy\fieldlab\runs\20260716-011112-valheim-lumberjacks-authoritative-priority-cutover\report.md`
+- Versioned P7 victory evidence: Comfy repository `fieldlab/evidence/p7-primary-v1-authoritative-priority-zdo-20260716-v0531.md` (permalink resolvable once staged revision 433f1cc is pushed).
+- P7 victory report (sanitized publication copy): Comfy repository `fieldlab/evidence/p7-gold-run-20260716-011112-authoritative-priority-cutover/report.md` (permalink resolvable once staged revision 433f1cc is pushed; raw immutable packet remains local under `fieldlab/runs/`).
 
 ## Evidence rules for future updates
 
