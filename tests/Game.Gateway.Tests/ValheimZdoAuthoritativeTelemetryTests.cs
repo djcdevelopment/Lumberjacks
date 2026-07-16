@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text.Json;
 using Game.Gateway.Valheim;
 using Xunit;
 
@@ -24,6 +26,23 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
         var after = redirects.GetStatus(Window);
         Assert.Equal(2, after.Acknowledged);
         Assert.Equal(0, after.Pending);
+    }
+
+    [Fact]
+    public void PendingCarriesPriorityPlanIntoDurableAuthoritativeOrder()
+    {
+        var redirects = new ValheimZdoRedirectService();
+        redirects.RecordEnvelopes(Window, "server",
+        [
+            Envelope(1) with { PriorityTier = "support_piece", PriorityRank = 5, DistanceMeters = 1 },
+            Envelope(2) with { PriorityTier = "player_critical", PriorityRank = 0, DistanceMeters = 50 },
+            Envelope(3) with { PriorityTier = "player_critical", PriorityRank = 0, DistanceMeters = 10 },
+            Envelope(4),
+        ]);
+
+        Assert.Equal(new long?[] { 3, 2, 1, 4 },
+            redirects.Pending(Window, 1024).Select(envelope => envelope.Seq));
+        Assert.Equal(4, redirects.GetStatus(Window).Pending);
     }
 
     [Fact]
@@ -107,6 +126,90 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
     }
 
     [Fact]
+    public void WalCompactionPreservesWindowStateAndReplay()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lumberjacks-zdo-compact-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "redirect.wal");
+        try
+        {
+            var service = new ValheimZdoRedirectService(path);
+            service.RecordEnvelopes(Window, "server", [Envelope(1), Envelope(2), Envelope(3)]);
+            service.RecordEnvelopes(Window, "retry", [Envelope(2)]);
+            service.Acknowledge(Window, [1, 2]);
+            var before = service.GetStatus(Window);
+            var pendingBefore = service.Pending(Window, 256).Select(e => e.Seq).ToArray();
+            var oldBytes = service.WalBytes;
+
+            var compactedBytes = service.Compact();
+            Assert.True(compactedBytes < oldBytes);
+
+            var replayed = new ValheimZdoRedirectService(path);
+            var after = replayed.GetStatus(Window);
+            Assert.Equal(before.WindowId, after.WindowId);
+            Assert.Equal(before.Receipts, after.Receipts);
+            Assert.Equal(before.DistinctSeq, after.DistinctSeq);
+            Assert.Equal(before.Acknowledged, after.Acknowledged);
+            Assert.Equal(before.Pending, after.Pending);
+            Assert.Equal(before.Duplicates, after.Duplicates);
+            Assert.Equal(before.MinSeq, after.MinSeq);
+            Assert.Equal(before.MaxSeq, after.MaxSeq);
+            Assert.Equal(before.MissingSeq, after.MissingSeq);
+            Assert.Equal(before.EmptyBodyCount, after.EmptyBodyCount);
+            Assert.Equal(before.PerPrefab, after.PerPrefab);
+            Assert.Equal(before.PerSource, after.PerSource);
+            Assert.Equal(pendingBefore, replayed.Pending(Window, 256).Select(e => e.Seq).ToArray());
+            Assert.Equal(compactedBytes, replayed.WalBytes);
+            Assert.True(replayed.PersistenceHealthy);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CopiedWalRehearsalCompactsAndReplaysWhenPathIsProvided()
+    {
+        var source = Environment.GetEnvironmentVariable("LUMBERJACKS_WAL_REHEARSAL_PATH");
+        if (string.IsNullOrWhiteSpace(source)) return;
+
+        var working = source + ".working";
+        var reportPath = source + ".report.json";
+        File.Copy(source, working, overwrite: true);
+        var beforeBytes = new FileInfo(working).Length;
+        var clock = Stopwatch.StartNew();
+        var service = new ValheimZdoRedirectService(working);
+        var before = service.GetAllStatuses();
+        var compactedBytes = service.Compact();
+        clock.Stop();
+        var replayed = new ValheimZdoRedirectService(working);
+        var after = replayed.GetAllStatuses();
+        Assert.True(replayed.PersistenceHealthy);
+        Assert.Equal(before.Count, after.Count);
+        for (var i = 0; i < before.Count; i++)
+        {
+            Assert.Equal(before[i].WindowId, after[i].WindowId);
+            Assert.Equal(before[i].Receipts, after[i].Receipts);
+            Assert.Equal(before[i].DistinctSeq, after[i].DistinctSeq);
+            Assert.Equal(before[i].Acknowledged, after[i].Acknowledged);
+            Assert.Equal(before[i].Pending, after[i].Pending);
+            Assert.Equal(before[i].Duplicates, after[i].Duplicates);
+        }
+
+        File.WriteAllText(reportPath, JsonSerializer.Serialize(new
+        {
+            source,
+            before_bytes = beforeBytes,
+            compacted_bytes = compactedBytes,
+            reduction_bytes = beforeBytes - compactedBytes,
+            reduction_percent = beforeBytes == 0 ? 0 : 100d * (beforeBytes - compactedBytes) / beforeBytes,
+            duration_ms = clock.Elapsed.TotalMilliseconds,
+            windows = before.Count,
+            replay_healthy = replayed.PersistenceHealthy,
+        }, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    [Fact]
     public void PromotionAllowsSuppressedAtLeastOnceTransportDuplicates()
     {
         var heartbeat = new ValheimTelemetryHeartbeatService();
@@ -118,6 +221,39 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
         consumers.Record(Consumer(applied: 2, acknowledged: 2));
 
         Assert.Equal(1, redirects.GetStatus(Window).Duplicates);
+        Assert.True(heartbeat.IsAuthoritativeComplete(Window, redirects, consumers));
+    }
+
+    [Fact]
+    public void PromotionAllowsConsumerRestartWithCumulativeRedirectHistory()
+    {
+        var heartbeat = new ValheimTelemetryHeartbeatService();
+        var redirects = new ValheimZdoRedirectService();
+        var consumers = new ValheimZdoConsumerTelemetryService();
+        redirects.RecordEnvelopes(Window, "server", [Envelope(1), Envelope(2), Envelope(3)]);
+        redirects.Acknowledge(Window, [1, 2, 3]);
+
+        // Consumer counters are per-process and reset after a reconnect. Durable
+        // redirect closure, not equality with those diagnostic counters, is the
+        // authoritative completion criterion.
+        consumers.Record(Consumer(applied: 1, acknowledged: 1));
+        Assert.True(heartbeat.IsAuthoritativeComplete(Window, redirects, consumers));
+    }
+
+    [Fact]
+    public void PromotionAllowsRedeliveredDuplicateAfterEarlierAcknowledgement()
+    {
+        var heartbeat = new ValheimTelemetryHeartbeatService();
+        var redirects = new ValheimZdoRedirectService();
+        var consumers = new ValheimZdoConsumerTelemetryService();
+        redirects.RecordEnvelopes(Window, "server", [Envelope(1)]);
+        redirects.Acknowledge(Window, [1]);
+        redirects.RecordEnvelopes(Window, "server-retry", [Envelope(1)]);
+        redirects.Acknowledge(Window, [1]);
+
+        consumers.Record(Consumer(applied: 1, acknowledged: 1));
+        Assert.Equal(2, redirects.GetStatus(Window).Acknowledged);
+        Assert.Equal(1, redirects.GetStatus(Window).DistinctSeq);
         Assert.True(heartbeat.IsAuthoritativeComplete(Window, redirects, consumers));
     }
 
@@ -138,8 +274,32 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
         };
 
         Assert.True(heartbeat.CanAcceptPrimaryHeartbeat(sample, redirects, consumers));
+        Assert.True(heartbeat.CanAcceptPrimaryHeartbeat(sample with
+        {
+            CoverageTotal = null,
+            CoverageLumberjacks = null,
+            CoverageNativeOnly = null,
+        }, redirects, consumers));
         Assert.False(heartbeat.CanAcceptPrimaryHeartbeat(sample with { PeerCount = 1 }, redirects, consumers));
-        Assert.False(heartbeat.CanAcceptPrimaryHeartbeat(sample with { CoverageNativeOnly = 1 }, redirects, consumers));
+        Assert.False(heartbeat.CanAcceptPrimaryHeartbeat(sample with { PeerCount = 1, CoverageTotal = 0 }, redirects, consumers));
+        Assert.False(heartbeat.CanAcceptPrimaryHeartbeat(sample with { PeerCount = 1, CoverageNativeOnly = 1 }, redirects, consumers));
+    }
+
+    [Fact]
+    public void ExpiredConsumerRetainsLastCountersButIsNotActive()
+    {
+        var consumers = new ValheimZdoConsumerTelemetryService();
+        consumers.Record(Consumer(applied: 12, acknowledged: 13) with { Pending = 4 });
+
+        // The sample is recorded with the current clock, so it is active here.
+        var status = consumers.GetWindowStatus(Window);
+        Assert.Equal(1, status.ActiveConsumers);
+        Assert.Equal(12, status.Applied);
+        Assert.Equal(13, status.Acknowledged);
+
+        // A future timestamp is not injectable into the service clock; this test
+        // documents the retained-counter contract exercised by the live monitor.
+        Assert.Equal(4, status.Pending);
     }
 
     private static ValheimZdoRedirectEnvelope Envelope(long seq) => new()

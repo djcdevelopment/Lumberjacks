@@ -18,6 +18,10 @@ public sealed record ValheimZdoRedirectEnvelope
     public int? DataRev { get; init; }
     public int? Prefab { get; init; }
     public double[]? Pos { get; init; }
+    public string? PriorityTier { get; init; }
+    public int? PriorityRank { get; init; }
+    public string? PriorityReason { get; init; }
+    public double? DistanceMeters { get; init; }
     public string? BodyB64 { get; init; }
 }
 
@@ -114,7 +118,7 @@ public sealed class ValheimZdoRedirectService
     public IReadOnlyList<ValheimZdoRedirectEnvelope> Pending(string windowId, int limit)
     {
         return _windows.TryGetValue(windowId, out var window)
-            ? window.Pending(Math.Clamp(limit, 1, 256))
+            ? window.Pending(Math.Clamp(limit, 1, 1024))
             : Array.Empty<ValheimZdoRedirectEnvelope>();
     }
 
@@ -126,6 +130,45 @@ public sealed class ValheimZdoRedirectService
             return _windows.TryGetValue(windowId, out var window)
                 ? window.Acknowledge(sequences)
                 : new(0, sequences.Count);
+        }
+    }
+
+    /// <summary>
+    /// Rewrites the WAL from the current in-memory state. The replacement is
+    /// fsynced before an atomic rename, so a crash leaves either the old WAL or
+    /// the complete compacted WAL. This is intentionally explicit; callers
+    /// should run it only after measuring the source WAL and queue state.
+    /// </summary>
+    public long Compact()
+    {
+        if (_walPath is null) return 0;
+        lock (_persistenceGate)
+        {
+            var tempPath = _walPath + ".compact-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write,
+                           FileShare.None, 64 * 1024, FileOptions.WriteThrough))
+                {
+                    foreach (var pair in _windows.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+                        WriteWalEntry(stream, new RedirectWalEntry
+                        {
+                            Op = "snapshot",
+                            WindowId = pair.Key,
+                            Snapshot = pair.Value.ToSnapshot(),
+                        });
+                    stream.Flush(flushToDisk: true);
+                }
+
+                File.Move(tempPath, _walPath, overwrite: true);
+                return WalBytes;
+            }
+            catch
+            {
+                PersistenceHealthy = false;
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                throw;
+            }
         }
     }
 
@@ -156,22 +199,27 @@ public sealed class ValheimZdoRedirectService
         if (_walPath is null) return;
         try
         {
-            var payload = JsonSerializer.SerializeToUtf8Bytes(entry);
-            if (payload.Length > MaxWalEntryBytes)
-                throw new InvalidOperationException($"ZDO WAL entry is too large ({payload.Length} bytes)");
             using var stream = new FileStream(_walPath, FileMode.Append, FileAccess.Write, FileShare.Read,
                 bufferSize: 64 * 1024, FileOptions.WriteThrough);
-            Span<byte> length = stackalloc byte[4];
-            BitConverter.TryWriteBytes(length, payload.Length);
-            stream.Write(length);
-            stream.Write(payload);
-            stream.Flush(flushToDisk: true);
+            WriteWalEntry(stream, entry);
         }
         catch
         {
             PersistenceHealthy = false;
             throw;
         }
+    }
+
+    private static void WriteWalEntry(FileStream stream, RedirectWalEntry entry)
+    {
+        var payload = JsonSerializer.SerializeToUtf8Bytes(entry);
+        if (payload.Length > MaxWalEntryBytes)
+            throw new InvalidOperationException($"ZDO WAL entry is too large ({payload.Length} bytes)");
+        Span<byte> length = stackalloc byte[4];
+        BitConverter.TryWriteBytes(length, payload.Length);
+        stream.Write(length);
+        stream.Write(payload);
+        stream.Flush(flushToDisk: true);
     }
 
     private void ReplayWal()
@@ -221,6 +269,9 @@ public sealed class ValheimZdoRedirectService
             case "ack" when !string.IsNullOrWhiteSpace(entry.WindowId) && entry.Sequences is not null:
                 if (_windows.TryGetValue(entry.WindowId, out var window)) window.Acknowledge(entry.Sequences);
                 break;
+            case "snapshot" when !string.IsNullOrWhiteSpace(entry.WindowId) && entry.Snapshot is not null:
+                _windows[entry.WindowId] = ValheimZdoRedirectWindow.FromSnapshot(entry.Snapshot);
+                break;
             case "reset" when !string.IsNullOrWhiteSpace(entry.WindowId):
                 _windows.TryRemove(entry.WindowId, out _);
                 break;
@@ -240,7 +291,23 @@ public sealed class ValheimZdoRedirectService
         public List<ValheimZdoRedirectEnvelope>? Envelopes { get; init; }
         public long[]? Sequences { get; init; }
         public DateTime? ObservedUtc { get; init; }
+        public RedirectWalSnapshot? Snapshot { get; init; }
     }
+
+    private sealed record RedirectWalSnapshot(
+        long Receipts,
+        long Duplicates,
+        long Acknowledged,
+        long? MinSeq,
+        long? MaxSeq,
+        long EmptyBodyCount,
+        bool SeqTrackingSaturated,
+        DateTime? FirstUtc,
+        DateTime? LastUtc,
+        long[] DistinctSeq,
+        List<ValheimZdoRedirectEnvelope> Pending,
+        Dictionary<int, long> PerPrefab,
+        Dictionary<string, long> PerSource);
 
     private sealed class ValheimZdoRedirectWindow
     {
@@ -318,7 +385,15 @@ public sealed class ValheimZdoRedirectService
         {
             lock (_gate)
             {
-                return _pending.OrderBy(kv => kv.Key).Take(limit).Select(kv => kv.Value).ToList();
+                // Every envelope remains in the durable reliable queue. Priority only
+                // changes delivery order, carrying the proven FieldLab load-order tiers
+                // into the authoritative path while seq remains the deterministic tie-break.
+                return _pending.Values
+                    .OrderBy(envelope => envelope.PriorityRank ?? int.MaxValue)
+                    .ThenBy(envelope => envelope.DistanceMeters ?? double.MaxValue)
+                    .ThenBy(envelope => envelope.Seq)
+                    .Take(limit)
+                    .ToList();
             }
         }
 
@@ -365,6 +440,49 @@ public sealed class ValheimZdoRedirectService
                     _perPrefab.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
                     new Dictionary<string, long>(_perSource));
             }
+        }
+
+        public RedirectWalSnapshot ToSnapshot()
+        {
+            lock (_gate)
+            {
+                return new(
+                    _receipts,
+                    _duplicates,
+                    _acknowledged,
+                    _minSeq,
+                    _maxSeq,
+                    _emptyBodyCount,
+                    _seqTrackingSaturated,
+                    _firstUtc,
+                    _lastUtc,
+                    _distinctSeq.ToArray(),
+                    _pending.OrderBy(pair => pair.Key).Select(pair => pair.Value).ToList(),
+                    new Dictionary<int, long>(_perPrefab),
+                    new Dictionary<string, long>(_perSource));
+            }
+        }
+
+        public static ValheimZdoRedirectWindow FromSnapshot(RedirectWalSnapshot snapshot)
+        {
+            var window = new ValheimZdoRedirectWindow
+            {
+                _receipts = snapshot.Receipts,
+                _duplicates = snapshot.Duplicates,
+                _acknowledged = snapshot.Acknowledged,
+                _minSeq = snapshot.MinSeq,
+                _maxSeq = snapshot.MaxSeq,
+                _emptyBodyCount = snapshot.EmptyBodyCount,
+                _seqTrackingSaturated = snapshot.SeqTrackingSaturated,
+                _firstUtc = snapshot.FirstUtc,
+                _lastUtc = snapshot.LastUtc,
+            };
+            foreach (var seq in snapshot.DistinctSeq) window._distinctSeq.Add(seq);
+            foreach (var envelope in snapshot.Pending)
+                if (envelope.Seq is long seq) window._pending[seq] = envelope;
+            foreach (var pair in snapshot.PerPrefab) window._perPrefab[pair.Key] = pair.Value;
+            foreach (var pair in snapshot.PerSource) window._perSource[pair.Key] = pair.Value;
+            return window;
         }
 
         public static ValheimZdoRedirectWindowStatus Empty(string windowId) =>

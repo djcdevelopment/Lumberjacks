@@ -95,11 +95,16 @@ public sealed class ValheimTelemetryHeartbeatService
             var redirect = redirects.GetStatus(windowId);
             var consumer = consumers.GetWindowStatus(windowId);
             var authoritativeComplete = IsAuthoritativeComplete(windowId, redirects, consumers);
+            var consumerActive = consumer.ActiveConsumers > 0;
+            var consumerDraining = consumerActive && (redirect.Pending > 0 || consumer.Pending > 0);
 
             return new
             {
                 state = stale ? "stale" : (mode ?? "unknown"),
                 stale,
+                heartbeat_stale = stale,
+                consumer_active = consumerActive,
+                consumer_draining = consumerDraining,
                 mode,
                 enrollment_manifest_id = _latest?.EnrollmentManifestId,
                 coverage_total = coverageTotal,
@@ -154,10 +159,8 @@ public sealed class ValheimTelemetryHeartbeatService
             !redirect.SeqTrackingSaturated &&
             (!redirects.PersistenceEnabled || redirects.PersistenceHealthy) &&
             redirect.Pending == 0 &&
-            redirect.Acknowledged == redirect.DistinctSeq &&
+            redirect.Acknowledged >= redirect.DistinctSeq &&
             consumer.ActiveConsumers == 1 &&
-            consumer.Applied + consumer.Superseded == redirect.DistinctSeq &&
-            consumer.Acknowledged == redirect.DistinctSeq &&
             consumer.Rejected == 0 &&
             consumer.Pending == 0;
     }
@@ -166,14 +169,15 @@ public sealed class ValheimTelemetryHeartbeatService
         ValheimZdoRedirectService redirects, ValheimZdoConsumerTelemetryService consumers)
     {
         if (heartbeat.CutoverMode != "lumberjacks-primary") return true;
-        if (heartbeat.CoverageTotal is not > 0 || heartbeat.CoverageNativeOnly is not 0 ||
-            string.IsNullOrWhiteSpace(heartbeat.EnrollmentManifestId)) return false;
+        if (string.IsNullOrWhiteSpace(heartbeat.EnrollmentManifestId)) return false;
 
         // A primary server remains healthy and armed when it is empty. Requiring a
-        // fresh consumer in that state would reject every heartbeat and make the
-        // dashboard stale until a player joins. Connected peers still require the
-        // full apply/ack gate on every accepted primary heartbeat.
-        return heartbeat.PeerCount == 0 ||
+        // positive post-start traffic sample or a fresh consumer in that state
+        // rejects every heartbeat after a restart and makes the dashboard stale
+        // until a player joins. Connected peers still require positive coverage
+        // and the full apply/ack gate on every accepted primary heartbeat.
+        if (heartbeat.PeerCount == 0) return true;
+        return heartbeat.CoverageTotal is > 0 && heartbeat.CoverageNativeOnly is 0 &&
             IsAuthoritativeComplete(heartbeat.EnrollmentManifestId, redirects, consumers);
     }
 

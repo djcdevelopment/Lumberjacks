@@ -57,6 +57,23 @@ public static class ValheimZdoRedirectEndpoints
             return Results.Ok(ToResponse(status));
         });
 
+        group.MapPost("/compact", (ValheimZdoRedirectService redirects) =>
+        {
+            var before = redirects.WalBytes;
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            var after = redirects.Compact();
+            started.Stop();
+            return Results.Ok(new
+            {
+                ok = true,
+                before_bytes = before,
+                after_bytes = after,
+                reduction_bytes = before - after,
+                reduction_percent = before == 0 ? 0 : 100d * (before - after) / before,
+                duration_ms = started.Elapsed.TotalMilliseconds,
+            });
+        });
+
         group.MapGet("/pending/{windowId}", (string windowId, int? limit, ValheimZdoRedirectService redirects) =>
             Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) }));
 

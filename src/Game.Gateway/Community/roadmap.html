@@ -349,7 +349,7 @@
       <div class="headline">ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-15T23:40:00-07:00</span>
+        <span>Updated 2026-07-15T23:50:00-07:00</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260715T234000-comfy-runtime-freeze">
+        <div class="journal"><article class="journal-entry" id="note-20260715T235000-gateway-runtime-freeze">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-15T23:50:00-07:00">2026-07-15T23:50:00-07:00</time>
+        <span class="pill note-kind">implementation</span>
+        <span>Lumberjacks</span>
+        <span>M0</span>
+      </div>
+      <h3>Freeze Gateway authoritative runtime and pilot enrollment</h3>
+      <p><strong>Impact:</strong> Captured the tested Gateway queue, priority ordering, retained telemetry, enrollment, client-access middleware, and dashboard liveness lineage as one-owner release code; volunteer admission and durable per-run proof remain gated by M1 and M3.</p>
+      <details><summary>Verification (3)</summary><ul><li>Docker .NET 9 SDK test run passed all 46 Game.Gateway.Tests tests; host .NET 8 is retained and does not claim a net9 build.</li><li>Sanitized the enrollment test to use a synthetic Steam identity and found no Steam identity in the staged diff.</li><li>Current relaxed completion and broad pilot access are recorded as known M3/M1 boundaries, not volunteer readiness.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>Lumberjacks Gateway runtime commit staged below</code> <code>Comfy runtime commit 26bb55b</code></div>
+      <div class="containing-commit">Recorded by Codex · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260715T234000-comfy-runtime-freeze">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">

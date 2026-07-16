@@ -21,6 +21,7 @@ builder.Services.AddSingleton<ValheimZdoConsumerTelemetryService>();
 builder.Services.AddSingleton<ValheimZdoInjectionService>();
 builder.Services.AddSingleton<ValheimHandshakeService>();
 builder.Services.AddSingleton<ValheimTelemetryHeartbeatService>();
+builder.Services.AddSingleton<SteamEnrollmentService>();
 
 // Simulation services (in-process — eliminates HTTP-per-move hop)
 builder.Services.AddSingleton<WorldState>();
@@ -70,6 +71,7 @@ catch (Exception ex)
 }
 
 app.MapServiceDefaults();
+app.UseMiddleware<ValheimClientAccessMiddleware>();
 app.UseWebSockets();
 app.UseMiddleware<GameWebSocketMiddleware>();
 
@@ -85,6 +87,7 @@ Game.Simulation.Endpoints.TelemetryV0Endpoints.Map(app);
 Game.Gateway.Endpoints.TelemetryV0SessionsEndpoints.Map(app);
 Game.Gateway.Endpoints.DeploymentTelemetryEndpoints.Map(app);
 Game.Gateway.Endpoints.CommunityViewEndpoints.Map(app);
+Game.Gateway.Endpoints.RoadmapViewEndpoints.Map(app);
 // G3/G4/G5 UI first pass (community-telemetry-strategy.md, docs/ui/g3-g4-g5-first-pass.md):
 // siblings of /community. G3 is live v0 data; G4/G5 are first-pass mockups with sample data /
 // simulated actions behind visible banners — see each endpoint's doc comment.
@@ -96,5 +99,6 @@ ValheimZdoRedirectEndpoints.Map(app);
 ValheimZdoInjectionEndpoints.Map(app);
 ValheimHandshakeEndpoints.Map(app);
 ValheimTelemetryHeartbeatEndpoints.Map(app);
+SteamEnrollmentEndpoints.Map(app);
 
 app.Run();

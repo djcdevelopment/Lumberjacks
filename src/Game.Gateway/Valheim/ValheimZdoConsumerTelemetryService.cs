@@ -48,18 +48,27 @@ public sealed class ValheimZdoConsumerTelemetryService
         var active = _samples.Values
             .Where(sample => sample.Heartbeat.WindowId == windowId && now - sample.SeenAt <= StaleAfter)
             .ToList();
+        var matching = _samples.Values
+            .Where(sample => sample.Heartbeat.WindowId == windowId)
+            .ToList();
+        // Preserve the last observed counters when a consumer heartbeat expires.
+        // ActiveConsumers remains zero, so callers cannot mistake retained data
+        // for a live consumer, but operators can still see the terminal counts.
+        var counted = active.Count > 0
+            ? active
+            : matching.OrderByDescending(sample => sample.SeenAt).Take(1).ToList();
 
         return new(
             windowId,
             active.Count,
-            active.Sum(sample => sample.Heartbeat.Applied),
-            active.Sum(sample => sample.Heartbeat.Superseded),
-            active.Sum(sample => sample.Heartbeat.Acknowledged),
-            active.Sum(sample => sample.Heartbeat.Rejected),
-            active.Sum(sample => sample.Heartbeat.Duplicates),
-            active.Sum(sample => sample.Heartbeat.Retried),
-            active.Sum(sample => sample.Heartbeat.Pending),
-            active.Count == 0 ? null : active.Max(sample => sample.SeenAt));
+            counted.Sum(sample => sample.Heartbeat.Applied),
+            counted.Sum(sample => sample.Heartbeat.Superseded),
+            counted.Sum(sample => sample.Heartbeat.Acknowledged),
+            counted.Sum(sample => sample.Heartbeat.Rejected),
+            counted.Sum(sample => sample.Heartbeat.Duplicates),
+            counted.Sum(sample => sample.Heartbeat.Retried),
+            counted.Sum(sample => sample.Heartbeat.Pending),
+            matching.Count == 0 ? null : matching.Max(sample => sample.SeenAt));
     }
 
     public object Snapshot(string windowId)
