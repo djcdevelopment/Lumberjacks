@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-16T00:15:00-07:00",
+  "updated_at": "2026-07-16T01:15:00-07:00",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M0",
@@ -185,8 +185,8 @@
     }
   ],
   "current_focus": [
-    "ACTIVE CHECKPOINT · M0/A1 SOURCE FREEZE — Inventory every dirty Lumberjacks and Comfy file, classify it as release-required, later work, or unrelated preserved work, then create coherent release commits with roadmap journal notes.",
-    "THEN · M0/A2 CLEAN REBUILD — Build the Gateway image and mod DLL exactly once from clean tagged checkouts; run tests and compare source, artifact, and runtime identities with an explicit match or mismatch verdict.",
+    "COMPLETE · M0/A1 SOURCE FREEZE — Release-required runtime and operator surfaces are committed; the identity-bearing historical Comfy dashboard remains deliberately preserved outside the release.",
+    "ACTIVE CHECKPOINT · M0/A2 CLEAN REBUILD — Candidate builds exist from clean tagged checkouts. The Gateway candidate is healthy, but the clean mod PE hash differs from the historical runtime despite identical IL; investigate reproducible PE identity before promotion.",
     "THEN · M0/A3-A5 RELEASE PROOF — Complete manifest v2 and the FieldLab catalog, scan the tracked tree and package, run the GCP cold-start and artifact-based rollback drill, and publish immutable evidence hashes. No gameplay is required for these steps.",
     "NEXT · M1 — Make the actual joining account, enrollment, release, readiness lease, one-seat capacity, least-privilege credentials, and TLS authoritative for strict admission.",
     "AFTER M1 · PARALLEL — Build M2's reversible guest package, M3's seal-before-reset per-run ledger and retained dashboards, and M4a's recipient isolation and producer loss safety.",
