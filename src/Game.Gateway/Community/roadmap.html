@@ -349,7 +349,7 @@
       <div class="headline">ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-16T01:30:00-07:00</span>
+        <span>Updated 2026-07-16T01:45:00-07:00</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -364,7 +364,7 @@
           <article class="truth-card proved"><h3>Proved now</h3><p>One enrolled client closed the complete observed all-prefab ZDO window through Lumberjacks priority delivery with exact durable accounting.</p><p><a href="#proof">See the validated result ↓</a></p></article>
           <article class="truth-card not-yet"><h3>Not proved yet</h3><ul><li>Safe public credential transport and authoritative admission.</li><li>A clean no-hand-edit package for a non-developer.</li><li>Per-session and per-recipient retained proof.</li><li>Two simultaneous consumers with isolated pending and ACK state.</li><li>Lumberjacks-owned candidate relevance, simulation, or non-ZDO RPCs.</li></ul></article>
         </div>
-        <div class="truth-card" style="margin-top:16px"><h3 style="color:var(--blue)">Next actions</h3><ul class="focus-list"><li>COMPLETE · M0/A1 SOURCE FREEZE — Release-required runtime and operator surfaces are committed; the identity-bearing historical Comfy dashboard remains deliberately preserved outside the release.</li><li>ACTIVE CHECKPOINT · M0/A2 CLEAN REBUILD — Candidate builds exist from clean tagged checkouts. The Gateway candidate is healthy, but the clean mod PE hash differs from the historical runtime despite identical IL; investigate reproducible PE identity before promotion.</li><li>THEN · M0/A3-A5 RELEASE PROOF — Complete manifest v2 and the FieldLab catalog, scan the tracked tree and package, run the GCP cold-start and artifact-based rollback drill, and publish immutable evidence hashes. No gameplay is required for these steps.</li><li>NEXT · M1 — Make the actual joining account, enrollment, release, readiness lease, one-seat capacity, least-privilege credentials, and TLS authoritative for strict admission.</li><li>AFTER M1 · PARALLEL — Build M2&#39;s reversible guest package, M3&#39;s seal-before-reset per-run ledger and retained dashboards, and M4a&#39;s recipient isolation and producer loss safety.</li><li>WIDEN ONLY AFTER · M4b + M5 — Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort.</li></ul></div>
+        <div class="truth-card" style="margin-top:16px"><h3 style="color:var(--blue)">Next actions</h3><ul class="focus-list"><li>COMPLETE · M0/A1 SOURCE FREEZE — Release-required runtime and operator surfaces are committed; the identity-bearing historical Comfy dashboard remains deliberately preserved outside the release.</li><li>ACTIVE CHECKPOINT · M0/A2 CLEAN REBUILD — Candidate r2 is reproducible from clean tagged checkouts with pinned CI/deterministic flags. Its mod PE hash intentionally differs from the historical runtime despite identical IL; it is not promoted until packaged and reviewed.</li><li>THEN · M0/A3-A5 RELEASE PROOF — Complete the immutable package and manifest, scan the tracked tree and archive, run the GCP cold-start and artifact-based rollback drill, and publish immutable evidence hashes. No gameplay is required for these steps.</li><li>NEXT · M1 — Make the actual joining account, enrollment, release, readiness lease, one-seat capacity, least-privilege credentials, and TLS authoritative for strict admission.</li><li>AFTER M1 · PARALLEL — Build M2&#39;s reversible guest package, M3&#39;s seal-before-reset per-run ledger and retained dashboards, and M4a&#39;s recipient isolation and producer loss safety.</li><li>WIDEN ONLY AFTER · M4b + M5 — Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort.</li></ul></div>
         <article class="primer">
           <div class="primer-head"><h3>What is being replaced in this test?</h3><p>Valheim still decides which world-object revisions a player should receive. The server mod redirects those eligible revisions through Lumberjacks, the Gateway stores and leases them, and the enrolled client mod applies them on Unity&#39;s main thread before acknowledging a terminal outcome.</p></div>
           <div class="denominator"><strong>The exact denominator</strong>100% means 83,220 of 83,220 eligible ZDO revisions observed in the declared strict one-client window closed through Lumberjacks, with zero eligible native ZDO sends. It does not mean 100% of Valheim networking.</div>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260716T013000-reproducible-build-flags">
+        <div class="journal"><article class="journal-entry" id="note-20260716T014500-m0-reproducible-candidate-r2">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-16T01:45:00-07:00">2026-07-16T01:45:00-07:00</time>
+        <span class="pill note-kind">implementation</span>
+        <span>Lumberjacks + Comfy</span>
+        <span>M0</span>
+      </div>
+      <h3>Record reproducible M0 candidate r2</h3>
+      <p><strong>Impact:</strong> Clean tagged checkouts now produce a repeatable mod candidate and Gateway image under pinned deterministic build flags; the candidate is deliberately not promoted over the historical runtime until the release package and rollback drill pass.</p>
+      <details><summary>Verification (3)</summary><ul><li>Two clean Comfy builds produced identical SHA-256 94a3843e...0ba3a8; Gateway candidate image is 141bd9e5...e86fb.</li><li>Clean Gateway tests passed 46/46 and the candidate image passed a local dependency-backed /health smoke.</li><li>Candidate r2 records all eleven Valheim/BepInEx assembly hashes and both repository commits; no GCP mutation occurred.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>docs/roadmap/m0-clean-build-candidate-r2.json</code> <code>Comfy commit b32bb5e</code> <code>Lumberjacks commit a7c47b5</code></div>
+      <div class="containing-commit">Recorded by Codex · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260716T013000-reproducible-build-flags">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">

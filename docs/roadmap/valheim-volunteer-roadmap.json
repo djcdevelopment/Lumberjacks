@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-16T01:30:00-07:00",
+  "updated_at": "2026-07-16T01:45:00-07:00",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M0",
@@ -186,8 +186,8 @@
   ],
   "current_focus": [
     "COMPLETE · M0/A1 SOURCE FREEZE — Release-required runtime and operator surfaces are committed; the identity-bearing historical Comfy dashboard remains deliberately preserved outside the release.",
-    "ACTIVE CHECKPOINT · M0/A2 CLEAN REBUILD — Candidate builds exist from clean tagged checkouts. The Gateway candidate is healthy, but the clean mod PE hash differs from the historical runtime despite identical IL; investigate reproducible PE identity before promotion.",
-    "THEN · M0/A3-A5 RELEASE PROOF — Complete manifest v2 and the FieldLab catalog, scan the tracked tree and package, run the GCP cold-start and artifact-based rollback drill, and publish immutable evidence hashes. No gameplay is required for these steps.",
+    "ACTIVE CHECKPOINT · M0/A2 CLEAN REBUILD — Candidate r2 is reproducible from clean tagged checkouts with pinned CI/deterministic flags. Its mod PE hash intentionally differs from the historical runtime despite identical IL; it is not promoted until packaged and reviewed.",
+    "THEN · M0/A3-A5 RELEASE PROOF — Complete the immutable package and manifest, scan the tracked tree and archive, run the GCP cold-start and artifact-based rollback drill, and publish immutable evidence hashes. No gameplay is required for these steps.",
     "NEXT · M1 — Make the actual joining account, enrollment, release, readiness lease, one-seat capacity, least-privilege credentials, and TLS authoritative for strict admission.",
     "AFTER M1 · PARALLEL — Build M2's reversible guest package, M3's seal-before-reset per-run ledger and retained dashboards, and M4a's recipient isolation and producer loss safety.",
     "WIDEN ONLY AFTER · M4b + M5 — Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort."
