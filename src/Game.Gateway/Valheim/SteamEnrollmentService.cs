@@ -256,9 +256,68 @@ public sealed class SteamEnrollmentService
             }
             _invites[Hash(rawToken)] = new Invite(Hash(rawToken), invite.CreatedUtc, invite.ExpiresUtc, invite.Used, enrollmentId);
         }
+        var collapsed = CollapseDuplicateSteamIds();
         Save();
-        Audit("store_migrated_v1", new { invites = _invites.Count, enrollments = _enrollments.Count });
+        // Audited only once the collapse is on disk, matching Revoke.
+        foreach (var (enrollment, survivorId) in collapsed)
+        {
+            Audit("enrollment_revoked", new
+            {
+                enrollment_id = enrollment.EnrollmentId,
+                steam_id = enrollment.SteamId,
+                reason = SupersededByMigration,
+                superseded_by = survivorId,
+            });
+        }
+        Audit("store_migrated_v1", new
+        {
+            invites = _invites.Count,
+            enrollments = _enrollments.Count,
+            collapsed = collapsed.Count,
+        });
     }
+
+    /// <summary>
+    /// v1 had no one-active-enrollment-per-SteamID rule, so its store can hold
+    /// several redeemed invites for the same player. Migrating them all as active
+    /// would seed a v2 roster that violates the invariant <see cref="RedeemLocked"/>
+    /// enforces on every redeem. The newest enrollment wins: it is the one the
+    /// player most recently proved they wanted, and it matches what an admin doing
+    /// the replacement by hand would have done.
+    /// </summary>
+    List<(Enrollment Superseded, string SurvivorId)> CollapseDuplicateSteamIds()
+    {
+        var collapsed = new List<(Enrollment, string)>();
+        // Materialized before the loop mutates _enrollments.
+        var duplicates = _enrollments.Values
+            .Where(item => item.Status == EnrollmentStatus.Active)
+            .GroupBy(item => item.SteamId, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .ToList();
+        foreach (var group in duplicates)
+        {
+            // Ties on EnrolledUtc break on id so the survivor never depends on
+            // the order the v1 dictionary happened to deserialize in.
+            var ordered = group
+                .OrderByDescending(item => item.EnrolledUtc)
+                .ThenByDescending(item => item.EnrollmentId, StringComparer.Ordinal)
+                .ToList();
+            var survivor = ordered[0];
+            foreach (var enrollment in ordered.Skip(1))
+            {
+                _enrollments[enrollment.EnrollmentId] = enrollment with
+                {
+                    Status = EnrollmentStatus.Revoked,
+                    RevokedUtc = DateTimeOffset.UtcNow,
+                    RevokedReason = SupersededByMigration,
+                };
+                collapsed.Add((enrollment, survivor.EnrollmentId));
+            }
+        }
+        return collapsed;
+    }
+
+    public const string SupersededByMigration = "superseded_by_migration";
 
     static readonly JsonSerializerOptions SerializerOptions = new()
     {
