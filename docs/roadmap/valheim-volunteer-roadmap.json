@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-16T14:17:15.576Z",
+  "updated_at": "2026-07-16T14:23:37.263Z",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M0",
@@ -779,8 +779,8 @@
       ]
     ],
     "publication": {
-      "status": "local_pending_m0",
-      "detail": "The sanitized publication set is staged at Comfy revision 433f1cc (tracked, hash-bound, and secret-scan clean); it becomes public closing evidence when pushed and linked immutably after the A4 drill passes."
+      "status": "published",
+      "detail": "The sanitized publication set is public and immutable at https://github.com/djcdevelopment/comfy/blob/433f1cc33605561ae1287db9cd8f37125d795c5d/fieldlab/evidence/p7-gold-run-20260716-011112-authoritative-priority-cutover/PUBLICATION.md — pushed 2026-07-16 after the A4 promotion drill passed (receipt: docs/roadmap/m0-a4-promotion-drill-receipt.json, evidence public at Comfy e6a1402). Published bytes re-verified against the recorded SHA-256 hashes after push."
     }
   },
   "authority_planes": [
