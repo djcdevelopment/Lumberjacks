@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-16T16:43:36.981Z",
+  "updated_at": "2026-07-16T19:12:52.149Z",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M1",
@@ -188,7 +188,7 @@
   "current_focus": [
     "COMPLETE · M0 RELEASE FREEZE — A1–A5 closed 2026-07-16: source frozen, candidate r2 reproducible from clean tagged checkouts, sanitized bundle and FieldLab catalog committed, promotion drill passed with artifact-only rollback, and the golden-proof evidence set published immutably with byte-verified hashes.",
     "COMPLETE · PROMOTION FINALIZED — The r2 release runs on P7 under a durable image pin: the temporary compose override is retired, the base compose resolves LUMBERJACKS_GATEWAY_IMAGE from the host environment across reboots, and VM-side gateway rebuilds fail closed.",
-    "ACTIVE · M1 — Make the actual joining Steam account, enrollment (list, revoke, expiry, unique-active), least-privilege capability split, fresh readiness leases, the one-seat reservation, and certificate-validating TLS authoritative for strict admission; admission fails closed when its authority is unavailable.",
+    "ACTIVE · M1 — Enrollment identity, the least-privilege capability split, the one-seat reservation, and a strict-admission roster gate keyed on the actual joining Steam account are built and awaiting the next Gateway release cut; the roster gate ships disabled and stays opt-in per window until an operator enables it, because a roster miss refuses a join. Remaining: a fresh readiness lease, which nothing yet issues; certificate-validating TLS, blocked on a stable public DNS name; and fail-closed admission when the authority is unavailable, which needs the next mod release.",
     "AFTER M1 · PARALLEL — Build M2's reversible guest package, M3's seal-before-reset per-run ledger and retained dashboards, and M4a's recipient isolation and producer loss safety.",
     "WIDEN ONLY AFTER · M4b + M5 — Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort."
   ],
