@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-16T02:00:00-07:00",
+  "updated_at": "2026-07-16T03:20:00-07:00",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M0",
@@ -187,8 +187,8 @@
   "current_focus": [
     "COMPLETE · M0/A1 SOURCE FREEZE — Release-required runtime and operator surfaces are committed; the identity-bearing historical Comfy dashboard remains deliberately preserved outside the release.",
     "COMPLETE · M0/A2 CLEAN CANDIDATE — Candidate r2 is reproducible from clean tagged checkouts with pinned CI/deterministic flags; its mod PE hash intentionally differs from the historical runtime despite identical IL, so the historical artifact remains rollback-only.",
-    "ACTIVE CHECKPOINT · M0/A3 RELEASE BUNDLE — The local bundle contains the candidate manifest, mod DLL, OCI Gateway archive, source/build inputs, and validated hashes. Next: publish the sanitized bundle receipt and prepare the no-build snapshot/rollback drill.",
-    "THEN · M0/A4-A5 PROMOTION PROOF — Snapshot the world/config, load artifacts without rebuilding, verify readiness and runtime identities, exercise rollback and restoration, then publish immutable hashes. No volunteer gameplay is required.",
+    "COMPLETE · M0/A3 RELEASE BUNDLE — The r2 bundle re-validated clean, the sanitized bundle receipt is committed at docs/roadmap/m0-a3-release-bundle-receipt.json, and the FieldLab catalog classifies all 125 runs (1 gold, 17 negative, 37 superseded, 70 historical) with a clean secret scan.",
+    "ACTIVE CHECKPOINT · M0/A4 PROMOTION PROOF — Snapshot the world/config, cold-start the exact manifest-tied release from bundle artifacts without rebuilding, verify readiness and runtime identities, exercise rollback and restoration. The drill runbook is prepared; execution is a scheduled GCP mutation. Then A5 publishes immutable hashes.",
     "NEXT · M1 — Make the actual joining account, enrollment, release, readiness lease, one-seat capacity, least-privilege credentials, and TLS authoritative for strict admission.",
     "AFTER M1 · PARALLEL — Build M2's reversible guest package, M3's seal-before-reset per-run ledger and retained dashboards, and M4a's recipient isolation and producer loss safety.",
     "WIDEN ONLY AFTER · M4b + M5 — Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort."
