@@ -40,19 +40,47 @@ public sealed class ValheimHandshakeSeatTests
     }
 
     [Fact]
-    public void SameUid_RehandshakingDoesNotCompeteWithItself()
+    public void SameUid_IsRejectedByTheDuplicateGate_NotTheSeatGate()
     {
         var now = T0;
         var service = new ValheimHandshakeService(nowUtc: () => now);
         Assert.True(service.SubmitPeerInfo(Window, Submission("c1", HolderUid)).Result!.Accept);
 
-        // The duplicate gate (G) owns "you are already connected"; the seat gate must not shadow it
-        // with a capacity answer, or the reason surfaced to the operator would be a lie.
+        // Gate G owns "you are already connected" and fires first, so the seat gate never sees a
+        // holder re-handshaking — its own-uid guard is unreachable while G stands. This asserts the
+        // reason surfaced is G's and not a capacity answer, which would be a lie to the operator.
         now = T0.AddSeconds(5);
         var again = service.SubmitPeerInfo(Window, Submission("c2", HolderUid)).Result!;
 
         Assert.Equal((int)ValheimConnectionStatus.ErrorAlreadyConnected, again.ErrorCode);
         Assert.Equal("duplicate", again.FailedCheck);
+    }
+
+    [Fact]
+    public void SeatCapacityAboveOne_IsRefused_RatherThanSilentlyMiscounted()
+    {
+        var service = new ValheimHandshakeService();
+
+        // Window-scoped liveness cannot attribute a poll to a holder, so at N>1 a single live
+        // consumer would vouch for N-1 departed players. Refusing the config beats honouring a
+        // number the model cannot enforce.
+        var configured = service.Configure(Window, new ValheimHandshakeServerContext
+        {
+            SeatCapacity = 2,
+        });
+
+        Assert.False(configured.Ok);
+        Assert.Contains("seat_capacity", configured.Error);
+    }
+
+    [Fact]
+    public void ImplausibleLease_IsRefused()
+    {
+        var service = new ValheimHandshakeService();
+        Assert.False(service.Configure(Window, new ValheimHandshakeServerContext
+        {
+            SeatLeaseSeconds = 0,
+        }).Ok);
     }
 
     [Fact]

@@ -254,6 +254,15 @@ public sealed class ValheimHandshakeService
             return "max_players must be 1..1000";
         if (context.CurrentPlayers is < 0 or > 100_000)
             return "current_players out of range";
+        // Refused rather than clamped: the seat gate's liveness is window-scoped, so it can tell
+        // that SOMEONE is consuming but not WHICH holder. That is exactly enough for one seat and
+        // incoherent for more — an N-seat window would let a single live consumer vouch for N
+        // departed players. Honouring the number would be a silent correctness bug; N seats need
+        // per-holder liveness, which needs the stage-3 identity (plan §5.4).
+        if (context.SeatCapacity is < 0 or > 1)
+            return "seat_capacity must be 0 (disabled) or 1; N-seat windows need per-holder liveness";
+        if (context.SeatLeaseSeconds is < 1 or > 86_400)
+            return "seat_lease_seconds must be 1..86400";
         return null;
     }
 
@@ -440,28 +449,30 @@ public sealed class ValheimHandshakeService
             var lease = TimeSpan.FromSeconds(Math.Max(1, _context.SeatLeaseSeconds));
             var activityIsLive = lastActivityUtc is DateTime seen && nowUtc - seen < lease;
 
-            var held = 0;
             foreach (var (holder, grantedUtc) in _seats)
             {
+                // Not reachable while gate G stands: a uid in _seats is always in _connectedUids
+                // (both are set on the same accept), so a re-handshake is rejected as a duplicate
+                // long before check H. Kept as a guard, not a feature — if G ever stops owning that
+                // case, the seat gate must not tell a player their own seat is taken.
                 if (holder == uid)
-                    return false; // already ours — a re-handshake refreshes rather than competes
+                    return false;
                 if (activityIsLive || nowUtc - grantedUtc < lease)
-                    held++;
+                    return true; // SeatCapacity is validated to 0..1, so one live holder is enough
             }
-            return held >= _context.SeatCapacity;
+            return false;
         }
 
         private void TakeSeat(long uid, DateTime nowUtc)
         {
             if (_context.SeatCapacity <= 0)
                 return;
-            // Drop leases that lapsed before recording ours, so the dictionary tracks the seats
-            // actually held rather than every uid ever admitted (the bug _connectedUids has).
-            var lease = TimeSpan.FromSeconds(Math.Max(1, _context.SeatLeaseSeconds));
-            var stale = _seats.Where(kv => kv.Key != uid && nowUtc - kv.Value >= lease)
-                .Select(kv => kv.Key).ToList();
-            foreach (var lapsed in stale)
-                _seats.Remove(lapsed);
+            // Reaching here means SeatUnavailableFor found no live holder, so any surviving entry
+            // has lapsed by definition and clearing is safe. Doing it this way keeps ONE liveness
+            // rule in the class: an earlier revision re-derived staleness here from grant age alone
+            // while the gate counted grant age OR activity, so a live holder could be purged by the
+            // very join their own liveness should have blocked.
+            _seats.Clear();
             _seats[uid] = nowUtc;
         }
 

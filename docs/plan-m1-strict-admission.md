@@ -81,13 +81,13 @@ drills/rebuilds don't burn issuance rate limits.
    re-scoped 2026-07-16: the roster gate is **not buildable Gateway-only**, because
    the frozen mod sends no Steam identity (§5.3). Ships live: the one-seat
    reservation as pure capacity (a seat needs a count, not a name), actionable
-   reason codes, retained rejection records, seat lease + passive TTL. Built behind
-   a flag, unreachable live: the roster lookup and readiness lease, carrying an
-   optional SteamID64 the frozen mod never populates. The release-compatibility
-   gate is **not** built dark — it is a string compare whose expected-value source
-   is itself deferred (§5.9), so it rides stage 3 whole. Verify with synthetic
-   handshake tests covering the full Gate M1 accept/reject matrix (§4) — dark rows
-   included, so stage 3 only has to add the wire field and flip the flag.
+   reason codes, retained rejection records, seat lease + passive TTL — all landed
+   `cd78296`, see §7. Intended to be built behind a flag, unreachable live: the
+   roster lookup and readiness lease. **The dark gates are not built** — §7 records
+   why the matrix has to be re-homed to its real surfaces first, and that nothing
+   in the system issues a readiness lease to gate on. The release-compatibility
+   gate is **not** built dark either — it is a string compare whose expected-value
+   source is itself deferred (§5.9), so it rides stage 3 whole.
    **Stage 2 delivers no live identity gating: strict admission does not exist
    until stage 3.**
 3. **Mod cut: authenticated identity + fail-closed strict mode + TLS +
@@ -266,3 +266,57 @@ free; the shape of a *reject* is not.
 - **`window_id` stability is a config accident.** It comes from mod config
   (`HandshakeResponderRunner.cs:64-67`); unset it regenerates per boot as
   `i5-<timestamp>`, set it is stable across restarts. Do not assume either.
+
+## 7. Stage 2 build status — 2026-07-16
+
+Built and committed (`cd78296`), **not deployed** — rides the next Gateway cut.
+Full solution green: 458 tests, 0 failures (Gateway 92 = 81 baseline + 11 new).
+
+**Shipped live.** The seat gate (`capacity_reserved`), as check **H** — after all six
+native checks, so a client vanilla would reject still gets vanilla's code and label.
+Seat state is in-memory in `Window` under the existing lock, expiring passively.
+`ValheimWindowActivityService` supplies liveness from consumer poll/ack (§5.4).
+Rejection records and per-code counters already existed and needed no work.
+
+**Decisions taken while Derek slept** — each is cheap to reverse, none are load-bearing
+on anything deployed:
+
+- *Reason codes ride `failed_check`; no new response field.* The plan allowed additive
+  fields (§6) and the mod's regex parser makes them safe, but `failed_check` already
+  carries the label the mod logs to the server log, which is exactly where an operator
+  wants it. A parallel `reason_code` would have duplicated it for no reader. Native
+  gates keep their six contract labels; only Lumberjacks gates use plan reason codes.
+- *`SeatCapacity` defaults to 1, so an unconfigured window enforces one seat.* The
+  window that materialises on first contact is the live path (that is how Derek's
+  2026-07-16 join was gated), so a default of 0 would have shipped the gate switched
+  off. One seat is the platform's actual intent, not a placeholder.
+- *`SeatLeaseSeconds` defaults to 60.* See the field's own comment for the reasoning.
+- *Time is injected* (`Func<DateTime>`) rather than read from `DateTime.UtcNow`, because
+  lease expiry is untestable otherwise and this codebase has no clock abstraction.
+- *Verified by mutation, not by green.* Stubbing the gate fails exactly the 3 tests
+  asserting a reject; forcing liveness never to expire fails exactly the 4 asserting
+  expiry. 6 of 11 are mutation-sensitive; the other 5 are regression guards against
+  over-rejecting, and a mutation that would prove them is still owed.
+
+**Deliberately NOT built — needs a decision, not a guess.** The `2-dark` rows. Reading
+the matrix against the actual surfaces, it conflates three of them, and the conflation
+has to be resolved before the code can be:
+
+- `not_enrolled` / `enrollment_revoked` are genuine handshake-gate rows and are the only
+  two that a dark roster gate could actually answer.
+- `steamid_mismatch` is not a handshake row at all. It means a *credential* belongs to
+  another account — but the handshake carries no credential, only a client-asserted
+  packet. Keyed by SteamID64, a mismatch is indistinguishable from `not_enrolled`.
+- `invite_consumed` is an enrollment-endpoint row (replay of a used invite), already
+  enforced there; the handshake never sees an invite.
+- `lease_stale` cannot be built because **nothing issues a readiness lease**. No
+  endpoint, no record, no field. The plan names it as a stage-2 deliverable but never
+  says who mints one, what it attests, or how long it lives. Inventing that overnight
+  would have hard-coded an identity model into the gate that stage 3 then has to live
+  with.
+
+**Open for Derek.** (1) What is a readiness lease — who issues it, what does it attest,
+what TTL? (2) Should the matrix rows above be re-homed to their real surfaces, so §4
+stops implying the handshake gate owns checks it cannot see? (3) The seat gate is live
+for *unconfigured* windows by default — confirm that is wanted before the cut, since it
+changes behaviour for any window an operator never configured.
