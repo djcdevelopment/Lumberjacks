@@ -26,9 +26,16 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Republishes /roadmap by copying the generated asset into the host directory — no image
+    # rebuild, no restart. Mount the directory, not the file: a bind-mounted file pins an
+    # inode, so a replacing copy would never be seen. An empty mount falls back to the
+    # copy baked into the image.
+    volumes:
+      - /mnt/lumberjacks/roadmap:/srv/roadmap:ro
     environment:
       <<: *telemetry
       OTEL_SERVICE_NAME: lumberjacks-gateway
+      LUMBERJACKS_ROADMAP_HTML: /srv/roadmap/roadmap.html
 
   eventlog:
     ports: !override

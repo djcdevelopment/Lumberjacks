@@ -68,3 +68,33 @@ npm run roadmap:render
 ```
 
 The renderer uses Node built-ins only and does not access the network.
+
+## Republish `/roadmap` without a release
+
+The Gateway re-reads the asset per request behind an mtime-and-length cache, and
+`LUMBERJACKS_ROADMAP_HTML` relocates it, so a rendered page reaches P7 by copying one
+file — no image rebuild, no restart:
+
+```powershell
+gcloud compute scp src/Game.Gateway/Community/roadmap.html `
+  "$VM_NAME:/mnt/lumberjacks/roadmap/roadmap.html" `
+  --project "$PROJECT_ID" --zone "$ZONE" --tunnel-through-iap
+```
+
+`scp` is used deliberately: `gcloud compute ssh` over IAP does not exit from a
+backgrounded shell, while `scp` returns normally.
+
+Verify that P7 serves the exact committed bytes — the response header is the SHA-256 of
+the file on disk, so it matches `sha256sum` of the artifact in the tree:
+
+```powershell
+curl -sI http://<p7>:<port>/roadmap | Select-String X-Roadmap-Sha256
+```
+
+The mount is a directory, not a file: a bind-mounted *file* pins an inode on a Linux
+host, so a replacing copy would never be seen inside the container. An absent or empty
+mount costs freshness, not the page — resolution falls through to the copy built into
+the image.
+
+Without the mount, `/roadmap` still serves the asset baked into the image at build time,
+which is stale for exactly as long as the deployed release lags the tree.
