@@ -1,15 +1,16 @@
 {
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
-  "headline": "ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-16T14:23:37.263Z",
+  "headline": "M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY",
+  "updated_at": "2026-07-16T15:28:16.206Z",
   "overall_status": "active",
   "platform_readiness": "not_ready",
-  "active_milestone": "M0",
+  "active_milestone": "M1",
   "current_release": {
+    "release_id": "m0-clean-20260716-r2",
     "mod": "ComfyNetworkSense 0.5.31",
-    "mod_sha256": "b31697d2a0cbe47b86c32b33d19fb9445e21af0cfe51687cb5afe871a3d7d77b",
-    "gateway_image": "sha256:358f5e11e35b54367a83d4e52ea3d47c0346e62a82ed357c2ff403eafafcd0a2",
+    "mod_sha256": "94a3843ef8042adceaca6bc4d5c0c38c7c8dc5a1aa05b5f2a3019879840ba3a8",
+    "gateway_image": "sha256:141bd9e5a2ce8bd95f1bd93a9f123637cbc1cffcb0795594fae94e28d7fe86fb",
     "deployment": "comfy-lumberjacks-p7",
     "window": "p7-primary-v1",
     "authoritative_consumer_ceiling": 1,
@@ -185,11 +186,9 @@
     }
   ],
   "current_focus": [
-    "COMPLETE · M0/A1 SOURCE FREEZE — Release-required runtime and operator surfaces are committed; the identity-bearing historical Comfy dashboard remains deliberately preserved outside the release.",
-    "COMPLETE · M0/A2 CLEAN CANDIDATE — Candidate r2 is reproducible from clean tagged checkouts with pinned CI/deterministic flags; its mod PE hash intentionally differs from the historical runtime despite identical IL, so the historical artifact remains rollback-only.",
-    "COMPLETE · M0/A3 RELEASE BUNDLE — The r2 bundle re-validated clean, the sanitized bundle receipt is committed at docs/roadmap/m0-a3-release-bundle-receipt.json, and the FieldLab catalog classifies all 125 runs (1 gold, 17 negative, 37 superseded, 70 historical) with a clean secret scan.",
-    "COMPLETE · M0/A4 PROMOTION PROOF — The drill passed 2026-07-16 in the owner's GCP window: the manifest-tied r2 release cold-started from prebuilt artifacts with no VM-side rebuild, rolled back artifact-only to the historical runtime, and restored, every transition identity- and health-verified fail-closed; owner live-validated post-restore. Receipts at docs/roadmap/m0-a4-promotion-drill-receipt.json bind the evidence folder at Comfy revision e6a1402. A5 publication closes on the owner pushes.",
-    "NEXT · M1 — Make the actual joining account, enrollment, release, readiness lease, one-seat capacity, least-privilege credentials, and TLS authoritative for strict admission.",
+    "COMPLETE · M0 RELEASE FREEZE — A1–A5 closed 2026-07-16: source frozen, candidate r2 reproducible from clean tagged checkouts, sanitized bundle and FieldLab catalog committed, promotion drill passed with artifact-only rollback, and the golden-proof evidence set published immutably with byte-verified hashes.",
+    "COMPLETE · PROMOTION FINALIZED — The r2 release runs on P7 under a durable image pin: the temporary compose override is retired, the base compose resolves LUMBERJACKS_GATEWAY_IMAGE from the host environment across reboots, and VM-side gateway rebuilds fail closed.",
+    "ACTIVE · M1 — Make the actual joining Steam account, enrollment (list, revoke, expiry, unique-active), least-privilege capability split, fresh readiness leases, the one-seat reservation, and certificate-validating TLS authoritative for strict admission; admission fails closed when its authority is unavailable.",
     "AFTER M1 · PARALLEL — Build M2's reversible guest package, M3's seal-before-reset per-run ledger and retained dashboards, and M4a's recipient isolation and producer loss safety.",
     "WIDEN ONLY AFTER · M4b + M5 — Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort."
   ],
@@ -220,7 +219,7 @@
       "id": "M0",
       "title": "Freeze the known-good release and evidence",
       "track": "shared",
-      "status": "active",
+      "status": "complete",
       "depends_on": [],
       "owns": "Reproducible source-to-binary release identity, immutable evidence publication, deployment verification, and tested rollback artifacts.",
       "does_not_own": "New admission, packaging, dashboard, or multiplayer behavior.",
@@ -243,13 +242,20 @@
         "The 2026-07-16 owner observation confirmed that OMEN, GCP, and the declared 0.5.31 artifacts align at runtime, while dirty source provenance still prevents clean-checkout reproduction.",
         "The live Gateway image was built from a non-Git source copy. Normalized cutover/runtime sources match the working tree, but roadmap-only sources differ and the existing capture manifest and rollback scripts omit required identities and readiness checks."
       ],
-      "exit_evidence": []
+      "exit_evidence": [
+        "Closed 2026-07-16. Promoted release m0-clean-20260716-r2: reproducible candidate manifest at docs/roadmap/m0-clean-build-candidate-r2.json; checkpoint receipts at docs/roadmap/m0-a3-release-bundle-receipt.json, m0-a4-promotion-drill-receipt.json, and m0-a5-publication-receipt.json.",
+        {
+          "label": "Published golden-proof evidence set (immutable, byte-verified)",
+          "href": "https://github.com/djcdevelopment/comfy/blob/433f1cc33605561ae1287db9cd8f37125d795c5d/fieldlab/evidence/p7-gold-run-20260716-011112-authoritative-priority-cutover/PUBLICATION.md"
+        },
+        "Promotion finalized 2026-07-16: the r2 release runs on P7 with the temporary compose override retired; the base compose pins the promoted image from the host environment (reboot-path verified, no container recreate, health ok) and VM-side gateway rebuilds fail closed."
+      ]
     },
     {
       "id": "M1",
       "title": "Make identity and admission authoritative",
       "track": "shared",
-      "status": "queued",
+      "status": "active",
       "depends_on": [
         "M0"
       ],
