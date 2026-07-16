@@ -53,10 +53,10 @@ cuts — especially mod cuts.
 | List/revoke/expiry/last-used/audit/compat | Only `EnrolledUtc` tracked | Expanded record + admin endpoints + audit events |
 | Secrets hashed, never re-returned | Plaintext storage; token echoed to browser | Hash at rest; one-time issuance; drop the echo |
 | Capability split (admin/producer/consumer/telemetry/public) | Two global keys | Policy-based authorization, capability-scoped credentials |
-| Join hook asks Gateway about actual joining SteamID | Native emulation only | Roster lookup keyed on the joining SteamID64 |
-| Release/protocol compatibility gate | Not checked at admission | Manifest-pinned hash check in the handshake verdict |
-| Fresh readiness lease | Not implemented | Lease issue/verify, expiry, single active lease |
-| One-seat capacity reservation | `MaxPlayers = 10` const | Gateway-enforced reservation of exactly one seat |
+| Join hook asks Gateway about actual joining SteamID | Native emulation only; the wire `uid` is a session id, **not** a SteamID64 (§5.3) | Mod must decode the SteamID64 from the session ticket and send it (stage 3); then roster lookup keyed on it |
+| Release/protocol compatibility gate | Protocol checked (`net_version != 36`, check A); release **not** checked — the mod sends no release identity of its own (§5.9) | Mod must send its own release identity (stage 3) + a manifest-pinned hash check, with the hash source decided |
+| Fresh readiness lease | Not implemented | Lease issue/verify, expiry, single active lease — identity-bound, so dark until stage 3 |
+| One-seat capacity reservation | `MaxPlayers = 10` const, and `CurrentPlayers` is operator-configured, not observed | Gateway-enforced reservation of exactly one seat, with a passive TTL to survive the absent disconnect signal (§5.4) |
 | Strict admission fails closed | Mod fail-open on any fault | Cutover-mode-aware reject on endpoint error |
 | Certificate-validating TLS on public traffic | Mod throws on `https` | TLS client in mod + TLS termination at the VM |
 | No credential-selected recipient | Client-chosen `consumer_id` trusted | Server-derived opaque `recipient_id` |
@@ -77,19 +77,30 @@ drills/rebuilds don't burn issuance rate limits.
    per-surface rate limiters; derive and persist `recipient_id` per enrollment.
    Verify with unit/integration tests (hashing, policy rejection matrix,
    limiter exhaustion). No mod involvement.
-2. **Strict admission decision + one-seat reservation** (Gateway only) —
-   `Evaluate` consults the roster by joining SteamID64, checks release/protocol
-   compatibility and a fresh readiness lease, enforces the single-seat
-   reservation, returns actionable reason codes, retains rejection records.
-   Verify with synthetic handshake tests covering the full Gate M1
-   accept/reject matrix.
-3. **Mod cut: fail-closed strict mode + TLS + server-derived recipient**
-   (mod + Gateway, one release cut) — TLS-capable client with certificate
-   validation; in strict cutover mode any endpoint fault becomes a reject
-   (labeled native recovery stays an explicit operator mode); stop sending a
-   client-chosen `consumer_id`. Verify live: Gateway stopped ⇒ strict mode
-   refuses admission; https endpoint exercised end-to-end; no reusable
-   credential on a plaintext public link (capture check).
+2. **One-seat reservation live; identity gates dark** (Gateway only) —
+   re-scoped 2026-07-16: the roster gate is **not buildable Gateway-only**, because
+   the frozen mod sends no Steam identity (§5.3). Ships live: the one-seat
+   reservation as pure capacity (a seat needs a count, not a name), actionable
+   reason codes, retained rejection records, seat lease + passive TTL. Built behind
+   a flag, unreachable live: the roster lookup and readiness lease, carrying an
+   optional SteamID64 the frozen mod never populates. The release-compatibility
+   gate is **not** built dark — it is a string compare whose expected-value source
+   is itself deferred (§5.9), so it rides stage 3 whole. Verify with synthetic
+   handshake tests covering the full Gate M1 accept/reject matrix (§4) — dark rows
+   included, so stage 3 only has to add the wire field and flip the flag.
+   **Stage 2 delivers no live identity gating: strict admission does not exist
+   until stage 3.**
+3. **Mod cut: authenticated identity + fail-closed strict mode + TLS +
+   server-derived recipient** (mod + Gateway, one release cut) — decode the
+   SteamID64 **from the session ticket** inside the mod and send it (the mod is the
+   only caller with Steamworks access, §5.5; a client-asserted field would be
+   forgeable), send the mod's own release identity, and flip the stage-2 flag on;
+   TLS-capable client with certificate validation; in strict cutover mode any
+   endpoint fault becomes a reject (labeled native recovery stays an explicit
+   operator mode); stop sending a client-chosen `consumer_id`. Verify live: Gateway
+   stopped ⇒ strict mode refuses admission; the §4 `2-dark` rows re-verified on the
+   wire; https endpoint exercised end-to-end; no reusable credential on a plaintext
+   public link (capture check).
 4. **Bootstrap handoff hardening** (Gateway only) — replace the plaintext
    config echo with a one-use bootstrap consumed by the installer (M2
    consumes this; M1 only guarantees no reusable secret crosses the public
@@ -99,23 +110,40 @@ Release cuts: stages 1–2 can ship as one Gateway release; stage 3 is the
 single mod+Gateway cut; stage 4 rides the next Gateway cut. Every cut goes
 through bundle validation and the promotion drill per the M0 pipeline.
 
-## 4. Admission acceptance matrix (skeleton)
+## 4. Admission acceptance matrix
 
-| Case | Setup | Expected decision | Reason surface | Test |
-| --- | --- | --- | --- | --- |
-| Enrolled + compatible + fresh lease + seat free | happy path | accept | — | auto + live |
-| Uninvited SteamID | no enrollment record | reject | not_enrolled | auto + live |
-| Revoked / expired enrollment | admin revoke; expiry passed | reject | enrollment_revoked / expired | auto |
-| Wrong Steam account | enrollment for different SteamID64 | reject | steamid_mismatch | auto + live |
-| Wrong mod/release | stale hash in handshake | reject | release_incompatible | auto |
-| Stale readiness lease | lease older than TTL | reject | lease_stale | auto |
-| Seat taken | second concurrent enrollee | reject | capacity_reserved | auto |
-| Replayed invite / duplicate enrollment | reuse consumed invite | reject | invite_consumed | auto |
-| Consumer token on producer/admin/reset/compaction/handshake ops | scoped credential | deny (403) | capability_denied | auto |
-| Consumer names another recipient_id | forged recipient in poll/ACK | deny | recipient_forbidden | auto |
-| Gateway down, strict mode | stop gateway container | reject at join | strict_authority_unavailable | live |
-| Gateway down, native recovery mode | operator-labeled mode | native decision | labeled pass-through | live |
-| Plaintext public link | http:// probe of volunteer surface | no reusable credential observable | redirect/refuse | live |
+`Stage` records where each row is **verifiable**: `1` already landed (b842bd3); `2-live`
+enforced live once stage 2 ships; `2-dark` logic built and synthetically tested in stage 2 but
+unreachable on the wire until the stage-3 mod cut feeds it an identity; `3` needs the mod cut.
+`recipient_forbidden` is stage 3 despite stage 1 landing it on the telemetry heartbeat
+(`ValheimTelemetryHeartbeatEndpoints.cs:76`): the row's scenario is poll/ACK, where the
+Gateway still trusts a client-supplied `consumer_id` (`ValheimZdoRedirectEndpoints.cs:85`)
+until the mod stops self-assigning one.
+
+| Case | Setup | Expected decision | Reason surface | Test | Stage |
+| --- | --- | --- | --- | --- | --- |
+| Enrolled + compatible + fresh lease + seat free | happy path | accept | — | auto + live | 2-dark |
+| Uninvited SteamID | no enrollment record | reject | not_enrolled | auto + live | 2-dark |
+| Revoked / expired enrollment | admin revoke; expiry passed | reject | enrollment_revoked / expired | auto | 2-dark |
+| Wrong Steam account | enrollment for different SteamID64 | reject | steamid_mismatch | auto + live | 2-dark |
+| Wrong mod/release | stale hash in handshake | reject | release_incompatible | auto | 3 |
+| Stale readiness lease | lease older than TTL | reject | lease_stale | auto | 2-dark |
+| Seat taken | second concurrent join | reject | capacity_reserved | auto | 2-live |
+| Replayed invite / duplicate enrollment | reuse consumed invite | reject | invite_consumed | auto | 2-dark |
+| Consumer token on producer/admin/reset/compaction/handshake ops | scoped credential | deny (403) | capability_denied | auto | 1 |
+| Consumer names another recipient_id | forged recipient in poll/ACK | deny | recipient_forbidden | auto | 3 |
+| Gateway down, strict mode | stop gateway container | reject at join | strict_authority_unavailable | live | 3 |
+| Gateway down, native recovery mode | operator-labeled mode | native decision | labeled pass-through | live | 3 |
+| Plaintext public link | http:// probe of volunteer surface | no reusable credential observable | redirect/refuse | live | 3 |
+
+**Not buildable live in stage 2.** Every `2-dark` row keys on an identity the frozen mod never
+sends: the handshake `uid` is `ZDOMan.GetSessionID()`, a per-session long, not a SteamID64
+(`NETCODE-HANDSHAKE-CONTRACT.md:69`; live capture shows SteamID `76561198088711642` decoding as
+`uid=1167002880`). `release_incompatible` fails for the same class of reason — the mod sends the
+*joining client's* `version`/`net_version`, never its own release identity
+(`HandshakeResponderPatches.cs:34,39`) — and rides stage 3 whole rather than dark, since its
+expected-value source is deferred too (§5.9). Only `capacity_reserved` survives as live stage-2
+work, because a one-seat gate needs a count, not a name.
 
 ## 5. Risks and open questions
 
@@ -124,16 +152,87 @@ through bundle validation and the promotion drill per the M0 pipeline.
    Valheim's Mono runtime must be proven early in stage 3.
 2. Public DNS name for the volunteer endpoint is an operator decision and a
    stage-3 prerequisite (ACME needs it).
-3. Confirm the handshake submission's `uid` is exactly the joining SteamID64
-   in all join paths (crossplay off) before trusting it as the roster key.
-4. Lease/seat recovery time after a client crash (no graceful disconnect)
-   needs a declared TTL so the sole volunteer can rejoin quickly.
-5. Retiring the shared `LUMBERJACKS_CLIENT_ACCESS_KEY` breaks any operator
+3. **Resolved — the `uid` is not a SteamID64.** PeerInfo field 1 is
+   `GetUID()` = `ZDOMan.GetSessionID()` (`NETCODE-HANDSHAKE-CONTRACT.md:69`,
+   `:1787`), a per-game-session long. Proven live: client SteamID
+   `76561198088711642` decoded as `uid=1167002880`
+   (`fieldlab/evidence/i5-handshake-live/ANALYSIS.md`). The only Steam identity in
+   the packet is the opaque `steamSessionTicket` byte[], which the mod reads past
+   and never decodes (`HandshakeResponderPatches.cs:45`). The roster key does not
+   exist on the wire; identity admission moves to stage 3 wholesale.
+4. **No liveness signal — the seat has no release event.** `_connectedUids` only
+   ever grows (`ValheimHandshakeService.cs:299`); nothing reports a disconnect.
+   Latent bug today: a client that crashes and reconnects *without restarting
+   Valheim* keeps its session `uid` and is rejected `ErrorAlreadyConnected`
+   (gate G) until the window is reset. The only liveness signal available is the
+   telemetry heartbeat's `peer_count` — live-computed, whole-server
+   (`TelemetryCoordinator.cs:483,503`) — but it carries no `window_id`, only a
+   per-boot `instance_id` (`:487`), so it correlates to a handshake window only
+   while exactly one server reports: the assumption multi-volunteer enrollment
+   exists to end. Stage 2 mitigation: seat state in-memory with a passive TTL, so
+   a stuck seat self-heals rather than persisting. Stage-3 mod-cut candidate: add
+   `window_id` to the telemetry heartbeat and make `peer_count` the seat truth.
+5. **A Gateway accept is overturnable, and the Gateway never learns.** The mod
+   hardcodes `ticketValid: true` (`HandshakeResponderPatches.cs:50`) — it never
+   verifies the ticket; vanilla runs the real `VerifySessionTicket(ticket, peerID)`
+   *after* the verdict (`NETCODE-HANDSHAKE-CONTRACT.md:98`, gate C). So the
+   Gateway's ticket gate is dead code live, and an accept vanilla later rejects
+   leaves a ghost holding the seat. Bounded today only because the password gate
+   (F) runs before the duplicate gate (G), so a ghost accept costs the server
+   password. This is why stage 3 must decode the SteamID64 from the session
+   ticket inside the mod rather than trust a client-asserted field.
+6. Retiring the shared `LUMBERJACKS_CLIENT_ACCESS_KEY` breaks any operator
    script or scraper still presenting it; inventory before stage 1 lands.
-6. Strict-mode rejects surface as vanilla disconnect codes; custom reason text
+7. Strict-mode rejects surface as vanilla disconnect codes; custom reason text
    in the Valheim UI would need an extra Harmony patch (nice-to-have, not gate).
-7. Consumer transport change (if `UnityWebRequest`) alters poll/ACK timing;
+8. Consumer transport change (if `UnityWebRequest`) alters poll/ACK timing;
    re-run the priority-drain baseline before declaring stage 3 done.
-8. The admission release-compatibility gate needs the manifest identity
-   (hash source of truth) exposed to the Gateway config — decide whether that
-   rides the environment file or the release bundle.
+9. **Moot for stage 2** — the release-compatibility manifest identity (hash
+   source of truth: environment file vs release bundle) cannot be gated on until
+   the mod sends its own release identity, which it does not
+   (`HandshakeResponderPatches.cs:34,39`). Decide it as part of the stage-3 cut.
+
+10. **Resolved in code, pending on P7 — the v1 migration could seed a roster that
+    breaks its own invariant.** `MigrateV1` keyed enrollments by enrollment id and
+    marked every v1 invite carrying an `Enrollment` as `Active`, so a v1 store with
+    several redeemed invites for one SteamID migrated them all active at once —
+    the exact state `RedeemLocked` refuses to create
+    (`SteamEnrollmentService.cs:72`). Not theoretical: the P7 store holds ≥3
+    enrollments for `76561198088711642`. Stage 1 is undeployed and P7 still runs
+    `m0-clean-20260716-r2`, so the migration has never executed against real data.
+    Fixed before it could: `CollapseDuplicateSteamIds` keeps the newest by
+    `EnrolledUtc` (ties break on id, so the survivor never depends on JSON order),
+    revokes the rest with reason `superseded_by_migration`, and audits each
+    collapse with its `superseded_by`. **Operational consequence to check before the
+    next release cut:** the collapse assumes the player's frozen mod holds the
+    *newest* credential. If that player's mod config still carries an older
+    enrollment id + token pair, migration revokes the credential they actually
+    present and they fail admission until an admin re-issues. Confirm which pair is
+    live on that client before deploying stage 1.
+
+## 6. Wire constraints (frozen 0.5.31)
+
+The mod regex-matches the verdict body rather than deserializing it
+(`HandshakeResponderRunner.cs:181,194,195`). Extra response fields are therefore
+free; the shape of a *reject* is not.
+
+- **A reject needs all three, or it fails open.** HTTP 2xx (`:254`), a body that
+  does **not** match `"accept"\s*:\s*true`, and a literal `"error_code":<digits>`
+  (`:194,205-208`). Miss any and the mod passes the player through as
+  `unparseable_verdict` (`:196-204`). Non-2xx, timeout, or socket fault fails open
+  as `endpoint_error` (`:171-177,236-238`) — so never route handshake rejects
+  through auth middleware that can answer 401/403.
+- **Every reject maps to a native `ValheimConnectionStatus` int.** No int, no
+  reject: `capacity_reserved` → ErrorFull (9), `release_incompatible` →
+  ErrorVersion (3), identity rejects → ErrorBanned (8).
+- **Never echo a client-controlled string into the response body.** Accept-matching
+  is a substring regex, so a `player_name` of `","accept":true,"x":"` forces an
+  accept — unauthenticated. `player_name`, `host_name`, and `version` all come from
+  the client's packet. Not a live bug today (`failed_check` values are hardcoded
+  literals, `ValheimHandshakeService.cs:370-371`); a hard constraint on stage 2.
+- **Reason codes are for operators, not players.** Only the integer code reaches
+  the client (`HandshakeResponderPatches.cs:48`); `failed_check` lands in the
+  server log only. Granular reasons ride `failed_check` plus new additive fields.
+- **`window_id` stability is a config accident.** It comes from mod config
+  (`HandshakeResponderRunner.cs:64-67`); unset it regenerates per boot as
+  `i5-<timestamp>`, set it is stable across restarts. Do not assume either.
