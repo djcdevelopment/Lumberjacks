@@ -30,6 +30,40 @@ binary resource updates for later. The architecture supports broader interest
 management, but the implementation should not be described as uniformly applying
 all tiers to every entity type.
 
+## Valheim adapter boundary (observed 2026-07-15)
+
+The Valheim authoritative-ZDO adapter is a separate visibility boundary. The
+Harmony mod suppresses selected Valheim sends, and Valheim's own sync-list
+construction determines which ZDOs are relevant to a peer before those envelopes
+enter the Lumberjacks Gateway. The Gateway consumer then applies the enrolled
+envelopes; it does **not** currently re-run `InterestManager` tiers over the
+Valheim ZDO stream.
+
+This is compatible with the authority and delivery tenets only when it is stated
+as an adapter exception: Valheim native relevance is the projection filter,
+Lumberjacks owns sequencing/durability/application, and client-consumption proof
+is separate from Gateway receipt proof. It must not be reported as uniform
+Lumberjacks AoI coverage for every Valheim entity type.
+
+This is an intentional phase-1 choice, not a permanent ceiling. A later
+performance phase may move the relevance decision into ComfyNetworkSense so the
+mod can suppress/aggregate earlier and reduce Gateway receipt, WAL, and
+serialization work. That migration requires a paired native-vs-Lumberjacks
+comparison proving identical peer-visible ZDO sets before it replaces the native
+sync-list boundary.
+
+The single-client P7 audit observed 100% enrolled coverage and zero native-only
+traffic while the consumer drained the durable queue. Raw evidence is retained
+outside this repository at:
+
+```text
+C:\work\comfy\fieldlab\runs\audits\p7-efficiency\
+C:\work\comfy\fieldlab\evidence\p7-primary-v1-authoritative-zdo-20260715-v0527.md
+```
+
+The next AoI audit must measure Valheim relevance selection separately from
+Lumberjacks player-tier filtering before making a multi-client scalability claim.
+
 ## Subscription-change events (`interest_subscription_changed`)
 
 The tiers above are evaluated fresh every tick and are otherwise invisible — you cannot see

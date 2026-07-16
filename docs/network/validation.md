@@ -15,6 +15,22 @@ load report does not establish that every production deployment exposes UDP.
 | Recorded results | A dated interpretation of one test environment | `docs/load-test-dual-channel-results.md` |
 | Audits | Architecture compared with explicit examination criteria | simulation and thesis audits |
 
+## Recorded Valheim authoritative-priority result
+
+The 2026-07-16 P7 window is the first clean live proof that one enrolled Valheim
+client consumed its complete observed ZDO window through Lumberjacks priority
+delivery. Session `20260716-011112-f7e72fb4` closed 83,220 Gateway receipts with
+83,220 acknowledgements, zero pending, 100% priority metadata, zero native-only
+delivery, and zero rejects, duplicates, retries, poll failures, acknowledgement
+failures, or telemetry failures.
+
+This result establishes single-client ZDO delivery authority only. It does not
+establish replacement of Steam login, Valheim simulation, native candidate relevance
+selection, non-ZDO RPCs, or recipient isolation under multiple clients. See the
+[P7 network overview](valheim-lumberjacks-p7-overview.md) and the retained FieldLab
+report at
+`C:\work\comfy\fieldlab\runs\20260716-011112-valheim-lumberjacks-authoritative-priority-cutover\report.md`.
+
 ## Recorded dual-channel result
 
 The March 27 load report describes 50 clients for 30 seconds:

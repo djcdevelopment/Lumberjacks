@@ -44,6 +44,7 @@ Open in a browser — no login, served straight from the game Gateway. All data 
 
 | URL | What it is |
 |---|---|
+| `http://localhost:4000/roadmap` | **Valheim volunteer roadmap** — living milestone gates, validated proof, known no-go findings, and append-only commit notes |
 | `http://localhost:4000/networksense` | **G3 NetworkSense HUD** — glanceable overlay: tick health vs 50 ms budget, sessions, delivery mix |
 | `http://localhost:4000/events` | **G4 Gameplay Event feed** — live, anonymized event stream (structure/inventory/region/interest events) |
 | `http://localhost:4000/community` | **Live Community View** — server overview: uptime, tick perf, sessions, delivery, regions |
@@ -63,44 +64,54 @@ Lumberjacks-primary mode by itself.
 The pages poll every 2 s. If a poll fails they show a "reconnecting / stale" chip and keep
 the last good values — they never fabricate data.
 
-## 2a. GCP P7 deployment
+## 2a. Live GCP P7 deployment
 
-### OMEN-only view (recommended for now)
-
-GCP binds Gateway HTTP only to its own loopback interface. Start the SSH/IAP tunnel
-from OMEN before Valheim or a dashboard browser:
-
-```powershell
-& C:\work\comfy\infra\gcp\p7\scripts\start-gateway-tunnel.ps1
-Start-Process http://127.0.0.1:14000/community
-```
-
-The hidden SSH process binds only OMEN `127.0.0.1:14000` and forwards through IAP to
-GCP `127.0.0.1:4000`. No public HTTP/HTTPS listener is required. The same tunnel carries
-the enrolled Valheim client's authoritative polling, acknowledgements, and telemetry;
-the GCP Valheim server reaches Gateway directly over the private Compose network.
-
-The current combined Valheim + Lumberjacks deployment is GCP P7:
+The trusted-pilot Gateway is available directly at `8.231.129.249:42317`. These URLs
+show the deployed GCP data, not local images or a local Docker simulation:
 
 ```text
-http://127.0.0.1:14000/community
-http://127.0.0.1:14000/networksense
-http://127.0.0.1:14000/events
-http://127.0.0.1:14000/testing
+http://8.231.129.249:42317/community
+http://8.231.129.249:42317/networksense
+http://8.231.129.249:42317/events
+http://8.231.129.249:42317/testing
 ```
 
-These are the same pages as the local surfaces, but they fetch from the deployed
-Gateway. Each page shows the environment and deployed revisions in its deployment
-badge. Verify the identity directly before a session:
+On OMEN, the loopback-only dashboard proxy exposes the page at
+`http://127.0.0.1:8080/roadmap`. It mounts the generated local
+`src/Game.Gateway/Community/roadmap.html`, so a browser refresh sees every committed
+roadmap update without waiting for a GCP deployment. Its sibling dashboard routes
+proxy live GCP `:42317` data. The source also opens directly without a server and
+remains useful while GCP is between deployments.
+
+The Gateway build now includes `http://8.231.129.249:42317/roadmap` as well; that
+direct GCP URL becomes available with the next Gateway deployment. The OMEN-mounted
+page above is available immediately and does not depend on that deployment.
+
+Verify the target and cutover state before a session:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:14000/api/v0/telemetry/deployment
+$gateway = 'http://8.231.129.249:42317'
+Invoke-RestMethod "$gateway/health"
+Invoke-RestMethod "$gateway/api/v0/telemetry/deployment"
+Invoke-RestMethod "$gateway/api/v0/telemetry/cutover" |
+  ConvertTo-Json -Depth 20
 ```
 
-The expected current identity is `environment=gcp-p7`. The dashboard's `/cutover` line is
-the source of truth for whether the live server is native, mirrored, or Lumberjacks-primary.
-Keep the tunnel running for the session. If it exits, the client poller retries while
-Valheim's native fallback remains available; restart the tunnel with the same command.
+Expected deployment identity is `environment=gcp-p7`. The `/cutover` response is the
+authority source of truth. A passing single-client primary window requires 100%
+coverage, zero native-only/fallback traffic, equal receipts and acknowledgements,
+zero pending, and `complete=true` in one coherent sample.
+
+The enrolled ComfyNetworkSense client also uses this direct endpoint for authoritative
+polling, acknowledgements, and telemetry. Control paths require its per-enrollment
+credential; the dashboard GET surfaces currently do not. The endpoint is plain HTTP
+and is intended only for the limited volunteer pilot until TLS, rate limiting, and
+dashboard access control are added.
+
+No OMEN tunnel or standalone forwarding process is required for gameplay. The legacy
+`127.0.0.1:14000` SSH/IAP tunnel remains an operator fallback if the public pilot port
+is intentionally closed. Primary mode is fail-closed: a lost Gateway route leaves
+work durable and unacknowledged; it is not evidence of a successful native fallback.
 
 For the admin console, forward Operator API through IAP and keep the Vite app local:
 

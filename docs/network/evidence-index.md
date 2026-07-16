@@ -22,7 +22,8 @@ describes the current repository, not an aspirational roadmap.
 | Compact tree projection | ADR 0019, tree plan | `CompactTreeState` in lab code | 24-byte display/budget check | Not in shared serializer or broadcaster |
 | Natural-resource transport | Nature 2.0 plans | JSON resource update in `TickBroadcaster` | Vertical client work | Binary/AoI path incomplete |
 | Valheim priority delivery | July gateway work | priority manifest planner and endpoints | Contract tests | Gateway extension; implemented in repository |
-| Valheim redirect/injection/handshake | July gateway work | `src/Game.Gateway/Valheim/` | Gateway tests and loopback work | Active infrastructure extension |
+| Valheim redirect/injection/handshake | July gateway work | `src/Game.Gateway/Valheim/` | Gateway tests, copied-WAL replay, and P7 single-client window | Active infrastructure extension; Valheim relevance remains native-side |
+| Valheim authoritative priority ZDO consumer | Server-owned persistent truth; reliable, importance-ordered mutation delivery | `ValheimZdoRedirectService`, `ValheimZdoConsumerTelemetryService`, shared ComfyNetworkSense priority classifier, background poller, Unity `RPC_ZDOData` client path | 2026-07-16 P7 clean gate: 83,220/83,220 acknowledged, 0 pending, 100% priority tagged, 0 native-only/rejects/duplicates/retries/transport failures; 46 Gateway tests | Proven for one enrolled client and the observed ZDO window; recipient-scoped multi-client queues and broader authority remain unproven |
 
 ## Primary contemporaneous records
 
@@ -34,6 +35,9 @@ describes the current repository, not an aspirational roadmap.
 - [Architecture decisions](../adrs/)
 - [Tree-felling lab plan](../plan-tree-felling-lab.md)
 - [World-generation lab plan](../plan-worldgen-lab.md)
+- [Valheim + Lumberjacks P7 overview](valheim-lumberjacks-p7-overview.md)
+- Versioned P7 victory evidence: `C:\work\comfy\fieldlab\evidence\p7-primary-v1-authoritative-priority-zdo-20260716-v0531.md`
+- P7 victory report: `C:\work\comfy\fieldlab\runs\20260716-011112-valheim-lumberjacks-authoritative-priority-cutover\report.md`
 
 ## Evidence rules for future updates
 
@@ -43,3 +47,4 @@ describes the current repository, not an aspirational roadmap.
 - Separate shared serializer support from gateway transport.
 - Separate gateway transport from a client that actually uses it.
 - Date benchmark results and retain raw output when possible.
+- For Valheim, record native relevance selection separately from Lumberjacks `InterestManager` AoI; do not merge those claims into one coverage number.
