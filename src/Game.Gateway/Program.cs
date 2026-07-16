@@ -24,7 +24,10 @@ builder.Services.AddSingleton<ValheimZdoInjectionService>();
 builder.Services.AddSingleton<ValheimWindowActivityService>();
 // Explicit factory: the ctor's other parameters are optional test seams DI must not try to bind.
 builder.Services.AddSingleton<ValheimHandshakeService>(sp =>
-    new ValheimHandshakeService(sp.GetRequiredService<ValheimWindowActivityService>()));
+    new ValheimHandshakeService(
+        sp.GetRequiredService<ValheimWindowActivityService>(),
+        nowUtc: null,
+        roster: sp.GetRequiredService<SteamEnrollmentService>().CheckSteamId));
 builder.Services.AddSingleton<ValheimTelemetryHeartbeatService>();
 builder.Services.AddSingleton<SteamEnrollmentService>();
 

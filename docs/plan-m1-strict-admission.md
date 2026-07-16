@@ -53,7 +53,7 @@ cuts — especially mod cuts.
 | List/revoke/expiry/last-used/audit/compat | Only `EnrolledUtc` tracked | Expanded record + admin endpoints + audit events |
 | Secrets hashed, never re-returned | Plaintext storage; token echoed to browser | Hash at rest; one-time issuance; drop the echo |
 | Capability split (admin/producer/consumer/telemetry/public) | Two global keys | Policy-based authorization, capability-scoped credentials |
-| Join hook asks Gateway about actual joining SteamID | Native emulation only; the wire `uid` is a session id, **not** a SteamID64 (§5.3) | Mod must decode the SteamID64 from the session ticket and send it (stage 3); then roster lookup keyed on it |
+| Join hook asks Gateway about actual joining SteamID | **Closed in stage 2**: roster keyed on `host_name`, the socket's Steam-authenticated SteamID64 (§5.3); `uid` is a session id and is not used | Flip `StrictRosterEnabled` on per window; fail-closed still needs the mod cut |
 | Release/protocol compatibility gate | Protocol checked (`net_version != 36`, check A); release **not** checked — the mod sends no release identity of its own (§5.9) | Mod must send its own release identity (stage 3) + a manifest-pinned hash check, with the hash source decided |
 | Fresh readiness lease | Not implemented | Lease issue/verify, expiry, single active lease — identity-bound, so dark until stage 3 |
 | One-seat capacity reservation | `MaxPlayers = 10` const, and `CurrentPlayers` is operator-configured, not observed | Gateway-enforced reservation of exactly one seat, with a passive TTL to survive the absent disconnect signal (§5.4) |
@@ -77,19 +77,18 @@ drills/rebuilds don't burn issuance rate limits.
    per-surface rate limiters; derive and persist `recipient_id` per enrollment.
    Verify with unit/integration tests (hashing, policy rejection matrix,
    limiter exhaustion). No mod involvement.
-2. **One-seat reservation live; identity gates dark** (Gateway only) —
-   re-scoped 2026-07-16: the roster gate is **not buildable Gateway-only**, because
-   the frozen mod sends no Steam identity (§5.3). Ships live: the one-seat
-   reservation as pure capacity (a seat needs a count, not a name), actionable
-   reason codes, retained rejection records, seat lease + passive TTL — all landed
-   `cd78296`, see §7. Intended to be built behind a flag, unreachable live: the
-   roster lookup and readiness lease. **The dark gates are not built** — §7 records
-   why the matrix has to be re-homed to its real surfaces first, and that nothing
-   in the system issues a readiness lease to gate on. The release-compatibility
-   gate is **not** built dark either — it is a string compare whose expected-value
-   source is itself deferred (§5.9), so it rides stage 3 whole.
-   **Stage 2 delivers no live identity gating: strict admission does not exist
-   until stage 3.**
+2. **One-seat reservation + roster gate** (Gateway only) — ships live: the one-seat
+   reservation as pure capacity with a consumer-poll liveness lease (§5.4), and the
+   **roster gate** keyed on the socket's Steam-authenticated `host_name` (§5.3),
+   behind `StrictRosterEnabled` (default off); plus reason codes and retained
+   rejection records. Landed `cd78296`, `b2a8d19`, and the roster commit — see §7.
+   A first re-scope on 2026-07-16 deferred the roster to stage 3 believing no Steam
+   identity reached the Gateway; that was wrong and is corrected in §5.3.
+   `lease_stale` remains unbuilt — nothing issues a readiness lease. The
+   release-compatibility gate rides stage 3 whole: it is a string compare whose
+   expected-value source is deferred (§5.9) and whose input the mod does not send.
+   **Strict admission is real in stage 2 but opt-in and fail-open**: the frozen mod
+   still passes through on any endpoint fault, so stage 3 still owns fail-closed.
 3. **Mod cut: authenticated identity + fail-closed strict mode + TLS +
    server-derived recipient** (mod + Gateway, one release cut) — decode the
    SteamID64 **from the session ticket** inside the mod and send it (the mod is the
@@ -122,28 +121,39 @@ until the mod stops self-assigning one.
 
 | Case | Setup | Expected decision | Reason surface | Test | Stage |
 | --- | --- | --- | --- | --- | --- |
-| Enrolled + compatible + fresh lease + seat free | happy path | accept | — | auto + live | 2-dark |
-| Uninvited SteamID | no enrollment record | reject | not_enrolled | auto + live | 2-dark |
-| Revoked / expired enrollment | admin revoke; expiry passed | reject | enrollment_revoked / expired | auto | 2-dark |
-| Wrong Steam account | enrollment for different SteamID64 | reject | steamid_mismatch | auto + live | 2-dark |
+| Enrolled + compatible + seat free | happy path | accept | — | auto + live | 2-live (flag) |
+| Uninvited SteamID | no enrollment record | reject | not_enrolled | auto + live | 2-live (flag) |
+| Revoked / expired enrollment | admin revoke; expiry passed | reject | enrollment_revoked / expired | auto | 2-live (flag) |
+| Wrong Steam account | enrollment for different SteamID64 | reject | steamid_mismatch | auto + live | n/a — see below |
 | Wrong mod/release | stale hash in handshake | reject | release_incompatible | auto | 3 |
-| Stale readiness lease | lease older than TTL | reject | lease_stale | auto | 2-dark |
+| Stale readiness lease | lease older than TTL | reject | lease_stale | auto | blocked — nothing issues a lease |
 | Seat taken | second concurrent join | reject | capacity_reserved | auto | 2-live |
-| Replayed invite / duplicate enrollment | reuse consumed invite | reject | invite_consumed | auto | 2-dark |
+| Replayed invite / duplicate enrollment | reuse consumed invite | reject | invite_consumed | auto | 1 — enrollment surface |
 | Consumer token on producer/admin/reset/compaction/handshake ops | scoped credential | deny (403) | capability_denied | auto | 1 |
 | Consumer names another recipient_id | forged recipient in poll/ACK | deny | recipient_forbidden | auto | 3 |
 | Gateway down, strict mode | stop gateway container | reject at join | strict_authority_unavailable | live | 3 |
 | Gateway down, native recovery mode | operator-labeled mode | native decision | labeled pass-through | live | 3 |
 | Plaintext public link | http:// probe of volunteer surface | no reusable credential observable | redirect/refuse | live | 3 |
 
-**Not buildable live in stage 2.** Every `2-dark` row keys on an identity the frozen mod never
-sends: the handshake `uid` is `ZDOMan.GetSessionID()`, a per-session long, not a SteamID64
-(`NETCODE-HANDSHAKE-CONTRACT.md:69`; live capture shows SteamID `76561198088711642` decoding as
-`uid=1167002880`). `release_incompatible` fails for the same class of reason — the mod sends the
-*joining client's* `version`/`net_version`, never its own release identity
-(`HandshakeResponderPatches.cs:34,39`) — and rides stage 3 whole rather than dark, since its
-expected-value source is deferred too (§5.9). Only `capacity_reserved` survives as live stage-2
-work, because a one-seat gate needs a count, not a name.
+**Corrected 2026-07-16.** An earlier revision marked every identity row `2-dark` on the claim that
+the frozen mod sends no Steam identity. It does: `host_name` is the socket's SteamID64, and vanilla
+ticket-verifies that same identity (§5.3). The roster rows are therefore **live in stage 2** behind
+`StrictRosterEnabled` (default off, §7), not deferred to the mod cut.
+
+What genuinely is not a stage-2 handshake row, and why — the matrix had been conflating three
+surfaces:
+
+- `steamid_mismatch` is **not a handshake row at all**. It means a *credential* belongs to another
+  account, and the handshake carries no credential. Keyed by SteamID64 a mismatch is
+  indistinguishable from `not_enrolled`, which is what the gate returns. It belongs to the
+  middleware, where a credential exists to mismatch.
+- `invite_consumed` is an **enrollment-surface** row (replay of a used invite); the handshake never
+  sees an invite. Stage 1 enforces it at redemption.
+- `lease_stale` is **blocked, not deferred**: nothing in the system issues a readiness lease — no
+  endpoint, no record, no field. It cannot be built until someone decides what mints one (§7).
+- `release_incompatible` still rides stage 3 whole: the mod sends the *joining client's*
+  `version`/`net_version`, never its own release identity (`HandshakeResponderPatches.cs:34,39`),
+  and its expected-value source is deferred anyway (§5.9).
 
 ## 5. Risks and open questions
 
@@ -152,14 +162,30 @@ work, because a one-seat gate needs a count, not a name.
    Valheim's Mono runtime must be proven early in stage 3.
 2. Public DNS name for the volunteer endpoint is an operator decision and a
    stage-3 prerequisite (ACME needs it).
-3. **Resolved — the `uid` is not a SteamID64.** PeerInfo field 1 is
-   `GetUID()` = `ZDOMan.GetSessionID()` (`NETCODE-HANDSHAKE-CONTRACT.md:69`,
+3. **Resolved — the `uid` is not a SteamID64, but `host_name` IS.** PeerInfo field 1
+   is `GetUID()` = `ZDOMan.GetSessionID()` (`NETCODE-HANDSHAKE-CONTRACT.md:69`,
    `:1787`), a per-game-session long. Proven live: client SteamID
    `76561198088711642` decoded as `uid=1167002880`
-   (`fieldlab/evidence/i5-handshake-live/ANALYSIS.md`). The only Steam identity in
-   the packet is the opaque `steamSessionTicket` byte[], which the mod reads past
-   and never decodes (`HandshakeResponderPatches.cs:45`). The roster key does not
-   exist on the wire; identity admission moves to stage 3 wholesale.
+   (`fieldlab/evidence/i5-handshake-live/ANALYSIS.md`).
+   **An earlier revision of this entry drew the wrong conclusion from that** — it
+   said the roster key does not exist on the wire and moved identity admission to
+   stage 3 wholesale. It never checked `host_name`. The joining SteamID64 is right
+   there: vanilla reads the host from the **socket**
+   (`peer.m_socket.GetHostName()`, `ZNet.decompiled.cs:833`) and then verifies the
+   Steam session ticket against that same socket identity
+   (`VerifySessionTicket(ticket, zSteamSocket.GetPeerID())`, `:882`), so it is
+   server-derived and Steam-authenticated rather than client-asserted, and the mod
+   already forwards it (`HandshakeResponderPatches.cs:47`). The live capture is a
+   bare SteamID64: `host=76561198088711642`
+   (`fieldlab/evidence/i5-handshake-live/am4-server-log-decisions.txt`). So the
+   roster gate is buildable **Gateway-only and live** — it is, `StrictRosterEnabled`,
+   default off (§7). Caveats: valid only while crossplay is off (I6), since the
+   PlayFab branch parses the same host as a `PlatformUserID` (`:891`); and the
+   Gateway sees the host *before* vanilla's ticket verify, so a forged socket
+   identity would pass the roster and then die at vanilla — a ghost accept (§5.5),
+   which the seat lease now self-heals. The opaque `steamSessionTicket` byte[] is
+   still never decoded by the mod (`HandshakeResponderPatches.cs:45`); it no longer
+   needs to be for the roster, only for the stage-3 fail-closed work.
 4. **Resolved in stage 2 — consumer poll/ack is the liveness signal.** Nothing
    reports a disconnect, and `_connectedUids` only ever grows
    (`ValheimHandshakeService.cs:299`), so a seat on a fixed timer is wrong in both
@@ -298,25 +324,24 @@ on anything deployed:
   expiry. 6 of 11 are mutation-sensitive; the other 5 are regression guards against
   over-rejecting, and a mutation that would prove them is still owed.
 
-**Deliberately NOT built — needs a decision, not a guess.** The `2-dark` rows. Reading
-the matrix against the actual surfaces, it conflates three of them, and the conflation
-has to be resolved before the code can be:
+**The roster gate, live behind a flag.** Built after the §5.3 correction: `host_name` is
+the socket's Steam-authenticated SteamID64, so the roster is answerable Gateway-only and
+did not need the mod cut. `StrictRosterEnabled` **defaults off** — a frozen mod treats a
+reject as a reject (only endpoint faults fail open), so a roster miss locks the sole
+volunteer out of their own server, and that is not a switch to throw unattended. It runs
+before the seat gate, so a stranger cannot consume a seat on the way to being rejected.
+A strict window with no roster source wired is refused at `Configure` rather than
+admitting everyone. `SteamEnrollmentService.CheckSteamId` separates `not_enrolled` from
+`enrollment_revoked` because they are different operator stories.
 
-- `not_enrolled` / `enrollment_revoked` are genuine handshake-gate rows and are the only
-  two that a dark roster gate could actually answer.
-- `steamid_mismatch` is not a handshake row at all. It means a *credential* belongs to
-  another account — but the handshake carries no credential, only a client-asserted
-  packet. Keyed by SteamID64, a mismatch is indistinguishable from `not_enrolled`.
-- `invite_consumed` is an enrollment-endpoint row (replay of a used invite), already
-  enforced there; the handshake never sees an invite.
-- `lease_stale` cannot be built because **nothing issues a readiness lease**. No
-  endpoint, no record, no field. The plan names it as a stage-2 deliverable but never
-  says who mints one, what it attests, or how long it lives. Inventing that overnight
-  would have hard-coded an identity model into the gate that stage 3 then has to live
-  with.
+**Not built — blocked on a decision, not on effort.** `lease_stale`: nothing issues a
+readiness lease. No endpoint, no record, no field. The plan names it as a deliverable but
+never says who mints one, what it attests, or how long it lives. Inventing that would
+hard-code an identity model the mod cut then inherits.
 
 **Open for Derek.** (1) What is a readiness lease — who issues it, what does it attest,
-what TTL? (2) Should the matrix rows above be re-homed to their real surfaces, so §4
-stops implying the handshake gate owns checks it cannot see? (3) The seat gate is live
-for *unconfigured* windows by default — confirm that is wanted before the cut, since it
-changes behaviour for any window an operator never configured.
+what TTL? (2) Flip `StrictRosterEnabled` on for `p7-primary-v1`? Your account is enrolled
+and the gate is tested, but this is the first switch that can lock you out, so it wants a
+live check with a way back. (3) The seat gate is live for *unconfigured* windows by
+default — confirm before the cut, since it changes behaviour for any window an operator
+never configured.

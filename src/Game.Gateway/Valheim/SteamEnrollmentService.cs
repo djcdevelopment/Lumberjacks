@@ -147,6 +147,32 @@ public sealed class SteamEnrollmentService
         lock (_gate) return _enrollments.Values.Select(View).OrderBy(item => item.EnrolledUtc).ToList();
     }
 
+    /// <summary>
+    /// Roster answer for the admission gate, keyed on the joining SteamID64.
+    ///
+    /// Separates "never invited" from "was invited, then revoked or replaced" because they are
+    /// different operator stories and the plan's §4 matrix names them separately
+    /// (not_enrolled vs enrollment_revoked). At most one Active can exist per SteamID —
+    /// RedeemLocked refuses to create a second and MigrateV1 collapses v1 duplicates — so the
+    /// first Active match is the answer, not an arbitrary one.
+    /// </summary>
+    public ValheimRosterVerdict CheckSteamId(string? steamId)
+    {
+        if (string.IsNullOrWhiteSpace(steamId))
+            return ValheimRosterVerdict.NotEnrolled;
+        lock (_gate)
+        {
+            var matches = _enrollments.Values
+                .Where(item => string.Equals(item.SteamId, steamId, StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count == 0)
+                return ValheimRosterVerdict.NotEnrolled;
+            return matches.Any(item => item.Status == EnrollmentStatus.Active)
+                ? ValheimRosterVerdict.Active
+                : ValheimRosterVerdict.Revoked;
+        }
+    }
+
     public EnrollmentView? Get(string enrollmentId)
     {
         lock (_gate) return _enrollments.TryGetValue(enrollmentId, out var item) ? View(item) : null;

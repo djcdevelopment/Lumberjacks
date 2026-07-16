@@ -2,6 +2,16 @@ using System.Collections.Concurrent;
 
 namespace Game.Gateway.Valheim;
 
+/// <summary>What the enrollment roster says about a joining SteamID64.</summary>
+public enum ValheimRosterVerdict
+{
+    /// <summary>No enrollment has ever existed for this SteamID.</summary>
+    NotEnrolled,
+    /// <summary>Enrolled once, but every enrollment for it is revoked or superseded.</summary>
+    Revoked,
+    Active,
+}
+
 /// <summary>
 /// Valheim connection-status codes, mirrored from the decompiled <c>ZNet.ConnectionStatus</c>
 /// enum (assembly_valheim.dll 0.221.12, ZNet.decompiled.cs:23-38). The handshake gate emits
@@ -45,6 +55,27 @@ public sealed record ValheimHandshakeServerContext
     public IReadOnlyList<string> BannedHosts { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> PermittedHosts { get; init; } = Array.Empty<string>();
     public IReadOnlyList<long> ConnectedUids { get; init; } = Array.Empty<long>();
+
+    /// <summary>
+    /// Lumberjacks roster gate: reject a joining SteamID64 that holds no active enrollment.
+    ///
+    /// The key is <see cref="ValheimPeerInfoSubmission.HostName"/>, NOT <c>Uid</c>. Vanilla reads
+    /// the host from the SOCKET (<c>peer.m_socket.GetHostName()</c>, ZNet.decompiled.cs:833) and
+    /// then verifies the Steam session ticket against that same socket identity
+    /// (<c>VerifySessionTicket(ticket, zSteamSocket.GetPeerID())</c>, :882) — so it is
+    /// server-derived and Steam-authenticated, unlike <c>Uid</c>, which is a client-supplied
+    /// <c>ZDOMan.GetSessionID()</c> and not a SteamID at all (plan §5.3). Live capture confirms
+    /// the wire value is a bare SteamID64: <c>host=76561198088711642</c>
+    /// (fieldlab/evidence/i5-handshake-live/am4-server-log-decisions.txt).
+    ///
+    /// Valid only while crossplay is off, which is a standing assumption (I6): the PlayFab branch
+    /// parses the same host as a PlatformUserID (:891), so it would not be a SteamID there.
+    ///
+    /// Defaults to OFF. Turning it on makes enrollment load-bearing for joining, and a frozen mod
+    /// treats a reject as a reject — only endpoint faults fail open — so a roster miss locks the
+    /// volunteer out of their own server. It is opt-in per window until an operator is watching.
+    /// </summary>
+    public bool StrictRosterEnabled { get; init; }
 
     /// <summary>
     /// Lumberjacks seat gate: concurrent seats this window admits. The volunteer pilot is one seat
@@ -176,20 +207,32 @@ public sealed class ValheimHandshakeService
     private readonly ConcurrentDictionary<string, Window> _windows = new(StringComparer.Ordinal);
     private readonly ValheimWindowActivityService? _activity;
     private readonly Func<DateTime> _nowUtc;
+    private readonly Func<string?, ValheimRosterVerdict>? _roster;
 
     /// <param name="activity">Consumer liveness for the seat gate. Null ⇒ seats expire on their
     /// grant alone, which is the pre-stage-2 behaviour and is what unit tests get by default.</param>
     /// <param name="nowUtc">Injected so seat-lease expiry is testable without sleeping.</param>
+    /// <param name="roster">Roster lookup by SteamID64. A delegate rather than a reference to
+    /// SteamEnrollmentService so the gate stays testable without a store on disk. Null ⇒ the roster
+    /// gate cannot answer, and <see cref="ValheimHandshakeServerContext.StrictRosterEnabled"/> is
+    /// then refused at Configure rather than silently admitting everyone.</param>
     public ValheimHandshakeService(
-        ValheimWindowActivityService? activity = null, Func<DateTime>? nowUtc = null)
+        ValheimWindowActivityService? activity = null,
+        Func<DateTime>? nowUtc = null,
+        Func<string?, ValheimRosterVerdict>? roster = null)
     {
         _activity = activity;
         _nowUtc = nowUtc ?? (() => DateTime.UtcNow);
+        _roster = roster;
     }
 
     public (bool Ok, string Error) Configure(string windowId, ValheimHandshakeServerContext context)
     {
         var error = ValidateToken(windowId, "window_id") ?? ValidateContext(context);
+        // Fail closed on misconfiguration: a strict window with no roster to ask would quietly
+        // admit everyone while the operator believed admission was gated.
+        if (error is null && context.StrictRosterEnabled && _roster is null)
+            error = "strict_roster_enabled requires a roster source; none is wired";
         if (error is not null)
             return (false, error);
         _windows.GetOrAdd(windowId, static _ => new Window()).Configure(context);
@@ -214,7 +257,7 @@ public sealed class ValheimHandshakeService
             return (false, error, null);
         var window = _windows.GetOrAdd(windowId, static _ => new Window());
         return (true, string.Empty, window.SubmitPeerInfo(
-            submission, _nowUtc(), _activity?.LastActivityUtc(windowId)));
+            submission, _nowUtc(), _activity?.LastActivityUtc(windowId), _roster));
     }
 
     public ValheimHandshakeWindowStatus GetStatus(string windowId) =>
@@ -345,11 +388,12 @@ public sealed class ValheimHandshakeService
         }
 
         public ValheimHandshakeGateResult SubmitPeerInfo(
-            ValheimPeerInfoSubmission s, DateTime nowUtc, DateTime? lastActivityUtc)
+            ValheimPeerInfoSubmission s, DateTime nowUtc, DateTime? lastActivityUtc,
+            Func<string?, ValheimRosterVerdict>? roster)
         {
             lock (_gate)
             {
-                var result = Evaluate(s, nowUtc, lastActivityUtc);
+                var result = Evaluate(s, nowUtc, lastActivityUtc, roster);
                 Touch();
 
                 if (result.Accept)
@@ -385,7 +429,8 @@ public sealed class ValheimHandshakeService
         /// runs only after all six native checks, so a client vanilla would have rejected still
         /// gets vanilla's own code and label rather than a Lumberjacks one.</summary>
         private ValheimHandshakeGateResult Evaluate(
-            ValheimPeerInfoSubmission s, DateTime nowUtc, DateTime? lastActivityUtc)
+            ValheimPeerInfoSubmission s, DateTime nowUtc, DateTime? lastActivityUtc,
+            Func<string?, ValheimRosterVerdict>? roster)
         {
             // A — network version (RPC_PeerInfo:835)
             if (s.NetVersion != _context.NetworkVersion)
@@ -413,6 +458,23 @@ public sealed class ValheimHandshakeService
             // G — duplicate (IsConnected(uid), :924)
             if (_connectedUids.Contains(s.Uid))
                 return Reject(ValheimConnectionStatus.ErrorAlreadyConnected, "duplicate");
+
+            // I — Lumberjacks roster. Runs before the seat gate: whether you are allowed at all
+            // precedes whether there is room, and an unenrolled join must not consume a seat.
+            // Keyed on HostName (the socket's SteamID64, ZNet.decompiled.cs:833), never on Uid.
+            // Surfaces as ErrorBanned because it is the nearest native meaning ("you are not
+            // permitted here") and vanilla already uses code 8 for its own blacklist; the specific
+            // reason rides failed_check to the operator's log.
+            if (_context.StrictRosterEnabled && roster is not null)
+            {
+                switch (roster(s.HostName))
+                {
+                    case ValheimRosterVerdict.NotEnrolled:
+                        return Reject(ValheimConnectionStatus.ErrorBanned, "not_enrolled");
+                    case ValheimRosterVerdict.Revoked:
+                        return Reject(ValheimConnectionStatus.ErrorBanned, "enrollment_revoked");
+                }
+            }
 
             // H — Lumberjacks seat reservation. NOT a native check: it has no decompile line and
             // runs last so the native verdict always wins first. Surfaces as ErrorFull because that
