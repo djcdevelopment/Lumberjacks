@@ -1,39 +1,90 @@
 namespace Game.Gateway.Valheim;
 
 /// <summary>
-/// Optional shared-client gate for the Valheim control plane.  It is disabled when
-/// no key is configured so the private OMEN tunnel remains backwards compatible.
-/// Enable it on a volunteer endpoint with LUMBERJACKS_CLIENT_ACCESS_KEY.
+/// Capability gate for the Valheim control plane (M1 least-privilege split).
+///
+/// Callers on the loopback/private plane (the operator's IAP tunnel and the
+/// server containers on the Docker network) receive the full capability set;
+/// splitting that plane further arrives with public TLS in a later M1 stage.
+/// Public callers get only what their credential grants:
+///   - a valid enrollment credential ⇒ consumer + telemetry;
+///   - the legacy shared client key  ⇒ consumer + telemetry (retire with the
+///     stage-3 mod cut — before M1 it granted every gated surface);
+///   - anything else                 ⇒ nothing.
+/// The admin capability is never granted to a public caller here: until TLS
+/// lands there must be no reusable admin credential on a plaintext public link.
+/// Unmatched gated routes require admin, so new surfaces are private-only by
+/// default — fail closed.
 /// </summary>
 public sealed class ValheimClientAccessMiddleware
 {
     private readonly RequestDelegate _next;
+    private readonly IConfiguration _configuration;
 
-    public ValheimClientAccessMiddleware(RequestDelegate next) => _next = next;
+    public ValheimClientAccessMiddleware(RequestDelegate next, IConfiguration configuration)
+    {
+        _next = next;
+        _configuration = configuration;
+    }
 
     public async Task InvokeAsync(HttpContext context, SteamEnrollmentService enrollments)
     {
-        if (RequiresClientKey(context) && !IsPrivateOrLoopback(context.Connection.RemoteIpAddress))
+        if (!ValheimAccessPolicy.IsGated(context))
         {
-            var expected = Environment.GetEnvironmentVariable("LUMBERJACKS_CLIENT_ACCESS_KEY");
-            var supplied = context.Request.Headers["X-Lumberjacks-Client-Key"].ToString();
-            var enrollmentId = context.Request.Headers["X-Lumberjacks-Enrollment-Id"].ToString();
-            var sharedKeyValid = !string.IsNullOrWhiteSpace(expected) && CryptographicEquals(supplied, expected);
-            var enrollmentValid = enrollments.IsCredentialValid(enrollmentId, supplied);
-            if (!sharedKeyValid && !enrollmentValid)
+            await _next(context);
+            return;
+        }
+
+        var principal = Resolve(context, enrollments);
+        context.Items[ValheimPrincipal.ItemKey] = principal;
+
+        var required = ValheimAccessPolicy.RequiredFor(context);
+        if (!principal.Has(required))
+        {
+            context.Response.StatusCode = principal.Capabilities == ValheimCapability.None
+                ? StatusCodes.Status401Unauthorized
+                : StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new
             {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                return;
-            }
+                error = principal.Capabilities == ValheimCapability.None
+                    ? "credentials_required"
+                    : "capability_denied",
+                required = required.ToString().ToLowerInvariant(),
+            });
+            return;
         }
 
         await _next(context);
     }
 
-    static bool RequiresClientKey(HttpContext context) =>
-        context.WebSockets.IsWebSocketRequest ||
-        context.Request.Path.StartsWithSegments("/valheim") ||
-        context.Request.Path.StartsWithSegments("/api/v0/valheim/enrollment");
+    ValheimPrincipal Resolve(HttpContext context, SteamEnrollmentService enrollments)
+    {
+        if (IsPrivateOrLoopback(context.Connection.RemoteIpAddress))
+        {
+            return new ValheimPrincipal("private-plane",
+                ValheimCapability.Admin | ValheimCapability.Producer |
+                ValheimCapability.Consumer | ValheimCapability.Telemetry);
+        }
+
+        var supplied = context.Request.Headers["X-Lumberjacks-Client-Key"].ToString();
+        var enrollmentId = context.Request.Headers["X-Lumberjacks-Enrollment-Id"].ToString();
+
+        if (!string.IsNullOrWhiteSpace(enrollmentId) &&
+            enrollments.Verify(enrollmentId, supplied, out var view, out _))
+        {
+            return new ValheimPrincipal("enrollment",
+                ValheimCapability.Consumer | ValheimCapability.Telemetry, view);
+        }
+
+        var sharedKey = _configuration["LUMBERJACKS_CLIENT_ACCESS_KEY"];
+        if (!string.IsNullOrWhiteSpace(sharedKey) && CryptographicEquals(supplied, sharedKey))
+        {
+            return new ValheimPrincipal("shared-client-key",
+                ValheimCapability.Consumer | ValheimCapability.Telemetry);
+        }
+
+        return ValheimPrincipal.Anonymous;
+    }
 
     static bool IsPrivateOrLoopback(System.Net.IPAddress? address)
     {

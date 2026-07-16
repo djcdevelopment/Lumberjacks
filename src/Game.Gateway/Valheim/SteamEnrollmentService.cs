@@ -1,82 +1,313 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Game.Gateway.Valheim;
 
-/// <summary>Small file-backed invite store for the trusted volunteer pilot.</summary>
+/// <summary>
+/// File-backed enrollment store for the volunteer pilot (M1 schema v2).
+///
+/// Invite and access tokens are 256-bit random values, so a single unsalted
+/// SHA-256 at rest is cryptographically sufficient (no KDF stretching is needed
+/// for high-entropy secrets) and cheap enough to verify on every authenticated
+/// request. Raw secrets exist only in the issuance response; they are never
+/// persisted and never returned again. A v1 plaintext store found on disk is
+/// migrated in place on first load.
+/// </summary>
 public sealed class SteamEnrollmentService
 {
     readonly object _gate = new();
     readonly string _path;
+    readonly string _auditPath;
     Dictionary<string, Invite> _invites = new(StringComparer.Ordinal);
+    Dictionary<string, Enrollment> _enrollments = new(StringComparer.Ordinal);
+    readonly Dictionary<string, DateTimeOffset> _persistedLastUsed = new(StringComparer.Ordinal);
+    static readonly TimeSpan LastUsedPersistInterval = TimeSpan.FromSeconds(60);
 
     public SteamEnrollmentService(IConfiguration configuration)
     {
         _path = configuration["LUMBERJACKS_ENROLLMENT_PATH"] ?? "/var/lib/lumberjacks/enrollment/invites.json";
+        _auditPath = Path.Combine(Path.GetDirectoryName(_path) ?? ".", "enrollment-audit.jsonl");
         Load();
     }
 
     public InviteReceipt CreateInvite(TimeSpan lifetime)
     {
-        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        var invite = new Invite(token, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.Add(lifetime));
-        lock (_gate) { _invites[token] = invite; Save(); }
+        var token = NewToken();
+        var invite = new Invite(Hash(token), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.Add(lifetime));
+        lock (_gate)
+        {
+            _invites[invite.TokenHash] = invite;
+            Save();
+        }
+        Audit("invite_created", new { expires_utc = invite.ExpiresUtc });
         return new InviteReceipt(token, invite.ExpiresUtc);
     }
 
-    public bool Redeem(string token, string steamId, out Enrollment enrollment)
+    public bool TryRedeem(string token, string steamId, out EnrollmentIssued issued, out string reason)
     {
-        lock (_gate)
+        issued = null!;
+        reason = RedeemLocked(token, steamId, out issued);
+        if (reason != "ok")
         {
-            enrollment = null!;
-            if (!_invites.TryGetValue(token, out var invite) || invite.Used || invite.ExpiresUtc <= DateTimeOffset.UtcNow || string.IsNullOrWhiteSpace(steamId)) return false;
-            enrollment = new Enrollment(
-                steamId,
-                Guid.NewGuid().ToString("N"),
-                DateTimeOffset.UtcNow,
-                NewToken(),
-                Environment.GetEnvironmentVariable("LUMBERJACKS_AUTHORITATIVE_WINDOW_ID") ?? "p7-primary-v1");
-            _invites[token] = invite with { Used = true, Enrollment = enrollment };
-            Save();
-            return true;
+            Audit("redeem_rejected", new { reason });
+            return false;
         }
+        Audit("enrollment_redeemed", new { enrollment_id = issued.Enrollment.EnrollmentId, steam_id = steamId });
+        return true;
     }
 
-    public bool IsCredentialValid(string enrollmentId, string accessToken)
+    string RedeemLocked(string token, string steamId, out EnrollmentIssued issued)
     {
-        if (string.IsNullOrWhiteSpace(enrollmentId) || string.IsNullOrWhiteSpace(accessToken)) return false;
+        issued = null!;
+        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(steamId)) return "invite_invalid";
+
         lock (_gate)
         {
-            var enrollment = _invites.Values.Select(invite => invite.Enrollment)
-                .FirstOrDefault(item => item is not null && string.Equals(item.ManifestId, enrollmentId, StringComparison.Ordinal));
-            return enrollment is not null && FixedTimeEquals(enrollment.AccessToken, accessToken);
+            if (!_invites.TryGetValue(Hash(token), out var invite)) return "invite_invalid";
+            if (invite.Used) return "invite_consumed";
+            if (invite.ExpiresUtc <= DateTimeOffset.UtcNow) return "invite_expired";
+            // One active enrollment per SteamID; an admin replaces it by revoking
+            // the existing record first (explicit, audited).
+            if (_enrollments.Values.Any(item =>
+                item.Status == EnrollmentStatus.Active &&
+                string.Equals(item.SteamId, steamId, StringComparison.Ordinal)))
+            {
+                return "steamid_already_enrolled";
+            }
+
+            var accessToken = NewToken();
+            var enrollment = new Enrollment(
+                EnrollmentId: Guid.NewGuid().ToString("N"),
+                SteamId: steamId,
+                RecipientId: Guid.NewGuid().ToString("N"),
+                TokenHash: Hash(accessToken),
+                Status: EnrollmentStatus.Active,
+                EnrolledUtc: DateTimeOffset.UtcNow,
+                LastUsedUtc: null,
+                RevokedUtc: null,
+                RevokedReason: null,
+                QueueWindowId: Environment.GetEnvironmentVariable("LUMBERJACKS_AUTHORITATIVE_WINDOW_ID") ?? "p7-primary-v1");
+            _invites[invite.TokenHash] = invite with { Used = true, EnrollmentId = enrollment.EnrollmentId };
+            _enrollments[enrollment.EnrollmentId] = enrollment;
+            Save();
+            issued = new EnrollmentIssued(View(enrollment), accessToken);
         }
+        return "ok";
     }
+
+    public bool Verify(string enrollmentId, string accessToken, out EnrollmentView view, out string reason)
+    {
+        view = null!;
+        if (string.IsNullOrWhiteSpace(enrollmentId) || string.IsNullOrWhiteSpace(accessToken))
+        {
+            reason = "credentials_required";
+            return false;
+        }
+        lock (_gate)
+        {
+            if (!_enrollments.TryGetValue(enrollmentId, out var enrollment))
+            {
+                reason = "enrollment_unknown";
+                return false;
+            }
+            if (!FixedTimeEquals(enrollment.TokenHash, Hash(accessToken)))
+            {
+                reason = "token_invalid";
+                return false;
+            }
+            if (enrollment.Status != EnrollmentStatus.Active)
+            {
+                reason = "enrollment_revoked";
+                return false;
+            }
+            var now = DateTimeOffset.UtcNow;
+            enrollment = enrollment with { LastUsedUtc = now };
+            _enrollments[enrollmentId] = enrollment;
+            // Persisting on every verified request would thrash the store at the
+            // consumer poll rate; the on-disk last-used value trails by ≤60 s.
+            if (!_persistedLastUsed.TryGetValue(enrollmentId, out var persisted) ||
+                now - persisted >= LastUsedPersistInterval)
+            {
+                _persistedLastUsed[enrollmentId] = now;
+                Save();
+            }
+            view = View(enrollment);
+        }
+        reason = "ok";
+        return true;
+    }
+
+    /// <summary>Compatibility shim for callers that only need a boolean.</summary>
+    public bool IsCredentialValid(string enrollmentId, string accessToken) =>
+        Verify(enrollmentId, accessToken, out _, out _);
+
+    public IReadOnlyList<EnrollmentView> List()
+    {
+        lock (_gate) return _enrollments.Values.Select(View).OrderBy(item => item.EnrolledUtc).ToList();
+    }
+
+    public EnrollmentView? Get(string enrollmentId)
+    {
+        lock (_gate) return _enrollments.TryGetValue(enrollmentId, out var item) ? View(item) : null;
+    }
+
+    public bool Revoke(string enrollmentId, string reason)
+    {
+        lock (_gate)
+        {
+            if (!_enrollments.TryGetValue(enrollmentId, out var enrollment) ||
+                enrollment.Status != EnrollmentStatus.Active) return false;
+            _enrollments[enrollmentId] = enrollment with
+            {
+                Status = EnrollmentStatus.Revoked,
+                RevokedUtc = DateTimeOffset.UtcNow,
+                RevokedReason = string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason,
+            };
+            Save();
+        }
+        Audit("enrollment_revoked", new { enrollment_id = enrollmentId, reason });
+        return true;
+    }
+
+    static EnrollmentView View(Enrollment enrollment) => new(
+        enrollment.EnrollmentId,
+        enrollment.SteamId,
+        enrollment.RecipientId,
+        enrollment.Status.ToString().ToLowerInvariant(),
+        enrollment.EnrolledUtc,
+        enrollment.LastUsedUtc,
+        enrollment.QueueWindowId);
 
     static string NewToken() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
         .TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
+    static string Hash(string token) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+
     static bool FixedTimeEquals(string left, string right)
     {
-        var a = System.Text.Encoding.UTF8.GetBytes(left ?? string.Empty);
-        var b = System.Text.Encoding.UTF8.GetBytes(right ?? string.Empty);
+        var a = Encoding.UTF8.GetBytes(left ?? string.Empty);
+        var b = Encoding.UTF8.GetBytes(right ?? string.Empty);
         return a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
+    }
+
+    void Audit(string eventName, object detail)
+    {
+        try
+        {
+            var line = JsonSerializer.Serialize(new { utc = DateTimeOffset.UtcNow, @event = eventName, detail });
+            lock (_gate) File.AppendAllText(_auditPath, line + "\n");
+        }
+        catch
+        {
+            // The audit trail must never take the control plane down.
+        }
     }
 
     void Load()
     {
-        try { if (File.Exists(_path)) _invites = JsonSerializer.Deserialize<Dictionary<string, Invite>>(File.ReadAllText(_path)) ?? _invites; } catch { }
+        try
+        {
+            if (!File.Exists(_path)) return;
+            var text = File.ReadAllText(_path);
+            using var probe = JsonDocument.Parse(text);
+            if (probe.RootElement.TryGetProperty("schema_version", out _))
+            {
+                var store = JsonSerializer.Deserialize<StoreFile>(text, SerializerOptions);
+                if (store is not null)
+                {
+                    _invites = store.Invites ?? _invites;
+                    _enrollments = store.Enrollments ?? _enrollments;
+                }
+                return;
+            }
+            MigrateV1(text);
+        }
+        catch
+        {
+            // An unreadable store yields an empty roster: fail closed (nobody
+            // verifies) rather than failing open.
+        }
     }
+
+    /// <summary>v1 stored raw invite tokens as keys and raw access tokens inline.</summary>
+    void MigrateV1(string text)
+    {
+        var v1 = JsonSerializer.Deserialize<Dictionary<string, V1Invite>>(text);
+        if (v1 is null) return;
+        foreach (var (rawToken, invite) in v1)
+        {
+            string? enrollmentId = null;
+            if (invite.Enrollment is not null)
+            {
+                enrollmentId = invite.Enrollment.ManifestId;
+                _enrollments[enrollmentId] = new Enrollment(
+                    EnrollmentId: enrollmentId,
+                    SteamId: invite.Enrollment.SteamId,
+                    RecipientId: Guid.NewGuid().ToString("N"),
+                    TokenHash: Hash(invite.Enrollment.AccessToken),
+                    Status: EnrollmentStatus.Active,
+                    EnrolledUtc: invite.Enrollment.EnrolledUtc,
+                    LastUsedUtc: null,
+                    RevokedUtc: null,
+                    RevokedReason: null,
+                    QueueWindowId: invite.Enrollment.QueueWindowId);
+            }
+            _invites[Hash(rawToken)] = new Invite(Hash(rawToken), invite.CreatedUtc, invite.ExpiresUtc, invite.Used, enrollmentId);
+        }
+        Save();
+        Audit("store_migrated_v1", new { invites = _invites.Count, enrollments = _enrollments.Count });
+    }
+
+    static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+    };
 
     void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        File.WriteAllText(_path, JsonSerializer.Serialize(_invites, new JsonSerializerOptions { WriteIndented = true }));
+        var store = new StoreFile(2, _invites, _enrollments);
+        File.WriteAllText(_path, JsonSerializer.Serialize(store, SerializerOptions));
     }
 
-    public sealed record Invite(string Token, DateTimeOffset CreatedUtc, DateTimeOffset ExpiresUtc, bool Used = false, Enrollment? Enrollment = null);
+    public enum EnrollmentStatus { Active, Revoked }
+
+    sealed record StoreFile(
+        [property: System.Text.Json.Serialization.JsonPropertyName("schema_version")] int SchemaVersion,
+        Dictionary<string, Invite> Invites,
+        Dictionary<string, Enrollment> Enrollments);
+
+    public sealed record Invite(string TokenHash, DateTimeOffset CreatedUtc, DateTimeOffset ExpiresUtc, bool Used = false, string? EnrollmentId = null);
     public sealed record InviteReceipt(string Token, DateTimeOffset ExpiresUtc);
+    public sealed record EnrollmentIssued(EnrollmentView Enrollment, string AccessToken);
+
     public sealed record Enrollment(
+        string EnrollmentId,
+        string SteamId,
+        string RecipientId,
+        string TokenHash,
+        EnrollmentStatus Status,
+        DateTimeOffset EnrolledUtc,
+        DateTimeOffset? LastUsedUtc,
+        DateTimeOffset? RevokedUtc,
+        string? RevokedReason,
+        string QueueWindowId);
+
+    /// <summary>Secret-free projection served to admins and to the enrollee itself.</summary>
+    public sealed record EnrollmentView(
+        string EnrollmentId,
+        string SteamId,
+        string RecipientId,
+        string Status,
+        DateTimeOffset EnrolledUtc,
+        DateTimeOffset? LastUsedUtc,
+        string QueueWindowId);
+
+    sealed record V1Invite(string Token, DateTimeOffset CreatedUtc, DateTimeOffset ExpiresUtc, bool Used = false, V1Enrollment? Enrollment = null);
+    sealed record V1Enrollment(
         string SteamId,
         string ManifestId,
         DateTimeOffset EnrolledUtc,

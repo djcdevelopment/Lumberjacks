@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using Game.Contracts.Protocol;
 using Game.Persistence;
 using Game.ServiceDefaults;
@@ -5,6 +6,7 @@ using Game.Gateway.Valheim;
 using Game.Gateway.WebSocket;
 using Game.Simulation.Tick;
 using Game.Simulation.World;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +24,74 @@ builder.Services.AddSingleton<ValheimZdoInjectionService>();
 builder.Services.AddSingleton<ValheimHandshakeService>();
 builder.Services.AddSingleton<ValheimTelemetryHeartbeatService>();
 builder.Services.AddSingleton<SteamEnrollmentService>();
+
+// M1 per-surface rate limits. Private/loopback callers (operator tunnel,
+// server containers) are exempt; public surfaces get independent budgets so
+// invite redemption, consumer poll/ACK, and telemetry cannot starve each
+// other. The consumer budget is deliberately far above the frozen 0.5.31
+// mod's poll cadence — these limits exist to bound abuse, not to shape
+// normal traffic.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { error = "rate_limited", surface = context.HttpContext.Request.Path.Value },
+            cancellationToken);
+    };
+
+    static string ClientKey(HttpContext context) =>
+        context.Request.Headers["X-Lumberjacks-Enrollment-Id"].ToString() is { Length: > 0 } id
+            ? id
+            : context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+    static bool IsPrivate(HttpContext context)
+    {
+        var address = context.Connection.RemoteIpAddress;
+        if (address is null || System.Net.IPAddress.IsLoopback(address)) return true;
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        var bytes = address.GetAddressBytes();
+        if (bytes.Length != 4) return false;
+        return bytes[0] == 10 ||
+            (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
+            (bytes[0] == 192 && bytes[1] == 168);
+    }
+
+    options.AddPolicy("join", context => IsPrivate(context)
+        ? RateLimitPartition.GetNoLimiter("private")
+        : RateLimitPartition.GetFixedWindowLimiter(ClientKey(context), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+        }));
+
+    options.AddPolicy("enrollment-admin", context => IsPrivate(context)
+        ? RateLimitPartition.GetNoLimiter("private")
+        : RateLimitPartition.GetFixedWindowLimiter(ClientKey(context), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 30,
+            Window = TimeSpan.FromMinutes(1),
+        }));
+
+    options.AddPolicy("consumer", context => IsPrivate(context)
+        ? RateLimitPartition.GetNoLimiter("private")
+        : RateLimitPartition.GetSlidingWindowLimiter(ClientKey(context), _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = 1000,
+            Window = TimeSpan.FromSeconds(10),
+            SegmentsPerWindow = 5,
+        }));
+
+    options.AddPolicy("telemetry", context => IsPrivate(context)
+        ? RateLimitPartition.GetNoLimiter("private")
+        : RateLimitPartition.GetSlidingWindowLimiter(ClientKey(context), _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = 120,
+            Window = TimeSpan.FromSeconds(10),
+            SegmentsPerWindow = 5,
+        }));
+});
 
 // Simulation services (in-process — eliminates HTTP-per-move hop)
 builder.Services.AddSingleton<WorldState>();
@@ -71,6 +141,7 @@ catch (Exception ex)
 }
 
 app.MapServiceDefaults();
+app.UseRateLimiter();
 app.UseMiddleware<ValheimClientAccessMiddleware>();
 app.UseWebSockets();
 app.UseMiddleware<GameWebSocketMiddleware>();

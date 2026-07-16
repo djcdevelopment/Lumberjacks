@@ -49,7 +49,7 @@ public static class ValheimTelemetryHeartbeatEndpoints
 
             service.Record(heartbeat);
             return Results.Ok(new { ok = true, received_at = DateTimeOffset.UtcNow });
-        });
+        }).RequireRateLimiting("telemetry");
 
         app.MapGet("/api/v0/telemetry/valheim", (ValheimTelemetryHeartbeatService service) =>
             Results.Ok(service.Snapshot()))
@@ -60,11 +60,20 @@ public static class ValheimTelemetryHeartbeatEndpoints
             Results.Ok(service.CutoverSnapshot(redirects, consumers)))
             .RequireCors(PublicTelemetryV0.CorsPolicyName);
 
-        app.MapGet("/api/v0/valheim/enrollment/{manifestId}", (string manifestId, ValheimTelemetryHeartbeatService service) =>
+        app.MapGet("/api/v0/valheim/enrollment/{manifestId}", (string manifestId, HttpContext context, ValheimTelemetryHeartbeatService service) =>
         {
             if (string.IsNullOrWhiteSpace(manifestId))
             {
                 return Results.BadRequest(new { error = "manifestId is required" });
+            }
+
+            // Enrollment credentials only see their own snapshot; the private
+            // plane (operator) may read any.
+            var principal = ValheimPrincipal.From(context);
+            if (principal?.Enrollment is not null &&
+                !string.Equals(principal.Enrollment.EnrollmentId, manifestId, StringComparison.Ordinal))
+            {
+                return Results.Json(new { error = "recipient_forbidden" }, statusCode: StatusCodes.Status403Forbidden);
             }
 
             return Results.Ok(service.EnrollmentSnapshot(manifestId));

@@ -23,7 +23,7 @@ public static class ValheimZdoInjectionEndpoints
             return result.Ok
                 ? Results.Ok(new { ok = true, window_id = windowId, commands = result.Commands })
                 : Results.BadRequest(new { ok = false, error = result.Error });
-        });
+        }).RequireRateLimiting("consumer");
 
         group.MapPost("/ack", (ValheimZdoInjectionAckRequest request,
             ValheimZdoInjectionService service) =>
@@ -33,7 +33,7 @@ public static class ValheimZdoInjectionEndpoints
                 ? Results.Ok(new { ok = true, window_id = request.WindowId,
                     command_id = request.CommandId, client_id = request.ClientId })
                 : Results.BadRequest(new { ok = false, error = result.Error });
-        });
+        }).RequireRateLimiting("consumer");
 
         group.MapGet("/status", (ValheimZdoInjectionService service) =>
             Results.Ok(new { windows = service.GetAllStatuses() }));

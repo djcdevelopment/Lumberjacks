@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text;
 
 namespace Game.Gateway.Valheim;
 
@@ -7,6 +6,9 @@ public static class SteamEnrollmentEndpoints
 {
     public static void Map(WebApplication app)
     {
+        // The capability middleware already requires admin for /api/v0/enrollment*;
+        // the legacy header check stays as defense in depth for deployments that
+        // still run without the middleware-gated private plane.
         app.MapPost("/api/v0/enrollment/invites", (HttpRequest request, SteamEnrollmentService service) =>
         {
             var admin = Environment.GetEnvironmentVariable("LUMBERJACKS_ADMIN_KEY");
@@ -14,6 +16,29 @@ public static class SteamEnrollmentEndpoints
             var invite = service.CreateInvite(TimeSpan.FromHours(24));
             var baseUrl = Environment.GetEnvironmentVariable("LUMBERJACKS_ENROLLMENT_PUBLIC_URL") ?? "http://127.0.0.1:4006";
             return Results.Ok(new { invite_url = $"{baseUrl.TrimEnd('/')}/join?t={invite.Token}", expires_utc = invite.ExpiresUtc });
+        }).RequireRateLimiting("enrollment-admin");
+
+        app.MapGet("/api/v0/enrollment", (SteamEnrollmentService service) =>
+            Results.Ok(new
+            {
+                schema_version = 1,
+                enrollments = service.List().Select(ToResponse),
+            })).RequireRateLimiting("enrollment-admin");
+
+        app.MapPost("/api/v0/enrollment/{enrollmentId}/revoke", (string enrollmentId, RevokeRequest? body, SteamEnrollmentService service) =>
+        {
+            if (!service.Revoke(enrollmentId, body?.Reason ?? "unspecified"))
+                return Results.NotFound(new { error = "enrollment_unknown_or_not_active" });
+            return Results.Ok(new { ok = true, enrollment_id = enrollmentId });
+        }).RequireRateLimiting("enrollment-admin");
+
+        // Pseudonymous self-view for the enrolled client (M2 preflight consumes this).
+        app.MapGet("/api/v0/valheim/enrollment/me", (HttpContext context) =>
+        {
+            var principal = ValheimPrincipal.From(context);
+            if (principal?.Enrollment is null)
+                return Results.Json(new { error = "enrollment_credential_required" }, statusCode: StatusCodes.Status403Forbidden);
+            return Results.Ok(ToResponse(principal.Enrollment));
         });
 
         app.MapGet("/join", (HttpRequest request) =>
@@ -23,7 +48,7 @@ public static class SteamEnrollmentEndpoints
             var callback = $"{baseUrl.TrimEnd('/')}/join/steam-callback?t={Uri.EscapeDataString(token)}";
             var login = "https://steamcommunity.com/openid/login?openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&openid.mode=checkid_setup&openid.return_to=" + Uri.EscapeDataString(callback) + "&openid.realm=" + Uri.EscapeDataString(baseUrl) + "&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select";
             return Results.Text($"<html><body><h1>Lumberjacks invite</h1><p>Use Steam to redeem this one-time invitation.</p><a href=\"{WebUtility.HtmlEncode(login)}\">Sign in with Steam</a></body></html>", "text/html");
-        });
+        }).RequireRateLimiting("join");
 
         app.MapGet("/join/steam-callback", async (HttpRequest request, SteamEnrollmentService service, IHttpClientFactory clients) =>
         {
@@ -40,29 +65,35 @@ public static class SteamEnrollmentEndpoints
             if (!response.IsSuccessStatusCode || !body.Contains("is_valid:true", StringComparison.OrdinalIgnoreCase)) return Results.Unauthorized();
 
             var steamId = claimed[(claimed.LastIndexOf('/') + 1)..];
-            if (!service.Redeem(token, steamId, out var enrollment)) return Results.BadRequest(new { error = "invite invalid, expired, or already used" });
+            if (!service.TryRedeem(token, steamId, out var issued, out var reason))
+                return Results.BadRequest(new { error = reason });
             var gateway = Environment.GetEnvironmentVariable("LUMBERJACKS_PLAYER_GATEWAY_URL") ?? baseUrlFor(request);
-            return Results.Text(BuildConfig(enrollment, gateway), "text/plain");
-        });
-
+            return Results.Text(BuildConfig(issued, gateway), "text/plain");
+        }).RequireRateLimiting("join");
     }
+
+    static object ToResponse(SteamEnrollmentService.EnrollmentView view) => new
+    {
+        enrollment_id = view.EnrollmentId,
+        steam_id = view.SteamId,
+        recipient_id = view.RecipientId,
+        status = view.Status,
+        enrolled_utc = view.EnrolledUtc,
+        last_used_utc = view.LastUsedUtc,
+        queue_window_id = view.QueueWindowId,
+    };
 
     static string baseUrlFor(HttpRequest request) => $"{request.Scheme}://{request.Host}";
 
-    static object BuildConfigObject(SteamEnrollmentService.Enrollment enrollment, string gateway) => new
-    {
-        lumberjacksGatewayUrl = gateway,
-        lumberjacksAuthoritativeWindowId = enrollment.QueueWindowId,
-        lumberjacksEnrollmentId = enrollment.ManifestId,
-        lumberjacksClientAccessKey = enrollment.AccessToken,
-    };
-
-    static string BuildConfig(SteamEnrollmentService.Enrollment enrollment, string gateway) =>
-        $"Lumberjacks enrollment complete. SteamID={enrollment.SteamId}\n\n" +
+    // The raw access token appears exactly once: in this issuance response.
+    // It is stored hashed and is never returned by any other endpoint.
+    static string BuildConfig(SteamEnrollmentService.EnrollmentIssued issued, string gateway) =>
+        $"Lumberjacks enrollment complete. SteamID={issued.Enrollment.SteamId}\n\n" +
         "[Lumberjacks]\n" +
         $"lumberjacksGatewayUrl = {gateway}\n" +
-        $"lumberjacksAuthoritativeWindowId = {enrollment.QueueWindowId}\n" +
-        $"lumberjacksEnrollmentId = {enrollment.ManifestId}\n" +
-        $"lumberjacksClientAccessKey = {enrollment.AccessToken}\n";
+        $"lumberjacksAuthoritativeWindowId = {issued.Enrollment.QueueWindowId}\n" +
+        $"lumberjacksEnrollmentId = {issued.Enrollment.EnrollmentId}\n" +
+        $"lumberjacksClientAccessKey = {issued.AccessToken}\n";
 
+    public sealed record RevokeRequest(string? Reason);
 }

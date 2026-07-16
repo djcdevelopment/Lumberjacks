@@ -75,7 +75,8 @@ public static class ValheimZdoRedirectEndpoints
         });
 
         group.MapGet("/pending/{windowId}", (string windowId, int? limit, ValheimZdoRedirectService redirects) =>
-            Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) }));
+            Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) }))
+            .RequireRateLimiting("consumer");
 
         group.MapPost("/consumer", (ValheimZdoConsumerHeartbeat heartbeat,
             ValheimZdoConsumerTelemetryService consumers) =>
@@ -93,7 +94,7 @@ public static class ValheimZdoRedirectEndpoints
 
             consumers.Record(heartbeat);
             return Results.Ok(new { ok = true, received_at = DateTimeOffset.UtcNow });
-        });
+        }).RequireRateLimiting("telemetry");
 
         app.MapGet("/api/v0/valheim/zdo-consumers/{windowId}", (string windowId,
             ValheimZdoConsumerTelemetryService consumers) => Results.Ok(consumers.Snapshot(windowId)))
@@ -105,7 +106,7 @@ public static class ValheimZdoRedirectEndpoints
                 return Results.BadRequest(new { error = "sequences is required" });
             var result = redirects.Acknowledge(windowId, sequences);
             return Results.Ok(new { window_id = windowId, acknowledged = result.Acknowledged, unknown = result.Unknown });
-        });
+        }).RequireRateLimiting("consumer");
 
         group.MapPost("/reset/{windowId}", (string windowId, ValheimZdoRedirectService redirects) =>
         {
