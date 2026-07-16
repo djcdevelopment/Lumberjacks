@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "ONE-CLIENT ZDO CUTOVER PROVEN · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-15T23:35:00-07:00",
+  "updated_at": "2026-07-15T23:40:00-07:00",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M0",
@@ -236,11 +236,11 @@
         "Rollback artifacts and the Era16 world snapshot are present, restore without a source rebuild, and pass readiness plus exact-hash verification in the documented drill.",
         "The validated P7 baseline is published at an immutable repository revision, and no secret appears in tracked or generic artifacts."
       ],
-    "inputs": [
-      "Validated, hash-recorded local P7 baseline; immutable public publication is pending M0.",
-      "Current Gateway image digest, mod DLL SHA-256, deployment receipt, world snapshot, and FieldLab run packets.",
-      "The 2026-07-16 owner observation confirmed that OMEN, GCP, and the declared 0.5.31 artifacts align at runtime, while dirty source provenance still prevents clean-checkout reproduction.",
-      "The live Gateway image was built from a non-Git source copy. Normalized cutover/runtime sources match the working tree, but roadmap-only sources differ and the existing capture manifest and rollback scripts omit required identities and readiness checks."
+      "inputs": [
+        "Validated, hash-recorded local P7 baseline; immutable public publication is pending M0.",
+        "Current Gateway image digest, mod DLL SHA-256, deployment receipt, world snapshot, and FieldLab run packets.",
+        "The 2026-07-16 owner observation confirmed that OMEN, GCP, and the declared 0.5.31 artifacts align at runtime, while dirty source provenance still prevents clean-checkout reproduction.",
+        "The live Gateway image was built from a non-Git source copy. Normalized cutover/runtime sources match the working tree, but roadmap-only sources differ and the existing capture manifest and rollback scripts omit required identities and readiness checks."
       ],
       "exit_evidence": []
     },
@@ -249,7 +249,9 @@
       "title": "Make identity and admission authoritative",
       "track": "shared",
       "status": "queued",
-      "depends_on": ["M0"],
+      "depends_on": [
+        "M0"
+      ],
       "owns": "Steam enrollment identity, least-privilege authorization, readiness leases, strict admission, the enforced one-seat reservation, and validated public TLS.",
       "does_not_own": "Recipient-scoped queue semantics, producer loss safety, guest installation, or traffic-proof presentation.",
       "summary": "Bind the actual joining Steam account to enrollment, compatibility, capacity, and a fresh consumer readiness lease.",
@@ -276,7 +278,9 @@
       "title": "Ship a boring, reversible guest package",
       "track": "volunteer",
       "status": "queued",
-      "depends_on": ["M1"],
+      "depends_on": [
+        "M1"
+      ],
       "owns": "The immutable guest artifact, one-use bootstrap, installer, preflight, redacted diagnostics, generated guide, backup, and uninstall experience.",
       "does_not_own": "The per-session traffic ledger, dashboard conservation verdict, participation receipt, or concurrent delivery isolation.",
       "summary": "Replace hand copying and hand-edited config with an immutable generic package plus a personal one-use bootstrap.",
@@ -303,7 +307,9 @@
       "title": "Make traffic proof definitive and durable",
       "track": "volunteer",
       "status": "queued",
-      "depends_on": ["M1"],
+      "depends_on": [
+        "M1"
+      ],
       "owns": "The capacity-one per-run ledger, conservation pipeline, volunteer/operator/public dashboard views, bounded telemetry, sealed receipt, and final verdict rules.",
       "does_not_own": "Concurrent recipient queue isolation, producer outbox correctness, or the real two-client gate; those belong to M4a and M4b.",
       "summary": "For the enforced one-seat window, prove each selected ZDO revision reached durable Gateway storage, the authenticated client, Unity application or safe supersession, and a durable terminal acknowledgement.",
@@ -321,11 +327,11 @@
         "A service restart or WAL compaction does not erase or alter the sealed run, its release identity, conservation result, or canonical receipt hash.",
         "Late old-run messages and a fast reconnect cannot mutate the next run or suppress traffic into a closing epoch; a forced incomplete close is retained with a non-PROVEN verdict."
       ],
-    "inputs": [
-      "M0 immutable release identity and hash-recorded P7 metric vocabulary.",
-      "M1 enrollment, readiness, authorization, and run-identity contracts.",
-      "The top-level conservation proof pipeline in this roadmap source.",
-      "The 2026-07-16 owner observation captured exact live closure, then observed the empty-server reset erase the Gateway receipt denominator before any per-run receipt was sealed."
+      "inputs": [
+        "M0 immutable release identity and hash-recorded P7 metric vocabulary.",
+        "M1 enrollment, readiness, authorization, and run-identity contracts.",
+        "The top-level conservation proof pipeline in this roadmap source.",
+        "The 2026-07-16 owner observation captured exact live closure, then observed the empty-server reset erase the Gateway receipt denominator before any per-run receipt was sealed."
       ],
       "exit_evidence": []
     },
@@ -334,7 +340,9 @@
       "title": "Prove automated recipient isolation and loss safety",
       "track": "multiplayer",
       "status": "queued",
-      "depends_on": ["M1"],
+      "depends_on": [
+        "M1"
+      ],
       "owns": "Recipient-scoped durable queue semantics, exact per-peer readiness, stable delivery identity, structured terminal outcomes, reconnect/takeover rules, and the producer outbox.",
       "does_not_own": "Real Steam-client quality, human onboarding, or cohort capacity claims.",
       "summary": "Remove the shared-window queue and producer-loss hazards while preserving the peer identity available at Valheim's per-peer sync-list boundary.",
@@ -360,7 +368,9 @@
       "title": "Prove two real Steam clients",
       "track": "multiplayer",
       "status": "gated",
-      "depends_on": ["M4a"],
+      "depends_on": [
+        "M4a"
+      ],
       "owns": "The first real concurrent correctness result across dense/shared and separated regions, reconnects, restarts, and save/reload.",
       "does_not_own": "External volunteer onboarding or claims beyond two real clients.",
       "summary": "Move the automated recipient model through two simultaneous real Valheim clients before any multi-seat invitation exists.",
@@ -386,7 +396,10 @@
       "title": "Run the one-seat external canary",
       "track": "volunteer",
       "status": "gated",
-      "depends_on": ["M2", "M3"],
+      "depends_on": [
+        "M2",
+        "M3"
+      ],
       "owns": "The first end-to-end non-developer volunteer journey from informed invite through retained participation receipt and clean uninstall.",
       "does_not_own": "Concurrent delivery correctness; the optional 60-minute play extension is useful evidence but is not required to close M5.",
       "summary": "Invite one trusted non-developer only after the host has proved the exact cold-started deployment and rollback path.",
@@ -415,7 +428,10 @@
       "title": "Widen in evidence-backed waves",
       "track": "widening",
       "status": "gated",
-      "depends_on": ["M4b", "M5"],
+      "depends_on": [
+        "M4b",
+        "M5"
+      ],
       "owns": "Evidence-backed promotion from the proven two-client model and volunteer journey to 2–4 and then 5–8 real-player cohorts.",
       "does_not_own": "Lumberjacks relevance/inference authority or claims extrapolated solely from synthetic clients.",
       "summary": "Move from the owned two-account gate to 2–4 and then 5–8 invited players only when correctness and capacity evidence permit.",
@@ -442,7 +458,9 @@
       "title": "Move inference and remaining authority into Lumberjacks",
       "track": "authority",
       "status": "later",
-      "depends_on": ["M6"],
+      "depends_on": [
+        "M6"
+      ],
       "owns": "Shadowing, validating, and promoting Lumberjacks relevance/inference and later authority planes one bounded claim at a time.",
       "does_not_own": "Unmeasured transport replacement or removal of Steam/Valheim compatibility dependencies that still provide value.",
       "summary": "Use the volunteer platform as the safety harness for shadowing and replacing Valheim's relevance, ownership, replication, and remaining RPC judgments.",
@@ -688,7 +706,10 @@
     "verdict_reason": "Exact delivery accounting was captured, but this was not a predeclared acceptance run and the empty-server reset erased live Gateway receipt state before a retained per-run receipt could be sealed.",
     "milestone_effect": "No milestone advanced. This corroborates the existing one-client P7 baseline and confirms the M3 retained-ledger exit criterion.",
     "operational_observation": "Two auxiliary consumer-telemetry POST attempts failed after the main drain and recovered; poll, application, and acknowledgement delivery were unaffected.",
-    "informs": ["M0", "M3"],
+    "informs": [
+      "M0",
+      "M3"
+    ],
     "evidence": {
       "status": "local_only",
       "label": "FieldLab castle-port session packet",
@@ -707,18 +728,54 @@
       "statement": "83,220 of 83,220 eligible ZDO revisions in the declared strict single-client window closed through Lumberjacks; this is not a denominator for all Valheim networking."
     },
     "metrics": [
-      ["Eligible revisions in declared window", "83,220"],
-      ["Durable receipts", "83,220"],
-      ["Exact applications", "72,946"],
-      ["Safe supersessions", "10,274"],
-      ["Acknowledgements", "83,220"],
-      ["Pending", "0"],
-      ["Eligible native-only sends", "0"],
-      ["Priority tagged", "83,220 (100%)"],
-      ["Observed reject / duplicate / retry", "0 / 0 / 0"],
-      ["Poll / ACK / telemetry failures", "0 / 0 / 0"],
-      ["Peer-ready → first apply", "6.721 s"],
-      ["Peer-ready → complete", "102.114 s"]
+      [
+        "Eligible revisions in declared window",
+        "83,220"
+      ],
+      [
+        "Durable receipts",
+        "83,220"
+      ],
+      [
+        "Exact applications",
+        "72,946"
+      ],
+      [
+        "Safe supersessions",
+        "10,274"
+      ],
+      [
+        "Acknowledgements",
+        "83,220"
+      ],
+      [
+        "Pending",
+        "0"
+      ],
+      [
+        "Eligible native-only sends",
+        "0"
+      ],
+      [
+        "Priority tagged",
+        "83,220 (100%)"
+      ],
+      [
+        "Observed reject / duplicate / retry",
+        "0 / 0 / 0"
+      ],
+      [
+        "Poll / ACK / telemetry failures",
+        "0 / 0 / 0"
+      ],
+      [
+        "Peer-ready → first apply",
+        "6.721 s"
+      ],
+      [
+        "Peer-ready → complete",
+        "102.114 s"
+      ]
     ],
     "publication": {
       "status": "local_pending_m0",
@@ -726,13 +783,41 @@
     }
   },
   "authority_planes": [
-    ["Invite / Steam enrollment", "Partial", "Implemented, but not yet the sole live admission roster."],
-    ["Valheim admission", "Partial", "Gateway responder exists; must bind actual SteamID, enrollment, release, readiness, and capacity."],
-    ["Eligible server-to-client ZDO delivery", "Proved for one client", "Validated, hash-recorded strict P7 window; concurrent queue isolation is not yet proved."],
-    ["Candidate relevance / inference", "Native", "Valheim still creates the peer-specific candidate list."],
-    ["ZDO application", "Lumberjacks adapter", "Client poller applies and validates on Unity's main thread before ACK."],
-    ["Ownership / simulation / non-ZDO RPC", "Native", "Later authority-plane work."],
-    ["Steam login / base peer transport", "Native by design", "May remain bootstrap and compatibility unless replacement adds measured value."]
+    [
+      "Invite / Steam enrollment",
+      "Partial",
+      "Implemented, but not yet the sole live admission roster."
+    ],
+    [
+      "Valheim admission",
+      "Partial",
+      "Gateway responder exists; must bind actual SteamID, enrollment, release, readiness, and capacity."
+    ],
+    [
+      "Eligible server-to-client ZDO delivery",
+      "Proved for one client",
+      "Validated, hash-recorded strict P7 window; concurrent queue isolation is not yet proved."
+    ],
+    [
+      "Candidate relevance / inference",
+      "Native",
+      "Valheim still creates the peer-specific candidate list."
+    ],
+    [
+      "ZDO application",
+      "Lumberjacks adapter",
+      "Client poller applies and validates on Unity's main thread before ACK."
+    ],
+    [
+      "Ownership / simulation / non-ZDO RPC",
+      "Native",
+      "Later authority-plane work."
+    ],
+    [
+      "Steam login / base peer transport",
+      "Native by design",
+      "May remain bootstrap and compatibility unless replacement adds measured value."
+    ]
   ],
   "no_go": [
     "The current p7-primary-v1 queue and ACK state are shared; two consumers can steal or close each other's peer-specific records.",
