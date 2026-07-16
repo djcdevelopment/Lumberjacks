@@ -202,11 +202,18 @@ surfaces:
    `SeatLeaseSeconds` (default 60). A holder who is really there refreshes it
    continuously; one who crashed or never landed stops instantly. Gateway-only, no
    mod cut. Remaining limits: liveness is window-scoped, so it cannot say *which*
-   holder is alive (fine at one seat, the reason `SeatCapacity > 1` counts but is
-   not yet meaningful), and a holder who runs no consumer is invisible to it. The
-   separate `_connectedUids` growth bug stands — a client that crashes and
-   reconnects *without restarting Valheim* keeps its session `uid` and is rejected
-   `ErrorAlreadyConnected` (gate G) until the window is reset.
+   holder is alive (fine at one seat, the reason `SeatCapacity > 1` is refused), and
+   a holder who runs no consumer is invisible to it.
+   The seat is keyed on `host_name`, not `uid`, so a reconnecting volunteer is
+   recognised and refreshes their own seat; the lease only ever gates a *different*
+   player. **A previous revision claimed `_connectedUids` growth was a lockout — a
+   client crashing and reconnecting without restarting Valheim keeping its `uid` and
+   being rejected `ErrorAlreadyConnected` forever. That was wrong.**
+   `ZDOMan.m_sessionID` is `readonly` and constructed in `ZNet.Awake()`
+   (`ZNet.decompiled.cs:264`), and ZNet is destroyed on leaving a world, so every
+   reconnect carries a fresh random uid. `_connectedUids` growth is therefore a
+   small unbounded-memory leak whose entries never collide, not a lockout. The same
+   fact is why a uid-keyed seat could not recognise its own holder returning.
 5. **A Gateway accept is overturnable, and the Gateway never learns.** The mod
    hardcodes `ticketValid: true` (`HandshakeResponderPatches.cs:50`) — it never
    verifies the ticket; vanilla runs the real `VerifySessionTicket(ticket, peerID)`

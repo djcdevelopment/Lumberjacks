@@ -93,12 +93,18 @@ public sealed record ValheimHandshakeServerContext
     /// How long a seat survives with no sign of life from its holder — see
     /// <see cref="ValheimWindowActivityService"/> for why liveness, not a plain timer, drives this.
     ///
-    /// 60s is chosen against the failure that actually bites: the sole volunteer crashing and
-    /// wanting back in (plan §5.4). Their session uid is regenerated per game process, so a rejoin
-    /// cannot be recognised as the same player and must wait out the lease. Relaunching Valheim
-    /// takes longer than 60s, so in practice the seat is already free when they return. The cost of
-    /// the short lease is that a holder whose consumer stalls for a full minute could have their
-    /// seat taken — which requires a second player to exist, and today there is one volunteer.
+    /// The lease only ever bites a DIFFERENT player, because the seat is keyed on the holder's
+    /// stable `host_name` — the volunteer reconnecting is recognised and refreshes their own seat
+    /// rather than waiting it out. (An earlier revision keyed the seat on `uid` and justified 60s
+    /// by "relaunching Valheim takes longer than that anyway". Both halves were wrong: `uid` is
+    /// rebuilt on every reconnect, not every process — `ZDOMan.m_sessionID` is readonly and built
+    /// in `ZNet.Awake()`, ZNet.decompiled.cs:264 — so quitting to the menu and returning in 20s
+    /// would have been told the server was full.)
+    ///
+    /// So 60s now trades only against a stranger: how long after a holder vanishes before someone
+    /// else may take the seat. Short enough that a genuinely departed volunteer frees it promptly;
+    /// long enough to ride out a consumer hiccup. The residual cost is a holder whose consumer
+    /// stalls a full minute could lose their seat to a second player — and today there is one.
     /// </summary>
     public int SeatLeaseSeconds { get; init; } = 60;
 
@@ -358,9 +364,20 @@ public sealed class ValheimHandshakeService
         private DateTime? _firstUtc;
         private DateTime? _lastUtc;
 
-        /// <summary>Uids currently holding a seat, and when each was last granted or refreshed.
-        /// Bounded by SeatCapacity, so this cannot grow the way _connectedUids does.</summary>
-        private readonly Dictionary<long, DateTime> _seats = new();
+        /// <summary>
+        /// Who holds a seat, keyed on the socket's Steam identity (`host_name`), and when it was
+        /// last granted or refreshed. Bounded by SeatCapacity, so it cannot grow the way
+        /// _connectedUids does.
+        ///
+        /// Keyed on host_name and NOT on uid: `ZDOMan.m_sessionID` is a readonly field built in
+        /// `ZNet.Awake()` (ZNet.decompiled.cs:264), and ZNet is destroyed when you leave a world —
+        /// so every reconnect carries a brand-new uid, even without restarting Valheim. A
+        /// uid-keyed seat therefore cannot recognise its own holder coming back, and would tell a
+        /// volunteer who quit to the menu and returned 20s later that the server is full for the
+        /// rest of the lease. host_name is stable across reconnects and is the same identity
+        /// vanilla ticket-verifies (:882).
+        /// </summary>
+        private readonly Dictionary<string, DateTime> _seats = new(StringComparer.Ordinal);
 
         public void Configure(ValheimHandshakeServerContext context)
         {
@@ -403,7 +420,7 @@ public sealed class ValheimHandshakeService
                     {
                         _steadyState++;
                         _connectedUids.Add(s.Uid); // now IsConnected(uid) for the next attempt
-                        TakeSeat(s.Uid, nowUtc);
+                        TakeSeat(s.HostName, nowUtc);
                     }
                 }
                 else
@@ -481,7 +498,7 @@ public sealed class ValheimHandshakeService
             // is the only native code whose meaning matches ("the server has no room for you") —
             // the player sees vanilla's full-server screen, and the reason rides failed_check into
             // the server log for the operator (plan §6: only the int reaches the client).
-            if (SeatUnavailableFor(s.Uid, nowUtc, lastActivityUtc))
+            if (SeatUnavailableFor(s.HostName, nowUtc, lastActivityUtc))
                 return Reject(ValheimConnectionStatus.ErrorFull, "capacity_reserved");
 
             // All pass ⇒ server replies PeerInfo and AddPeer(zdoMan)/AddPeer(routedRpc) (:975-976).
@@ -503,7 +520,7 @@ public sealed class ValheimHandshakeService
         /// is alive, which is exactly good enough at one seat and is why SeatCapacity > 1 is
         /// honoured for counting but not really meaningful yet.
         /// </summary>
-        private bool SeatUnavailableFor(long uid, DateTime nowUtc, DateTime? lastActivityUtc)
+        private bool SeatUnavailableFor(string? holderId, DateTime nowUtc, DateTime? lastActivityUtc)
         {
             if (_context.SeatCapacity <= 0)
                 return false;
@@ -513,11 +530,10 @@ public sealed class ValheimHandshakeService
 
             foreach (var (holder, grantedUtc) in _seats)
             {
-                // Not reachable while gate G stands: a uid in _seats is always in _connectedUids
-                // (both are set on the same accept), so a re-handshake is rejected as a duplicate
-                // long before check H. Kept as a guard, not a feature — if G ever stops owning that
-                // case, the seat gate must not tell a player their own seat is taken.
-                if (holder == uid)
+                // The seat is already ours: this is the volunteer reconnecting, which gate G cannot
+                // recognise because their uid is new every session. Refresh rather than compete —
+                // otherwise quitting to the menu costs them their own server for a full lease.
+                if (string.Equals(holder, holderId, StringComparison.Ordinal))
                     return false;
                 if (activityIsLive || nowUtc - grantedUtc < lease)
                     return true; // SeatCapacity is validated to 0..1, so one live holder is enough
@@ -525,9 +541,9 @@ public sealed class ValheimHandshakeService
             return false;
         }
 
-        private void TakeSeat(long uid, DateTime nowUtc)
+        private void TakeSeat(string? holderId, DateTime nowUtc)
         {
-            if (_context.SeatCapacity <= 0)
+            if (_context.SeatCapacity <= 0 || string.IsNullOrWhiteSpace(holderId))
                 return;
             // Reaching here means SeatUnavailableFor found no live holder, so any surviving entry
             // has lapsed by definition and clearing is safe. Doing it this way keeps ONE liveness
@@ -535,7 +551,7 @@ public sealed class ValheimHandshakeService
             // while the gate counted grant age OR activity, so a live holder could be purged by the
             // very join their own liveness should have blocked.
             _seats.Clear();
-            _seats[uid] = nowUtc;
+            _seats[holderId] = nowUtc;
         }
 
         private bool IsAllowed(string host, string name)
