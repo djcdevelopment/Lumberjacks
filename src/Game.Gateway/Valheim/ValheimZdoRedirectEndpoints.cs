@@ -104,30 +104,18 @@ public static class ValheimZdoRedirectEndpoints
         group.MapPost("/consumer", (ValheimZdoConsumerHeartbeat heartbeat, HttpContext context,
             ValheimZdoConsumerTelemetryService consumers) =>
         {
-            if (string.IsNullOrWhiteSpace(heartbeat.WindowId) ||
-                string.IsNullOrWhiteSpace(heartbeat.ModVersion) ||
-                string.IsNullOrWhiteSpace(heartbeat.TimestampUtc))
-            {
-                return Results.BadRequest(new
-                {
-                    error = "window_id, mod_version, and timestamp_utc are required",
-                });
-            }
-
+            // The rule lives in ValheimConsumerHeartbeatPolicy, not here, and that is the point:
+            // nothing in this lambda is reachable from a test (Game.Gateway.Tests is service-level
+            // throughout, and a WebApplicationFactory here means standing up Postgres), so a
+            // decision left inside it is a decision nobody can check. This method now only plumbs.
             var recipientId = ValheimPrincipal.From(context)?.Enrollment?.RecipientId;
-            if (string.IsNullOrWhiteSpace(recipientId) && string.IsNullOrWhiteSpace(heartbeat.ConsumerId))
+            var resolved = ValheimConsumerHeartbeatPolicy.Resolve(heartbeat, recipientId);
+            if (resolved.Error is not null)
             {
-                return Results.BadRequest(new
-                {
-                    error = "consumer_id is required when the caller presents no enrollment to derive a recipient from",
-                });
+                return Results.BadRequest(new { error = resolved.Error });
             }
 
-            var recorded = string.IsNullOrWhiteSpace(recipientId)
-                ? heartbeat // private plane / legacy shared key: no enrollment to derive from
-                : heartbeat with { ConsumerId = recipientId };
-
-            consumers.Record(recorded);
+            consumers.Record(resolved.Recorded!);
             return Results.Ok(new { ok = true, received_at = DateTimeOffset.UtcNow });
         }).RequireRateLimiting("telemetry");
 
