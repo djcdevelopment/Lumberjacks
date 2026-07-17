@@ -322,20 +322,25 @@ surfaces:
    thing the gate should ever fire on. The mod should **not** hash its own DLL at
    runtime: the code doing the hashing is the DLL, so it buys no assurance for its
    cost.
-   **NOT IMPLEMENTED AS DECIDED — found 2026-07-17 while starting the stage-3 cut.** The
-   Gateway half (`e3bc9f4`) takes `ExpectedModReleaseId` as a **window context field, set at
-   runtime via `POST /config`**. There is no build-time constant, no manifest tie, nothing
-   derived from the release at all. That is not merely the environment-file pattern this
-   entry rejected — it is worse: hand-typed, per-window, at runtime. The decision above and
-   the code disagree, and the decision was written first, by the same hand, hours earlier.
-   Exactly the failure risk 10 documents: a plan asserting something the code does not do.
-   The gate still *works* — it compares what it is given — but what it is given is an
-   operator's opinion, so it currently attests "someone typed a matching string", not
-   "this build is the release the manifest names". **Do not cut a release around it until
-   this is fixed**, because the cut would bake the wrong scheme into the artifact the scheme
-   exists to identify. The fix is small and mechanical — an MSBuild property from the
-   manifest into a constant, with the context defaulting to it and the field remaining an
-   override for tests — and is stage-3 blocking, not optional.
+   **Implemented wrong, then fixed — 2026-07-17.** The first Gateway half (`e3bc9f4`) took
+   `ExpectedModReleaseId` only as a window context field set at runtime via `POST /config`:
+   an operator's opinion, which is the second source of truth this entry rejected, worse for
+   being per-window and un-reviewable. The decision and the code disagreed, written hours
+   apart by the same hand — the exact failure risk 10 documents. Caught by *starting the cut*
+   and re-reading the decision against the code, which is the only thing that catches it.
+   Fixed in `9def403`: `LumberjacksExpectedModRelease` is an MSBuild property emitted as
+   `AssemblyMetadata`, so the expected value is compiled in and travels with the image; the
+   context **defaults** to it and the field survives only as a test override. `"dev"` = uncut
+   build = no expectation = gate off. Proven by making the build flag change behaviour
+   (building with `-p:LumberjacksExpectedModRelease=proof-release-xyz` fails exactly
+   `UncutBuild_ReadsAsNoExpectation`) rather than by a green run, since "the baked value is
+   null" passes identically when the metadata never emits.
+   **Residual asymmetry:** the mod cannot use this — it sets `GenerateAssemblyInfo=false`, so
+   `AssemblyMetadata` does not emit — and keeps `ReleaseId` as a const set at the cut, like
+   `PluginVersion`. Both are compiled into their artifact and both are set from the manifest's
+   id, so the "one record" is the manifest; but it is now **two places a cut must touch**, and
+   only a cut script keeps them honest. A cut that sets one and forgets the other produces a
+   Gateway that rejects the very mod it shipped with.
    **Qualified by risk 12** — the DLL hash this leans on is not currently
    reproducible across checkouts. That does not change the decision (the manifest
    is still the only reachable root), but it does mean the hash attests "the
