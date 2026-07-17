@@ -84,31 +84,45 @@ public static class ValheimZdoRedirectEndpoints
             return Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) });
         }).RequireRateLimiting("consumer");
 
-        // The consumer names itself: `consumer_id` is a GUID the client picks
-        // (ZdoAuthoritativeConsumerRunner.cs:35), so anything keyed on it is keyed on a value the
-        // caller chose. Where the caller presented an enrollment, the server-derived RecipientId
-        // replaces it — the client cannot select which recipient it is recorded as.
+        // Who a consumer IS is the server's to say, not the caller's. Where the caller presented an
+        // enrollment, the server-derived RecipientId is what gets recorded — the client cannot
+        // select which recipient it is filed as.
         //
-        // Overridden rather than rejected on mismatch. The frozen 0.5.31 mod has no idea its
-        // recipient id exists and always sends its own GUID, so a mismatch is the normal case, not
-        // an attack; rejecting it would refuse every real heartbeat. It never reads the value back
-        // (it ignores this response body entirely), so substituting is invisible to it. Once the
-        // mod cut stops the client naming itself at all, this can tighten to a reject.
+        // `consumer_id` is therefore OPTIONAL as of the stage-3 mod cut, which stops the client
+        // naming itself at all (ZdoAuthoritativeConsumerRunner no longer has a _consumerId). It
+        // stays *accepted* rather than refused because the frozen 0.5.31 mod always sends a GUID it
+        // invented, so a mismatch is the normal case and not an attack; refusing it would break
+        // every heartbeat from a rolled-back mod. The mod never reads the value back — it ignores
+        // this response body entirely — so substituting is invisible to it.
+        //
+        // Required only when there is no enrollment to derive from: the legacy shared-key path has
+        // no server-side identity, so a caller-supplied label is the only one available.
+        //
+        // Tightening this to a 403 on mismatch is deliberately NOT done here. It becomes correct
+        // once no supported mod sends the field, and doing it while a rollback to 0.5.31 must keep
+        // working would trade a real outage for a property the override already provides.
         group.MapPost("/consumer", (ValheimZdoConsumerHeartbeat heartbeat, HttpContext context,
             ValheimZdoConsumerTelemetryService consumers) =>
         {
             if (string.IsNullOrWhiteSpace(heartbeat.WindowId) ||
-                string.IsNullOrWhiteSpace(heartbeat.ConsumerId) ||
                 string.IsNullOrWhiteSpace(heartbeat.ModVersion) ||
                 string.IsNullOrWhiteSpace(heartbeat.TimestampUtc))
             {
                 return Results.BadRequest(new
                 {
-                    error = "window_id, consumer_id, mod_version, and timestamp_utc are required",
+                    error = "window_id, mod_version, and timestamp_utc are required",
                 });
             }
 
             var recipientId = ValheimPrincipal.From(context)?.Enrollment?.RecipientId;
+            if (string.IsNullOrWhiteSpace(recipientId) && string.IsNullOrWhiteSpace(heartbeat.ConsumerId))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "consumer_id is required when the caller presents no enrollment to derive a recipient from",
+                });
+            }
+
             var recorded = string.IsNullOrWhiteSpace(recipientId)
                 ? heartbeat // private plane / legacy shared key: no enrollment to derive from
                 : heartbeat with { ConsumerId = recipientId };
