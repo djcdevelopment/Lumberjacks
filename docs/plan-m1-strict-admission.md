@@ -120,6 +120,45 @@ drills/rebuilds don't burn issuance rate limits.
    fresh invite. TTL is 24h (`LUMBERJACKS_BOOTSTRAP_TTL_HOURS`) to make that unlikely
    rather than impossible; a self-serve re-issue is the real fix and is not built.
 
+**Stage 3 build status — 2026-07-17.** The mod-side half is **built and committed,
+undeployed**, all of it shipping OFF. Nothing below has touched P7.
+
+- *Transport* (comfy `b7395d3`, `e09937c`, `4700b4f`): the raw-socket client is extracted
+  into Unity-free `BoundedRawHttp` and shared by the handshake and the consumer — the
+  socket and the bounded read only; each caller still builds its own head, because the
+  consumer's credential headers come from `PluginConfig` and its port-less `Host` is what
+  the Gateway has always been sent. **TLS is in**: `https` authenticates with
+  `SslProtocols.Tls12` and accepts only `SslPolicyErrors.None`. Revocation is not checked —
+  known and bounded (§5.1 still owes the Mono cipher proof against a real server; the TLS
+  *success* path is unprovable in a unit test without a machine-trusted cert, so what is
+  proven is that an untrusted cert is **refused**).
+- *Release identity* (comfy `585bfac`): the handshake now sends `mod_version` and
+  `mod_release_id` — the build answering, not the client joining. `ReleaseId` is a hand-set
+  const beside `PluginVersion`, `"dev"` until a cut names it, per §5.9.
+- *Fail-closed* (comfy `585bfac`): both fault paths — dead endpoint, unparseable verdict —
+  now meet in one place, because they are one event: no verdict we can trust.
+  `handshakeResponderStrictMode` defaults **false** (today's fail-open); ON rejects with
+  `ErrorConnectFailed` (5), **not** `ErrorBanned` — the fault is not the player's and
+  telling them they are banned is a lie they cannot act on. Leaving it off stays the
+  labelled native-recovery mode §3 calls for. Not unit-tested and not pretended to be: it
+  reads `PluginConfig` and logs via `ZLog`, so it cannot link into the Unity-free test
+  assembly, and what it adds is one ternary — the behaviour that matters is the live check
+  this stage already requires.
+- *TLS termination* (comfy `a74442d`): a Caddy sidecar, digest-pinned, **inert behind the
+  `tls` compose profile** — `docker compose up` cannot start it by accident. ACME state is
+  on a persistent mount, which is the whole point: the drill rebuilds this stack, and a
+  fresh `/data` re-issues until Let's Encrypt's 5/week duplicate limit locks TLS out for
+  days.
+
+**Still needs a human, and none of it is mod work:** a real **DNS A record** (ACME will not
+issue for a bare IP — the long pole), an ACME contact address, and firewall openings for
+**80** and 443 (80 is not optional; HTTP-01 needs it, and terraform opens only the player
+port today). Then the live verifications this stage has always owed: Gateway stopped ⇒
+strict refuses; the §4 `2-dark` rows on the wire; https end to end; a capture check for a
+reusable credential on a plaintext link. Plus the priority-drain baseline the consumer's
+new deadline is owed (§5.8) — it is a ceiling and should not move healthy timing, but that
+is reasoning, not measurement.
+
 Release cuts: stages 1–2 can ship as one Gateway release; stage 3 is the
 single mod+Gateway cut; stage 4 rides the next Gateway cut. Every cut goes
 through bundle validation and the promotion drill per the M0 pipeline.
