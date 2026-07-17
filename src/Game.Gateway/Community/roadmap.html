@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-17T10:56:54.213Z</span>
+        <span>Updated 2026-07-17T11:29:50.925Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260717105654-cut-the-readiness-lease-from-m1-s-exit-gate-its-">
+        <div class="journal"><article class="journal-entry" id="note-20260717112950-pin-the-roadmap-artifact-and-its-sources-to-lf-s">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-17T11:29:50.925Z">2026-07-17T11:29:50.925Z</time>
+        <span class="pill note-kind">implementation</span>
+        <span>Lumberjacks</span>
+        <span>M0</span>
+      </div>
+      <h3>Pin the roadmap artifact and its sources to LF so a fresh clone cannot break byte verification</h3>
+      <p><strong>Impact:</strong> The repository had no .gitattributes, so roadmap.html&#39;s bytes depended on the accident of how a given checkout was made. scripts/roadmap.mjs writes LF; with core.autocrlf=true, the Windows default, a fresh clone checks the artifact out as CRLF, which changes the bytes. Three things then break at once: roadmap:check compares a CRLF file against a fresh LF render and fails with a spurious stale, telling the operator to regenerate a page that was never wrong; X-Roadmap-Sha256 stops matching the committed artifact, so the served page can no longer be verified byte-for-byte against the tree, which is the whole point of reporting it; and every render rewrites the files back to LF as permanent working-tree churn. This machine only avoided it because the generator wrote the files and git had not yet touched them. The two JSON sources are pinned for the same reason: the script writes them LF and would fight the checkout on every note. Comfy already pins its evidence folder this way.</p>
+      <details><summary>Verification (1)</summary><ul><li>git check-attr reports text unset for all three paths, the LF-to-CRLF warnings they previously emitted are gone, and the artifact&#39;s SHA-256 is unchanged at cd808269, so the pin renormalizes nothing that was already committed. Roadmap check still passes.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>.gitattributes</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260717105654-cut-the-readiness-lease-from-m1-s-exit-gate-its-">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">
