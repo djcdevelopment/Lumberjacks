@@ -5,14 +5,21 @@ using System.Text.Json;
 namespace Game.Gateway.Valheim;
 
 /// <summary>
-/// File-backed enrollment store for the volunteer pilot (M1 schema v2).
+/// File-backed enrollment store for the volunteer pilot (M1 schema v3).
 ///
-/// Invite and access tokens are 256-bit random values, so a single unsalted
-/// SHA-256 at rest is cryptographically sufficient (no KDF stretching is needed
-/// for high-entropy secrets) and cheap enough to verify on every authenticated
-/// request. Raw secrets exist only in the issuance response; they are never
-/// persisted and never returned again. A v1 plaintext store found on disk is
+/// Invite, bootstrap, and access tokens are 256-bit random values, so a single
+/// unsalted SHA-256 at rest is cryptographically sufficient (no KDF stretching is
+/// needed for high-entropy secrets) and cheap enough to verify on every
+/// authenticated request. Raw secrets exist only in the issuance response; they are
+/// never persisted and never returned again. A v1 plaintext store found on disk is
 /// migrated in place on first load.
+///
+/// Redeeming an invite issues a single-use <see cref="Bootstrap"/>, not the access
+/// token. The access token is minted when the installer consumes the bootstrap
+/// (<see cref="TryConsumeBootstrap"/>), so the reusable credential never reaches the
+/// browser, and — because it is minted on consumption rather than parked in the store
+/// waiting for one — it never exists at rest in any form. A bootstrap is worthless
+/// once used, so the value the volunteer copies out of a browser cannot be replayed.
 /// </summary>
 public sealed class SteamEnrollmentService
 {
@@ -21,13 +28,30 @@ public sealed class SteamEnrollmentService
     readonly string _auditPath;
     Dictionary<string, Invite> _invites = new(StringComparer.Ordinal);
     Dictionary<string, Enrollment> _enrollments = new(StringComparer.Ordinal);
+    Dictionary<string, Bootstrap> _bootstraps = new(StringComparer.Ordinal);
     readonly Dictionary<string, DateTimeOffset> _persistedLastUsed = new(StringComparer.Ordinal);
     static readonly TimeSpan LastUsedPersistInterval = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Defaults to the invite's own 24h lifetime. The single-use rule is what makes a
+    /// bootstrap safe to hand to a browser; the window only bounds how long a copied
+    /// code stays live in history or a clipboard. Too short is its own hazard: the
+    /// enrollment already exists and one-active-per-SteamID refuses a second, so a
+    /// volunteer whose bootstrap expired before they installed needs an admin to
+    /// revoke and re-invite. Configurable because expiry is otherwise untestable —
+    /// this service reads the clock directly and has no injection point.
+    /// </summary>
+    public const double DefaultBootstrapTtlHours = 24;
+    readonly TimeSpan _bootstrapLifetime;
 
     public SteamEnrollmentService(IConfiguration configuration)
     {
         _path = configuration["LUMBERJACKS_ENROLLMENT_PATH"] ?? "/var/lib/lumberjacks/enrollment/invites.json";
         _auditPath = Path.Combine(Path.GetDirectoryName(_path) ?? ".", "enrollment-audit.jsonl");
+        _bootstrapLifetime = TimeSpan.FromHours(
+            double.TryParse(configuration["LUMBERJACKS_BOOTSTRAP_TTL_HOURS"], out var hours)
+                ? hours
+                : DefaultBootstrapTtlHours);
         Load();
     }
 
@@ -44,7 +68,7 @@ public sealed class SteamEnrollmentService
         return new InviteReceipt(token, invite.ExpiresUtc);
     }
 
-    public bool TryRedeem(string token, string steamId, out EnrollmentIssued issued, out string reason)
+    public bool TryRedeem(string token, string steamId, out BootstrapIssued issued, out string reason)
     {
         issued = null!;
         reason = RedeemLocked(token, steamId, out issued);
@@ -57,7 +81,7 @@ public sealed class SteamEnrollmentService
         return true;
     }
 
-    string RedeemLocked(string token, string steamId, out EnrollmentIssued issued)
+    string RedeemLocked(string token, string steamId, out BootstrapIssued issued)
     {
         issued = null!;
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(steamId)) return "invite_invalid";
@@ -76,24 +100,81 @@ public sealed class SteamEnrollmentService
                 return "steamid_already_enrolled";
             }
 
-            var accessToken = NewToken();
+            // No access token is minted here. The enrollment starts with an empty
+            // TokenHash — it exists and holds the SteamID's seat, but carries no
+            // credential until the installer consumes the bootstrap. Verify refuses
+            // an empty hash outright, so a pending enrollment authenticates nothing.
+            var now = DateTimeOffset.UtcNow;
             var enrollment = new Enrollment(
                 EnrollmentId: Guid.NewGuid().ToString("N"),
                 SteamId: steamId,
                 RecipientId: Guid.NewGuid().ToString("N"),
-                TokenHash: Hash(accessToken),
+                TokenHash: string.Empty,
                 Status: EnrollmentStatus.Active,
-                EnrolledUtc: DateTimeOffset.UtcNow,
+                EnrolledUtc: now,
                 LastUsedUtc: null,
                 RevokedUtc: null,
                 RevokedReason: null,
                 QueueWindowId: Environment.GetEnvironmentVariable("LUMBERJACKS_AUTHORITATIVE_WINDOW_ID") ?? "p7-primary-v1");
+            var bootstrapToken = NewToken();
+            var bootstrap = new Bootstrap(
+                TokenHash: Hash(bootstrapToken),
+                EnrollmentId: enrollment.EnrollmentId,
+                CreatedUtc: now,
+                ExpiresUtc: now.Add(_bootstrapLifetime));
             _invites[invite.TokenHash] = invite with { Used = true, EnrollmentId = enrollment.EnrollmentId };
             _enrollments[enrollment.EnrollmentId] = enrollment;
+            _bootstraps[bootstrap.TokenHash] = bootstrap;
             Save();
-            issued = new EnrollmentIssued(View(enrollment), accessToken);
+            issued = new BootstrapIssued(View(enrollment), bootstrapToken, bootstrap.ExpiresUtc);
         }
         return "ok";
+    }
+
+    /// <summary>
+    /// Exchanges a single-use bootstrap for the enrollment's access token, minting the
+    /// token at consumption. Replay fails: the bootstrap is marked used inside the same
+    /// lock that reads it, so two racing installers cannot both mint a credential, and
+    /// the second sees bootstrap_consumed.
+    /// </summary>
+    public bool TryConsumeBootstrap(string bootstrapToken, out EnrollmentIssued issued, out string reason)
+    {
+        issued = null!;
+        if (string.IsNullOrWhiteSpace(bootstrapToken))
+        {
+            reason = "bootstrap_invalid";
+            Audit("bootstrap_rejected", new { reason });
+            return false;
+        }
+
+        string enrollmentId;
+        lock (_gate)
+        {
+            if (!_bootstraps.TryGetValue(Hash(bootstrapToken), out var bootstrap)) reason = "bootstrap_invalid";
+            else if (bootstrap.Used) reason = "bootstrap_consumed";
+            else if (bootstrap.ExpiresUtc <= DateTimeOffset.UtcNow) reason = "bootstrap_expired";
+            else if (!_enrollments.TryGetValue(bootstrap.EnrollmentId, out var enrollment)) reason = "enrollment_unknown";
+            else if (enrollment.Status != EnrollmentStatus.Active) reason = "enrollment_revoked";
+            else
+            {
+                var accessToken = NewToken();
+                var credentialed = enrollment with { TokenHash = Hash(accessToken) };
+                _enrollments[credentialed.EnrollmentId] = credentialed;
+                _bootstraps[bootstrap.TokenHash] = bootstrap with { Used = true, ConsumedUtc = DateTimeOffset.UtcNow };
+                Save();
+                issued = new EnrollmentIssued(View(credentialed), accessToken);
+                reason = "ok";
+            }
+            enrollmentId = issued?.Enrollment.EnrollmentId ?? string.Empty;
+        }
+
+        if (reason != "ok")
+        {
+            Audit("bootstrap_rejected", new { reason });
+            return false;
+        }
+        Audit("bootstrap_consumed", new { enrollment_id = enrollmentId });
+        return true;
     }
 
     public bool Verify(string enrollmentId, string accessToken, out EnrollmentView view, out string reason)
@@ -109,6 +190,15 @@ public sealed class SteamEnrollmentService
             if (!_enrollments.TryGetValue(enrollmentId, out var enrollment))
             {
                 reason = "enrollment_unknown";
+                return false;
+            }
+            // An enrollment whose bootstrap has not been consumed carries no
+            // credential. FixedTimeEquals would already refuse it on length, but the
+            // guard is explicit so that a future change to the hash encoding cannot
+            // turn "no credential" into a comparison that might succeed.
+            if (string.IsNullOrEmpty(enrollment.TokenHash))
+            {
+                reason = "bootstrap_pending";
                 return false;
             }
             if (!FixedTimeEquals(enrollment.TokenHash, Hash(accessToken)))
@@ -245,6 +335,11 @@ public sealed class SteamEnrollmentService
                 {
                     _invites = store.Invites ?? _invites;
                     _enrollments = store.Enrollments ?? _enrollments;
+                    // v2 has no bootstraps property; it deserializes to null and the
+                    // next Save rewrites the file as v3. Existing v2 enrollments keep
+                    // their access token hash and keep verifying, so a store written
+                    // before this change needs no migration pass of its own.
+                    _bootstraps = store.Bootstraps ?? _bootstraps;
                 }
                 return;
             }
@@ -354,7 +449,7 @@ public sealed class SteamEnrollmentService
     void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var store = new StoreFile(2, _invites, _enrollments);
+        var store = new StoreFile(3, _invites, _enrollments, _bootstraps);
         File.WriteAllText(_path, JsonSerializer.Serialize(store, SerializerOptions));
     }
 
@@ -363,10 +458,29 @@ public sealed class SteamEnrollmentService
     sealed record StoreFile(
         [property: System.Text.Json.Serialization.JsonPropertyName("schema_version")] int SchemaVersion,
         Dictionary<string, Invite> Invites,
-        Dictionary<string, Enrollment> Enrollments);
+        Dictionary<string, Enrollment> Enrollments,
+        Dictionary<string, Bootstrap>? Bootstraps = null);
 
     public sealed record Invite(string TokenHash, DateTimeOffset CreatedUtc, DateTimeOffset ExpiresUtc, bool Used = false, string? EnrollmentId = null);
     public sealed record InviteReceipt(string Token, DateTimeOffset ExpiresUtc);
+
+    /// <summary>
+    /// Single-use handoff from the browser to the installer. Holds only a hash and the
+    /// enrollment it credentials — never a secret, because the access token it yields
+    /// does not exist until this is consumed.
+    /// </summary>
+    public sealed record Bootstrap(
+        string TokenHash,
+        string EnrollmentId,
+        DateTimeOffset CreatedUtc,
+        DateTimeOffset ExpiresUtc,
+        bool Used = false,
+        DateTimeOffset? ConsumedUtc = null);
+
+    /// <summary>What the browser gets: a single-use code, no reusable credential.</summary>
+    public sealed record BootstrapIssued(EnrollmentView Enrollment, string BootstrapToken, DateTimeOffset ExpiresUtc);
+
+    /// <summary>What the installer gets, exactly once: the access token itself.</summary>
     public sealed record EnrollmentIssued(EnrollmentView Enrollment, string AccessToken);
 
     public sealed record Enrollment(

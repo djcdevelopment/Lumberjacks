@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Game.Gateway.Valheim;
 using Microsoft.Extensions.Configuration;
@@ -12,7 +13,7 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
     string StorePath => Path.Combine(_directory, "invites.json");
 
     [Fact]
-    public void Redeem_BindsSteamIdentityToCredentialAndQueueWindow()
+    public void Redeem_BindsSteamIdentityToQueueWindowAndIssuesOnlyABootstrap()
     {
         var service = CreateService();
         var invite = service.CreateInvite(TimeSpan.FromMinutes(5));
@@ -23,9 +24,84 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
         Assert.Equal("p7-primary-v1", issued.Enrollment.QueueWindowId);
         Assert.NotEmpty(issued.Enrollment.EnrollmentId);
         Assert.NotEmpty(issued.Enrollment.RecipientId);
-        Assert.NotEmpty(issued.AccessToken);
-        Assert.True(service.IsCredentialValid(issued.Enrollment.EnrollmentId, issued.AccessToken));
-        Assert.False(service.IsCredentialValid(issued.Enrollment.EnrollmentId, "wrong"));
+        Assert.NotEmpty(issued.BootstrapToken);
+
+        // What the browser holds is not a credential. The enrollment exists and owns
+        // the SteamID's seat, but authenticates nothing until the installer acts.
+        Assert.False(service.Verify(issued.Enrollment.EnrollmentId, issued.BootstrapToken, out _, out var pending));
+        Assert.Equal("bootstrap_pending", pending);
+
+        Assert.True(service.TryConsumeBootstrap(issued.BootstrapToken, out var credentialed, out _));
+        Assert.Equal(issued.Enrollment.EnrollmentId, credentialed.Enrollment.EnrollmentId);
+        Assert.Equal(issued.Enrollment.RecipientId, credentialed.Enrollment.RecipientId);
+        Assert.NotEmpty(credentialed.AccessToken);
+        Assert.True(service.IsCredentialValid(credentialed.Enrollment.EnrollmentId, credentialed.AccessToken));
+        Assert.False(service.IsCredentialValid(credentialed.Enrollment.EnrollmentId, "wrong"));
+    }
+
+    [Fact]
+    public void Bootstrap_IsSingleUse()
+    {
+        var service = CreateService();
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var issued, out _));
+        Assert.True(service.TryConsumeBootstrap(issued.BootstrapToken, out var installed, out _));
+
+        Assert.False(service.TryConsumeBootstrap(issued.BootstrapToken, out _, out var reason));
+        Assert.Equal("bootstrap_consumed", reason);
+
+        // Replay fails without disturbing what the one legitimate consume minted.
+        Assert.True(service.IsCredentialValid(installed.Enrollment.EnrollmentId, installed.AccessToken));
+    }
+
+    [Fact]
+    public void Bootstrap_MintsAFreshCredentialRatherThanReplayingOne()
+    {
+        var service = CreateService();
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var first, out _));
+        Assert.True(service.TryConsumeBootstrap(first.BootstrapToken, out var firstInstall, out _));
+
+        // A revoke-and-re-invite cycle must not resurrect the previous credential.
+        Assert.True(service.Revoke(firstInstall.Enrollment.EnrollmentId, "replaced in test"));
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var second, out _));
+        Assert.True(service.TryConsumeBootstrap(second.BootstrapToken, out var secondInstall, out _));
+
+        Assert.NotEqual(firstInstall.AccessToken, secondInstall.AccessToken);
+        Assert.False(service.IsCredentialValid(firstInstall.Enrollment.EnrollmentId, firstInstall.AccessToken));
+        Assert.True(service.IsCredentialValid(secondInstall.Enrollment.EnrollmentId, secondInstall.AccessToken));
+    }
+
+    [Fact]
+    public void Bootstrap_RejectsExpired()
+    {
+        var service = CreateService(bootstrapTtlHours: -1);
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var issued, out _));
+
+        Assert.False(service.TryConsumeBootstrap(issued.BootstrapToken, out _, out var reason));
+        Assert.Equal("bootstrap_expired", reason);
+        // Expiry leaves the enrollment credential-less rather than open.
+        Assert.False(service.Verify(issued.Enrollment.EnrollmentId, issued.BootstrapToken, out _, out var pending));
+        Assert.Equal("bootstrap_pending", pending);
+    }
+
+    [Fact]
+    public void Bootstrap_RejectsUnknownTokenAndRevokedEnrollment()
+    {
+        var service = CreateService();
+        Assert.False(service.TryConsumeBootstrap("never-issued", out _, out var unknown));
+        Assert.Equal("bootstrap_invalid", unknown);
+
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var issued, out _));
+        Assert.True(service.Revoke(issued.Enrollment.EnrollmentId, "revoked before install"));
+
+        // An operator who revokes between invite and install must not be overtaken by
+        // a volunteer who still holds the code.
+        Assert.False(service.TryConsumeBootstrap(issued.BootstrapToken, out _, out var revoked));
+        Assert.Equal("enrollment_revoked", revoked);
     }
 
     [Fact]
@@ -69,11 +145,12 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
     {
         var service = CreateService();
         Assert.True(service.TryRedeem(service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var issued, out _));
-        Assert.True(service.Revoke(issued.Enrollment.EnrollmentId, "test revocation"));
+        Assert.True(service.TryConsumeBootstrap(issued.BootstrapToken, out var installed, out _));
+        Assert.True(service.Revoke(installed.Enrollment.EnrollmentId, "test revocation"));
 
-        Assert.False(service.Verify(issued.Enrollment.EnrollmentId, issued.AccessToken, out _, out var reason));
+        Assert.False(service.Verify(installed.Enrollment.EnrollmentId, installed.AccessToken, out _, out var reason));
         Assert.Equal("enrollment_revoked", reason);
-        Assert.False(service.Revoke(issued.Enrollment.EnrollmentId, "twice"));
+        Assert.False(service.Revoke(installed.Enrollment.EnrollmentId, "twice"));
     }
 
     [Fact]
@@ -83,9 +160,18 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
         var invite = service.CreateInvite(TimeSpan.FromMinutes(5));
         Assert.True(service.TryRedeem(invite.Token, "76561198000000001", out var issued, out _));
 
+        // Before the install: the store holds a pending bootstrap and no credential at
+        // all, because the access token does not exist yet.
+        var pendingText = File.ReadAllText(StorePath);
+        Assert.DoesNotContain(invite.Token, pendingText, StringComparison.Ordinal);
+        Assert.DoesNotContain(issued.BootstrapToken, pendingText, StringComparison.Ordinal);
+
+        Assert.True(service.TryConsumeBootstrap(issued.BootstrapToken, out var installed, out _));
+
         var storeText = File.ReadAllText(StorePath);
         Assert.DoesNotContain(invite.Token, storeText, StringComparison.Ordinal);
-        Assert.DoesNotContain(issued.AccessToken, storeText, StringComparison.Ordinal);
+        Assert.DoesNotContain(issued.BootstrapToken, storeText, StringComparison.Ordinal);
+        Assert.DoesNotContain(installed.AccessToken, storeText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -93,10 +179,30 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
     {
         var service = CreateService();
         Assert.True(service.TryRedeem(service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var issued, out _));
-        Assert.Null(issued.Enrollment.LastUsedUtc);
+        Assert.True(service.TryConsumeBootstrap(issued.BootstrapToken, out var installed, out _));
+        Assert.Null(installed.Enrollment.LastUsedUtc);
 
-        Assert.True(service.Verify(issued.Enrollment.EnrollmentId, issued.AccessToken, out var view, out _));
+        Assert.True(service.Verify(installed.Enrollment.EnrollmentId, installed.AccessToken, out var view, out _));
         Assert.NotNull(view.LastUsedUtc);
+    }
+
+    /// <summary>
+    /// A v2 store predates bootstraps entirely: its enrollments already hold a token
+    /// hash. Loading one under v3 must leave the frozen mod's credential working and
+    /// must not strand it as bootstrap_pending.
+    /// </summary>
+    [Fact]
+    public void Load_V2StoreKeepsWorkingAndUpgradesInPlace()
+    {
+        WriteV1StoreWithDuplicateSteamId();
+        CreateService(); // migrates v1 -> v2-shaped store, then Save writes v3
+
+        var reloaded = CreateService();
+        Assert.True(reloaded.Verify("enrollment-1", "v1-raw-access-token-1", out _, out var reason));
+        Assert.Equal("ok", reason);
+
+        using var store = JsonDocument.Parse(File.ReadAllText(StorePath));
+        Assert.Equal(3, store.RootElement.GetProperty("schema_version").GetInt32());
     }
 
     [Fact]
@@ -246,14 +352,16 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
             reloaded.CreateInvite(TimeSpan.FromMinutes(5)).Token, DuplicateSteamId, out _, out _));
     }
 
-    SteamEnrollmentService CreateService()
+    SteamEnrollmentService CreateService(double? bootstrapTtlHours = null)
     {
         Directory.CreateDirectory(_directory);
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>
         {
             ["LUMBERJACKS_ENROLLMENT_PATH"] = StorePath,
-        }).Build();
-        return new SteamEnrollmentService(config);
+        };
+        if (bootstrapTtlHours is not null)
+            settings["LUMBERJACKS_BOOTSTRAP_TTL_HOURS"] = bootstrapTtlHours.Value.ToString(CultureInfo.InvariantCulture);
+        return new SteamEnrollmentService(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
     }
 
     public void Dispose()

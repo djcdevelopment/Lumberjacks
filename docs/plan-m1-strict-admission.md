@@ -19,9 +19,12 @@ cuts — especially mod cuts.
   (fixed-time compare at `SteamEnrollmentService.cs:52`). No uniqueness per
   SteamID, no revocation/expiry/last-used state on the enrollment itself, no
   audit events, no release-compatibility record.
-- **Credential echo** — `SteamEnrollmentEndpoints.cs:57,66` returns the raw
+- **Credential echo** — ~~`SteamEnrollmentEndpoints.cs:57,66` returns the raw
   `AccessToken` into the browser response as `lumberjacksClientAccessKey`
-  (config-snippet handoff). Reusable secret over plain HTTP today.
+  (config-snippet handoff). Reusable secret over plain HTTP today.~~
+  **Closed in stage 4** (2026-07-17): the callback returns a single-use bootstrap
+  code; `POST /join/bootstrap` mints the access token at consumption, so no reusable
+  credential reaches the browser and none exists at rest.
 - **Authorization** — `ValheimClientAccessMiddleware` accepts either the shared
   `X-Lumberjacks-Client-Key` env credential or an enrollment id+token pair, and
   grants global access; `SteamEnrollmentEndpoints` hand-checks
@@ -51,7 +54,7 @@ cuts — especially mod cuts.
 | --- | --- | --- |
 | One active enrollment per SteamID | Blind append to JSON dictionary | Uniqueness rule + explicit admin replacement |
 | List/revoke/expiry/last-used/audit/compat | Only `EnrolledUtc` tracked | Expanded record + admin endpoints + audit events |
-| Secrets hashed, never re-returned | Plaintext storage; token echoed to browser | Hash at rest; one-time issuance; drop the echo |
+| Secrets hashed, never re-returned | **Closed** (stage 1 + stage 4): hashed at rest; the echo is a single-use bootstrap and the access token is minted on consumption | — |
 | Capability split (admin/producer/consumer/telemetry/public) | Two global keys | Policy-based authorization, capability-scoped credentials |
 | Join hook asks Gateway about actual joining SteamID | **Closed in stage 2**: roster keyed on `host_name`, the socket's Steam-authenticated SteamID64 (§5.3); `uid` is a session id and is not used | Flip `StrictRosterEnabled` on per window; fail-closed still needs the mod cut |
 | Release/protocol compatibility gate | Protocol checked (`net_version != 36`, check A); release **not** checked — the mod sends no release identity of its own (§5.9) | Mod must send its own release identity (stage 3) + a manifest-pinned hash check, with the hash source decided |
@@ -100,10 +103,22 @@ drills/rebuilds don't burn issuance rate limits.
    stopped ⇒ strict mode refuses admission; the §4 `2-dark` rows re-verified on the
    wire; https endpoint exercised end-to-end; no reusable credential on a plaintext
    public link (capture check).
-4. **Bootstrap handoff hardening** (Gateway only) — replace the plaintext
-   config echo with a one-use bootstrap consumed by the installer (M2
-   consumes this; M1 only guarantees no reusable secret crosses the public
-   link in cleartext). Verify replay of a used bootstrap fails.
+4. **Bootstrap handoff hardening** (Gateway only) — **LANDED 2026-07-17, undeployed.**
+   Redeeming an invite now issues a single-use bootstrap instead of the config;
+   `POST /join/bootstrap` exchanges it for the config exactly once. The access token is
+   **minted at consumption**, not parked in the store waiting for one, so it never
+   exists at rest in any form and the enrollment carries no credential until the
+   installer acts (`Verify` returns `bootstrap_pending`, failing closed). POST, not
+   GET, so the code cannot be spent by pasting a URL and stays out of history,
+   referers, and access logs. Public and rate-limited under `join`: it is deliberately
+   outside `IsGated`, because the installer has nothing to authenticate with yet.
+   Store schema v2→v3, upgraded in place on first Save; v2 enrollments keep their token
+   hash and keep verifying. Replay verified by mutation: disabling the single-use gate
+   fails exactly `Bootstrap_IsSingleUse` and nothing else. M2 consumes this.
+   **Open:** an expired bootstrap strands the volunteer — the enrollment exists and
+   one-active-per-SteamID refuses a second, so re-issuing needs an admin revoke plus a
+   fresh invite. TTL is 24h (`LUMBERJACKS_BOOTSTRAP_TTL_HOURS`) to make that unlikely
+   rather than impossible; a self-serve re-issue is the real fix and is not built.
 
 Release cuts: stages 1–2 can ship as one Gateway release; stage 3 is the
 single mod+Gateway cut; stage 4 rides the next Gateway cut. Every cut goes

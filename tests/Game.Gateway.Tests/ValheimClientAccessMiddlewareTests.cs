@@ -144,7 +144,10 @@ public sealed class ValheimClientAccessMiddlewareTests : IDisposable
             ["LUMBERJACKS_ENROLLMENT_PATH"] = Path.Combine(_directory, "invites.json"),
         }).Build();
         var service = new SteamEnrollmentService(config);
-        Assert.True(service.TryRedeem(service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var issued, out _));
+        Assert.True(service.TryRedeem(service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var bootstrap, out _));
+        // Redeeming only issues the browser's one-use code; the access token these
+        // tests present as a client key exists only once the installer spends it.
+        Assert.True(service.TryConsumeBootstrap(bootstrap.BootstrapToken, out var issued, out _));
         return (service, issued);
     }
 

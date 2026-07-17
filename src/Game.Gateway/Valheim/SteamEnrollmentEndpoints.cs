@@ -67,6 +67,17 @@ public static class SteamEnrollmentEndpoints
             var steamId = claimed[(claimed.LastIndexOf('/') + 1)..];
             if (!service.TryRedeem(token, steamId, out var issued, out var reason))
                 return Results.BadRequest(new { error = reason });
+            return Results.Text(BuildHandoff(issued), "text/plain");
+        }).RequireRateLimiting("join");
+
+        // Public by design: the bootstrap token is the only credential, it is
+        // single-use, and the installer has nothing else to authenticate with yet.
+        // POST rather than GET so the code cannot be spent by pasting the URL into a
+        // browser, and so it stays out of history, referers, and access logs.
+        app.MapPost("/join/bootstrap", (BootstrapRequest? body, HttpRequest request, SteamEnrollmentService service) =>
+        {
+            if (!service.TryConsumeBootstrap(body?.Token ?? string.Empty, out var issued, out var reason))
+                return Results.BadRequest(new { error = reason });
             var gateway = Environment.GetEnvironmentVariable("LUMBERJACKS_PLAYER_GATEWAY_URL") ?? baseUrlFor(request);
             return Results.Text(BuildConfig(issued, gateway), "text/plain");
         }).RequireRateLimiting("join");
@@ -85,8 +96,18 @@ public static class SteamEnrollmentEndpoints
 
     static string baseUrlFor(HttpRequest request) => $"{request.Scheme}://{request.Host}";
 
-    // The raw access token appears exactly once: in this issuance response.
-    // It is stored hashed and is never returned by any other endpoint.
+    // What the browser sees. Deliberately not the config: this page is the one part of
+    // the flow that lands in history, screenshots, and over-the-shoulder views, so it
+    // carries a code that is worthless the moment the installer spends it.
+    static string BuildHandoff(SteamEnrollmentService.BootstrapIssued issued) =>
+        $"Lumberjacks enrollment complete. SteamID={issued.Enrollment.SteamId}\n\n" +
+        "Setup code (works once):\n\n" +
+        $"    {issued.BootstrapToken}\n\n" +
+        $"Paste it into the Lumberjacks installer to finish setup. It expires {issued.ExpiresUtc:u}.\n" +
+        "If it expires or is used, ask the operator to re-invite you.\n";
+
+    // The raw access token appears exactly once: in this response, to whoever spent the
+    // bootstrap. It is minted here, stored only as a hash, and never returned again.
     static string BuildConfig(SteamEnrollmentService.EnrollmentIssued issued, string gateway) =>
         $"Lumberjacks enrollment complete. SteamID={issued.Enrollment.SteamId}\n\n" +
         "[Lumberjacks]\n" +
@@ -96,4 +117,5 @@ public static class SteamEnrollmentEndpoints
         $"lumberjacksClientAccessKey = {issued.AccessToken}\n";
 
     public sealed record RevokeRequest(string? Reason);
+    public sealed record BootstrapRequest(string? Token);
 }
