@@ -416,19 +416,32 @@ surfaces:
     0.5.31 needs its recipe — check out `b32bb5e`, convert every `.cs` to LF, build
     Release.** That recipe is now proven, and is the only way to verify what runs on
     P7 against source.
-    **RESIDUAL, UNRESOLVED — do not call this fixed.** With the pin in place and the
-    mod sources **byte-identical** between a fresh clone and the working tree, the two
-    still build different DLLs (`6ba2965c…` vs `391c6dd8…`), under the manifest's own
-    build command. Exactly 72 bytes differ, at the PE deterministic timestamp-hash and
-    the MVID/PDB checksum — the deterministic *identity* fields, so some compilation
-    input still varies with build path despite `PathMap`. The build is deterministic
-    *in place* (three clean builds of one tree agree), and path-independence demonstrably
-    **held** at `b32bb5e` — that is how `94a3843e` reproduced from a scratch worktree —
-    so this is new at HEAD and unexplained. Consequence: the LF corruption is closed,
-    but **rebuild-to-verify is still not established**, and risk 9's hash therefore
-    still attests "what the pipeline built" rather than "what this commit builds".
-    Next probe: bisect the difference between `b32bb5e` and HEAD, and check whether
-    `PathMap`'s `Condition` is silently losing to an inherited value.
+    **RESIDUAL, UNRESOLVED — do not call this fixed.** A first revision of this entry
+    called the residual "path-dependence despite `PathMap`" and blamed something new at
+    HEAD. **Both halves were wrong**, and the bisect that was supposed to confirm them
+    refuted them instead. Building each mod-touching commit — `b32bb5e`, `3b9249f`,
+    `b7395d3`, `ad54d93` — from two worktrees at *different* paths gives, in every case,
+    the **same** hash. The build is path-independent at every commit including HEAD, and
+    nothing in those three commits broke anything.
+    The real axis is **clone vs worktree**, which is not the same claim and is still
+    unexplained: a fresh `git clone` builds `6ba2965c…` where a worktree (and
+    `C:\work\comfy` itself) builds `391c6dd8…`, from **byte-identical sources**, same
+    commit, same `core.autocrlf`, same generated `obj` inputs, no SourceLink and no
+    embedded git SHA. Exactly 72 bytes differ, at the PE deterministic timestamp-hash
+    and the MVID/PDB checksum — the deterministic *identity* fields, so an input still
+    varies. The build is deterministic in place (three clean builds of one tree agree).
+    **What the hunt did turn up:** the csproj's `PathMap` never fires. The SDK injects
+    its own entries ahead of it — `…\.nuget\packages\=/_1/` and `<repo root>\=/_/` — and
+    csc applies the *first* matching prefix, so every source file is rewritten to
+    `/_/network/mod/…` and `$(MSBuildProjectDirectory)=C:\src\ComfyNetworkSense` is dead
+    code. That also explains why path-independence holds *without* the hand-written map
+    doing anything, and makes `<repo root>` detection the prime suspect for the clone/
+    worktree split. Next probe: dump SourceRoot on both sides properly (an attempt at
+    this returned a bogus "identical" off a broken `sed` — distrust it), or take a binlog
+    of each and diff the Csc task inputs.
+    Consequence unchanged: the LF corruption is closed, but **rebuild-to-verify is still
+    not established**, and risk 9's hash still attests "what the pipeline built" rather
+    than "what this commit builds".
     **Note:** `ZdoAuthoritativeConsumerRunner.cs` was LF at session start, went CRLF
     when `git checkout` re-smudged it mid-investigation, and is LF again under the pin.
 
