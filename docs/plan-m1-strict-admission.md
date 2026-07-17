@@ -246,6 +246,24 @@ surfaces:
    in the Valheim UI would need an extra Harmony patch (nice-to-have, not gate).
 8. Consumer transport change (if `UnityWebRequest`) alters poll/ACK timing;
    re-run the priority-drain baseline before declaring stage 3 done.
+   **Amended 2026-07-17 — the consumer has risk 10's bug too, and wedges quietly.**
+   Risk 10 cited the consumer's `MaxResponseBytes` as proof the handshake's missing
+   cap was an oversight. True, but it flattered the consumer: it bounds **size**
+   (16 MiB) and not **wall clock**, so the identical trickle holds its read open
+   forever. It is off the main thread (`Send` runs inside `Task.Run(Poll)` /
+   `Task.Run(FlushAcks)`), so it cannot freeze the server — the failure is quieter
+   and arguably nastier. `_polling` is reset in a `finally` that a wedged read never
+   reaches, so the CAS at `Update` never admits another poll: **the consumer stops
+   polling for good, without an error**. The tell is `poll_in_flight` stuck true.
+   That matters beyond the consumer, because §5.4 makes consumer poll/ack the seat
+   **liveness signal**: a degraded Gateway wedges the consumer, the traffic stops,
+   and the seat lease expires out from under the volunteer it exists to protect.
+   Not fixed with the handshake (`BoundedRawHttp`, comfy `b7395d3`) precisely
+   because of this risk's own warning — poll/ACK is a benchmarked path. A wall-clock
+   deadline is a ceiling, not a rewrite, so it should not move healthy timing at
+   all; that claim is cheap to check against the priority-drain baseline and should
+   be, not assumed. The extracted client already takes the deadline as a parameter,
+   so adopting it is a call-site change.
 9. **Decided 2026-07-17 — the manifest is the source of truth; no environment
    file.** The gate still cannot fire until the mod sends its own release identity,
    which it does not (`HandshakeResponderPatches.cs:34,39`), so this rides stage 3
@@ -265,6 +283,11 @@ surfaces:
    thing the gate should ever fire on. The mod should **not** hash its own DLL at
    runtime: the code doing the hashing is the DLL, so it buys no assurance for its
    cost.
+   **Qualified by risk 12** — the DLL hash this leans on is not currently
+   reproducible across checkouts. That does not change the decision (the manifest
+   is still the only reachable root), but it does mean the hash attests "the
+   artifact the pipeline built", not "the artifact this commit builds", until 12
+   is closed.
    **This is a compatibility gate, not an authentication gate — say so in the
    code.** A hostile volunteer can assert any `release_id`; nothing here stops that,
    and nothing needs to. Its real job is to stop the Gateway handing a *strict*
@@ -335,6 +358,41 @@ surfaces:
     enrollment id + token pair, migration revokes the credential they actually
     present and they fail admission until an admin re-issues. Confirm which pair is
     live on that client before deploying stage 1.
+
+12. **The mod DLL hash is not reproducible across checkouts, and the mod source is
+    not byte-pinned.** Found 2026-07-17 while deciding risk 9, which leans on that
+    hash. Three facts, each measured rather than reasoned:
+    (a) **Line endings change the DLL hash.** Converting one source file LF→CRLF
+    and rebuilding `-c Release` moves the output: `5e22cd1d…` → `c59d506b…`. The
+    project sets `Deterministic`/`ContinuousIntegrationBuild`/`PathMap`, which pin
+    the *path* and the compiler's nondeterminism but not the source bytes; the
+    source checksum rides the debug directory into the DLL.
+    (b) **A fresh clone and the working tree do not agree.** `git clone` of comfy
+    materialises the mod sources CRLF; `C:\work\comfy` holds **29 of 41** of them
+    as LF. `git status` reports clean the whole time, so nothing surfaces this.
+    (c) **Therefore the builds differ**: fresh clone `a6f95c9a…` vs working tree
+    `c59d506b…`, same commit.
+    Comfy has `.gitattributes` for `fieldlab/` and `scratch/ComfyMods/` **only** —
+    `git check-attr` returns nothing for the mod sources, so the exact bytes that
+    produce a hash-pinned artifact are the one thing left unpinned. This is the
+    same class as the M0 gotcha that hash-bound evidence must be pinned `-text`;
+    it simply was not applied to the code.
+    **Impact, stated honestly.** Nothing deployed is wrong: the bundle records the
+    hash of the DLL the pipeline actually built, and `validate-release-bundle.ps1`
+    checks recorded hashes against files rather than rebuilding. What does not work
+    is *rebuild-to-verify* — "prove this DLL came from this commit" fails on a
+    different machine for reasons that have nothing to do with the code. Whether
+    the frozen 0.5.31 `94a3843e…` is reproducible at all is **untested**; that needs
+    a checkout of the frozen tag and a rebuild, which nobody has done.
+    **Open decision (Derek's):** pin the mod source in `.gitattributes`, and pick
+    which ending is canonical. Not done here because renormalising changes source
+    bytes, which changes the DLL hash, which touches a frozen, identity-pinned
+    release — so it wants intent, not a drive-by. Stage 3 cuts a new mod release
+    and is the natural place to land it. **Note:** `ZdoAuthoritativeConsumerRunner.cs`
+    was LF at session start and is now CRLF — a side effect of restoring it via
+    `git checkout` during (a). Git calls the tree clean and it now matches a fresh
+    clone, so it is the more canonical of the two states, but it is a change: a
+    local rebuild will not match one from before 2026-07-17.
 
 ## 6. Wire constraints (frozen 0.5.31)
 
