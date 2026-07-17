@@ -261,8 +261,10 @@ surfaces:
     several redeemed invites for one SteamID migrated them all active at once —
     the exact state `RedeemLocked` refuses to create
     (`SteamEnrollmentService.cs:72`). Not theoretical: the P7 store holds ≥3
-    enrollments for `76561198088711642`. Stage 1 is undeployed and P7 still runs
-    `m0-clean-20260716-r2`, so the migration has never executed against real data.
+    enrollments for `76561198088711642`. Stage 1 shipped to P7 in
+    `m1-clean-20260717-r1` (2026-07-17), so the migration has now executed against
+    the real store; cold-start health passed, but the collapse outcome has not been
+    inspected on the VM.
     Fixed before it could: `CollapseDuplicateSteamIds` keeps the newest by
     `EnrolledUtc` (ties break on id, so the survivor never depends on JSON order),
     revokes the rest with reason `superseded_by_migration`, and audits each
@@ -302,7 +304,8 @@ free; the shape of a *reject* is not.
 
 ## 7. Stage 2 build status — 2026-07-16
 
-Built and committed (`cd78296`), **not deployed** — rides the next Gateway cut.
+Built and committed (`cd78296`); **deployed** to P7 on 2026-07-17 in
+`m1-clean-20260717-r1`, with `StrictRosterEnabled` still off (§7 decision).
 Full solution green: 458 tests, 0 failures (Gateway 92 = 81 baseline + 11 new).
 
 **Shipped live.** The seat gate (`capacity_reserved`), as check **H** — after all six
