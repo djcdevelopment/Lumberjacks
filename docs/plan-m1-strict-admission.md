@@ -246,10 +246,37 @@ surfaces:
    in the Valheim UI would need an extra Harmony patch (nice-to-have, not gate).
 8. Consumer transport change (if `UnityWebRequest`) alters poll/ACK timing;
    re-run the priority-drain baseline before declaring stage 3 done.
-9. **Moot for stage 2** — the release-compatibility manifest identity (hash
-   source of truth: environment file vs release bundle) cannot be gated on until
-   the mod sends its own release identity, which it does not
-   (`HandshakeResponderPatches.cs:34,39`). Decide it as part of the stage-3 cut.
+9. **Decided 2026-07-17 — the manifest is the source of truth; no environment
+   file.** The gate still cannot fire until the mod sends its own release identity,
+   which it does not (`HandshakeResponderPatches.cs:34,39`), so this rides stage 3
+   as before. The open half — env file vs release bundle — resolves to neither
+   exactly, and the receipt says why. **Not an env file:** a hand-maintained
+   expected-hash is a second source of truth that can disagree with the artifact
+   that actually shipped, and its failure mode is the gate calling an incompatible
+   release compatible — precisely what identity-pinning exists to prevent. **Not
+   the bundle, either:** the bundle is unreachable at runtime — `m0-a3-release-bundle-receipt.json`
+   locates it in a "local FieldLab workspace … not tracked in git; large binary
+   artifacts", so no Gateway container can ever read it. What *is* reachable is the
+   tracked **receipt/manifest**, which already carries `mod/ComfyNetworkSense.dll`
+   sha256 under a manifest that is itself hashed. So: the Gateway's expected value
+   is baked into its image at build time from the manifest, and the mod sends a
+   build-time-baked `release_id` from the same manifest. Both sides derive from one
+   record, so they cannot disagree except by real version skew — which is the only
+   thing the gate should ever fire on. The mod should **not** hash its own DLL at
+   runtime: the code doing the hashing is the DLL, so it buys no assurance for its
+   cost.
+   **This is a compatibility gate, not an authentication gate — say so in the
+   code.** A hostile volunteer can assert any `release_id`; nothing here stops that,
+   and nothing needs to. Its real job is to stop the Gateway handing a *strict*
+   verdict to a mod too old to enforce one: a stale mod fails **open** on a reject
+   (§6), so an authority that believes it is rejecting while the mod waves players
+   through is strictly worse than no gate. Absence is therefore the signal that
+   matters — frozen 0.5.31 sends no release identity at all, so a missing field
+   means stale by construction and needs no cooperation from the mod to detect.
+   **Sequencing consequence:** absent must not mean `release_incompatible` until the
+   stage-3 cut has landed everywhere, because today absence is the norm — the gate
+   ships off and flips after, on the `StrictRosterEnabled` pattern (§7).
+   Cheap to reverse; nothing is built on it yet.
 10. **Stage-3 prerequisite: the handshake blocks the server's main thread, and
     the stall was unbounded.** The Harmony prefix runs on the dedicated server's
     main thread and `Decide` → `PostForBody` does a synchronous raw-socket
