@@ -513,6 +513,38 @@ surfaces:
     **Note:** `ZdoAuthoritativeConsumerRunner.cs` was LF at session start, went CRLF
     when `git checkout` re-smudged it mid-investigation, and is LF again under the pin.
 
+13. **Fixed — the release cut's artifact comparison was broken and had never executed.** Script
+    `C:\work\comfy\infra\gcp\p7\scripts\New-ReleaseCut.ps1` (added in comfy `3e6f6304`) implements
+    risk 9's fix: type the release id once, build both sides, then read the id back out of BOTH
+    compiled DLLs and refuse if they disagree. The comparison was believed to be an active
+    safeguard; in reality it had never executed, because it sits behind `-WhatIf` and only runs
+    during a real cut — the one moment it matters.
+    **Mechanism — it could not have worked.** `Get-AssemblyMetadataValue` reached the reader
+    through `Add-Type -AssemblyName System.Reflection.Metadata`. .NET Framework has no GAC entry
+    for that assembly, and this box has only Windows PowerShell 5.1 (no pwsh 7). Every real cut
+    would have thrown a type-not-found *at the check* — after the mod source edit and both builds
+    (including the `sdk:9.0` container gateway build) had already run, leaving a half-applied
+    state reversible with `git checkout`. `-ErrorAction SilentlyContinue` on that `Add-Type`
+    suppressed the only error that explained the cause.
+    **Fixed (comfy `9fa4858`):** the `netstandard2.0` builds of `System.Reflection.Metadata` and
+    `System.Collections.Immutable` are vendored into `infra/gcp/p7/scripts/lib/` and loaded by
+    explicit path in dependency order, failing loudly if absent. Vendored, not resolved from the
+    nuget cache, because a cache clear would silently disarm the check; and `.gitignore`'s blanket
+    `*.dll` would have silently skipped them on `git add`, so the fix would have worked on this box
+    and been absent from every clone — overridden explicitly.
+    **Verified by lifting the real functions** out of the real script and running them against the
+    artifacts on disk: the mod DLL carries `LumberjacksModReleaseId='dev'`, the gateway DLL carries
+    `LumberjacksExpectedModRelease='proof-release-xyz'`, and the verdict logic refuses on all three
+    comparisons. First time the check has ever returned an answer.
+    **Checked and cleared — not defects:** (1) the comparison logic itself is sound — a missing
+    metadata key returns null, and null never equals a regex-enforced non-empty `ReleaseId`, so
+    absence fails closed rather than falsely passing. (2) An audit suggested `$modDll` pointed at a
+    stale path missing a `net48` folder; refuted — the mod csproj sets
+    `AppendTargetFrameworkToOutputPath=false`, so `bin\Release\ComfyNetworkSense.dll` is correct.
+    **Residual:** this only proves the check *runs* and refuses; the comparison it performs is
+    still trusted, not yet demonstrated to *pass*, because that requires a real cut. Risk 12's
+    rebuild-to-verify gap is unaffected and still open.
+
 ## 6. Wire constraints (frozen 0.5.31)
 
 The mod regex-matches the verdict body rather than deserializing it
