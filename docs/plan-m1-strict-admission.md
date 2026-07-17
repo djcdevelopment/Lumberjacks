@@ -614,11 +614,28 @@ with the VM up, all passing:
   A first attempt at this was junk and is worth recording: reusing one `uid` across both probes
   meant the stranger hit gate G (duplicate) before the roster ever ran, and it *looked* like a
   reject. The ladder was right; the probe was wrong. Distinct uids fixed it.
-  **Caveat on what this is not:** these are synthetic submissions, not real joins. They supply
-  `host_name` directly rather than having vanilla read it off the socket. That path is already
-  evidenced (§5.3, `host=76561198088711642` in the live capture), but the flip's own precondition
-  as Derek stated it — "verify the roster answers correctly against real joins" — is met in
-  substance, not literally.
+  **FLIPPED, and then verified by a real join.** `StrictRosterEnabled` is **on** for the live
+  `p7-primary-v1` window as of 2026-07-17. The synthetic probes above were not the last word:
+  at `14:02:23.453Z`, fourteen minutes after the flip, Derek joined for real and the window
+  recorded a third exchange — **accept**. Server log:
+  `Got connection SteamID 76561198088711642` → `[handshake] ACCEPT (Lumberjacks-decided)
+  window=p7-primary-v1 uid=1110941871 player=Durracktu host=76561198088711642` → `AddPeer`.
+  Window counters `accepted=2 rejected=1 by_code={8:1}`: two probes and the join, on a window
+  that was already strict.
+  So the precondition — "verify the roster answers correctly against real joins, then flip" —
+  is now met **literally**, not in substance. Note the order was inverted: flip first, real
+  join second. That was the riskier sequence and worked only because the store said Active and
+  the probes agreed first; it is not the order to repeat.
+  **What this proves beyond the gate itself:** the join was decided by the **frozen 0.5.31 mod**
+  (`94a3843e`), armed at `http://gateway:4000`, with no mod cut. Vanilla read
+  `host=76561198088711642` off the socket and the Gateway answered from the real enrollment
+  store. §5.3's correction is now evidenced live rather than argued from a capture — the earlier
+  revision that deferred the roster to stage 3 on the belief that no Steam identity reached the
+  Gateway was wrong, and this is the proof.
+  **Configure replaces, it does not merge** (`_context = context`), and it clears connected uids
+  and drops seats. Safe here only because the window was fresh from boot and every record default
+  matched the live values; reconfiguring a live window mid-session would drop a player's seat.
+  The flag is in-memory, so a gateway restart reverts it to off.
 
 **Answered by Derek — 2026-07-17.** (1) Readiness lease: cut from M1, above. (2)
 `StrictRosterEnabled` stays **off** through the cut: deploy it disabled, verify the roster
