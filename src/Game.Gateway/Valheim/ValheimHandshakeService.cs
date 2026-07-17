@@ -78,6 +78,32 @@ public sealed record ValheimHandshakeServerContext
     public bool StrictRosterEnabled { get; init; }
 
     /// <summary>
+    /// The mod release this window will admit, e.g. "m1-clean-20260717-r1". Baked into the Gateway
+    /// image at build from the release manifest — never hand-typed into an environment file, and
+    /// never read live from the bundle, which is untracked and unreachable from a container (plan
+    /// risk 9). Both sides therefore derive from one record and cannot disagree except by real
+    /// version skew, which is the only thing this should ever fire on.
+    ///
+    /// Null/empty disables the gate, which is what an uncut local build gets.
+    /// </summary>
+    public string? ExpectedModReleaseId { get; init; }
+
+    /// <summary>
+    /// Lumberjacks release-compatibility gate. Defaults to OFF, and the sequencing is the whole
+    /// reason: every mod deployed today predates <see cref="ValheimPeerInfoSubmission.ModReleaseId"/>
+    /// and sends nothing, so switching this on before the stage-3 cut has landed everywhere would
+    /// reject every real volunteer for being honest about their version. Ships off, flips after —
+    /// the <see cref="StrictRosterEnabled"/> pattern.
+    ///
+    /// This is a COMPATIBILITY gate, not authentication: a volunteer can edit the constant in their
+    /// own mod and claim anything, and nothing here stops that. Its job is to stop the Gateway
+    /// handing a *strict* verdict to a mod too old to enforce one — a stale mod fails OPEN on a
+    /// reject, so an authority that believes it is rejecting while the mod waves players through is
+    /// worse than no gate at all.
+    /// </summary>
+    public bool StrictReleaseEnabled { get; init; }
+
+    /// <summary>
     /// Lumberjacks seat gate: concurrent seats this window admits. The volunteer pilot is one seat
     /// (VOLUNTEER-ENDPOINT.md: "Admit only one client while P7 still uses the shared p7-primary-v1
     /// queue"), so 1 is the default — including for a window that materializes on first contact
@@ -146,6 +172,16 @@ public sealed record ValheimPeerInfoSubmission
     /// <summary>The mod's Steamworks VerifySessionTicket result (gate check C). The real
     /// crypto verify can only run in-game, so it is supplied as a boolean.</summary>
     public bool TicketValid { get; init; } = true;
+
+    /// <summary>The release the *mod* was cut as — the build answering the handshake, not the
+    /// client joining it (<see cref="Version"/> and <see cref="NetVersion"/> are the client's).
+    /// Null from any mod predating the field, which is the signal that matters: a stale mod
+    /// cannot claim to be current, because it does not know to claim anything.</summary>
+    public string? ModReleaseId { get; init; }
+
+    /// <summary>The mod's own plugin version, for the operator log. Not gated on: the release id
+    /// is the identity a cut names, and gating two things that must agree invites them not to.</summary>
+    public string? ModVersion { get; init; }
 }
 
 public sealed record ValheimServerPeerInfo(
@@ -475,6 +511,26 @@ public sealed class ValheimHandshakeService
             // G — duplicate (IsConnected(uid), :924)
             if (_connectedUids.Contains(s.Uid))
                 return Reject(ValheimConnectionStatus.ErrorAlreadyConnected, "duplicate");
+
+            // J — Lumberjacks release compatibility. Not a native check. Runs first among the
+            // Lumberjacks gates because it asks whether this conversation can be trusted at all,
+            // which precedes whether the joiner is allowed (I) or has room (H) — but still after
+            // the six native checks, so a client vanilla would have rejected keeps vanilla's label.
+            //
+            // Unlike I and H this is not about the joiner: it is about the mod answering. A skewed
+            // mod rejects everyone, which is severe, and exactly why the flag ships off and flips
+            // only once the cut has landed.
+            //
+            // ErrorVersion, matching gate A: "your side and my side disagree about the build" is
+            // precisely what code 3 means to a player, and it is the only honest one available.
+            //
+            // A NULL id is the stale case and MUST reject when this is on — a mod predating the
+            // field sends nothing, which is exactly the mod that will fail open on the strict
+            // verdicts this gate exists to protect. Absence is the signal, not an exemption.
+            if (_context.StrictReleaseEnabled
+                && !string.IsNullOrEmpty(_context.ExpectedModReleaseId)
+                && !string.Equals(s.ModReleaseId, _context.ExpectedModReleaseId, StringComparison.Ordinal))
+                return Reject(ValheimConnectionStatus.ErrorVersion, "release_incompatible");
 
             // I — Lumberjacks roster. Runs before the seat gate: whether you are allowed at all
             // precedes whether there is room, and an unenrolled join must not consume a seat.
