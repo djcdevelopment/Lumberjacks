@@ -322,6 +322,20 @@ surfaces:
    thing the gate should ever fire on. The mod should **not** hash its own DLL at
    runtime: the code doing the hashing is the DLL, so it buys no assurance for its
    cost.
+   **NOT IMPLEMENTED AS DECIDED — found 2026-07-17 while starting the stage-3 cut.** The
+   Gateway half (`e3bc9f4`) takes `ExpectedModReleaseId` as a **window context field, set at
+   runtime via `POST /config`**. There is no build-time constant, no manifest tie, nothing
+   derived from the release at all. That is not merely the environment-file pattern this
+   entry rejected — it is worse: hand-typed, per-window, at runtime. The decision above and
+   the code disagree, and the decision was written first, by the same hand, hours earlier.
+   Exactly the failure risk 10 documents: a plan asserting something the code does not do.
+   The gate still *works* — it compares what it is given — but what it is given is an
+   operator's opinion, so it currently attests "someone typed a matching string", not
+   "this build is the release the manifest names". **Do not cut a release around it until
+   this is fixed**, because the cut would bake the wrong scheme into the artifact the scheme
+   exists to identify. The fix is small and mechanical — an MSBuild property from the
+   manifest into a constant, with the context defaulting to it and the field remaining an
+   override for tests — and is stage-3 blocking, not optional.
    **Qualified by risk 12** — the DLL hash this leans on is not currently
    reproducible across checkouts. That does not change the decision (the manifest
    is still the only reachable root), but it does mean the hash attests "the
