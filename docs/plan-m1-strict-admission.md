@@ -259,10 +259,27 @@ surfaces:
     loop (and the main thread) open **forever** — over plain HTTP, with no TLS.
     That the consumer's read loop in the same repo bounds itself with
     `MaxResponseBytes` while this one did not marks it as an oversight, not a
-    tradeoff. Fixed in the mod source (uncommitted, rides this cut):
-    `ResponseDeadlineMs`/`MaxResponseBytes` bound the loop by wall clock and size,
-    making the worst case finite (~`HttpTimeoutMs` connect + `ResponseDeadlineMs`
-    read ≈ 4s). **This is a prerequisite, not a nice-to-have:** stage 3 makes this
+    tradeoff. **An earlier revision of this entry called the fix "uncommitted" in
+    the mod source. That was wrong, and the word did real damage** — it made the
+    fix sound ephemeral and stopped anyone from looking for it. It was committed
+    2026-07-16 as `cc2f95e` on branch `claude/handshake-bounded-read` in the
+    `comfy` repo (the mod lives in `C:\work\comfy`, not in this one — a second
+    reason it was hard to find from here). Two later commits from that branch were
+    cherry-picked onto `main`; `cc2f95e` was not, so it sat stranded on the branch,
+    invisible to anyone reading `main`, while this plan reported it as done.
+    Recovered 2026-07-17 — cherry-picked onto `comfy` `main` as `3b9249f`, with
+    `git cherry` confirming it was the only commit not already there. The bounds
+    themselves are unchanged and correct: `ResponseDeadlineMs` (2000) and
+    `MaxResponseBytes` (64 KiB), checked after each read, making the worst case
+    finite (~`HttpTimeoutMs` connect + `ResponseDeadlineMs` read ≈ 4s).
+    **Still open: no test drives either bound.** They fire only against a
+    trickling or flooding peer; normal joins never reach either branch. The mod
+    has no C# test project at all, and `PostForBody` is a private static in a
+    class bound to UnityEngine/ZNet/ZLog, so nothing can drive it without
+    extracting the raw-socket client into a Unity-free helper. Stage 3 needs a TLS
+    variant of that same client and the consumer holds a near-duplicate read loop,
+    so the extraction pays for itself rather than being a detour.
+    **This is a prerequisite, not a nice-to-have:** stage 3 makes this
     path fail-*closed*, and doing that on an unbounded stall is strictly worse — a
     hung or degraded Gateway would then freeze the server *and* reject everyone.
     Blocking is inherent to a Harmony prefix (it must return `bool`; it cannot
@@ -272,7 +289,7 @@ surfaces:
     the join path — the latter is the only design with no network on the join path
     at all, and stage 3 already opens the mod.
 
-10. **Resolved in code, pending on P7 — the v1 migration could seed a roster that
+11. **Resolved in code, pending on P7 — the v1 migration could seed a roster that
     breaks its own invariant.** `MigrateV1` keyed enrollments by enrollment id and
     marked every v1 invite carrying an `Enrollment` as `Active`, so a v1 store with
     several redeemed invites for one SteamID migrated them all active at once —
