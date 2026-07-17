@@ -78,15 +78,22 @@ public sealed record ValheimHandshakeServerContext
     public bool StrictRosterEnabled { get; init; }
 
     /// <summary>
-    /// The mod release this window will admit, e.g. "m1-clean-20260717-r1". Baked into the Gateway
-    /// image at build from the release manifest — never hand-typed into an environment file, and
-    /// never read live from the bundle, which is untracked and unreachable from a container (plan
-    /// risk 9). Both sides therefore derive from one record and cannot disagree except by real
-    /// version skew, which is the only thing this should ever fire on.
+    /// The mod release this window will admit, e.g. "m1-clean-20260717-r1".
     ///
-    /// Null/empty disables the gate, which is what an uncut local build gets.
+    /// **Defaults to the value baked into this assembly at build**
+    /// (<see cref="ValheimReleaseIdentity.ExpectedModRelease"/>), which is the point: the expected
+    /// value travels with the image and cannot drift from the artifact that shipped. It is never
+    /// read live from the bundle, which is untracked and unreachable from a container (plan risk 9).
+    ///
+    /// An earlier revision made this settable-only, with no default, so the sole way to populate it
+    /// was a runtime <c>POST /config</c> — an operator's opinion, which is the second source of
+    /// truth risk 9 explicitly rejected, only worse for being per-window and un-reviewable. The
+    /// property survives as an **override for tests**, which need to name a release without
+    /// rebuilding; production should not set it.
+    ///
+    /// Null disables the gate, which is what an uncut local build ("dev") gets.
     /// </summary>
-    public string? ExpectedModReleaseId { get; init; }
+    public string? ExpectedModReleaseId { get; init; } = ValheimReleaseIdentity.ExpectedModRelease;
 
     /// <summary>
     /// Lumberjacks release-compatibility gate. Defaults to OFF, and the sequencing is the whole

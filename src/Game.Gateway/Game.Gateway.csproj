@@ -1,4 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- The mod release this image admits (M1 risk 9). Baked into the assembly at build so the
+       expected value travels WITH the artifact, rather than being typed at an operator by an
+       environment file or, worse, a runtime /config POST - both of which are second sources of
+       truth that can disagree with what actually shipped, and whose failure mode is the gate
+       calling an incompatible release compatible.
+
+       Set by the release cut, from the same id the manifest records:
+         dotnet build -p:LumberjacksExpectedModRelease=m1-clean-20260717-r2
+       "dev" is an uncut local build and disables the gate, because a build with nothing to
+       compare against must not reject every join and teach people to leave the flag off. -->
+  <PropertyGroup>
+    <LumberjacksExpectedModRelease Condition="'$(LumberjacksExpectedModRelease)' == ''">dev</LumberjacksExpectedModRelease>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="LumberjacksExpectedModRelease" Value="$(LumberjacksExpectedModRelease)" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Game.Contracts\Game.Contracts.csproj" />
     <ProjectReference Include="..\Game.Simulation\Game.Simulation.csproj" />

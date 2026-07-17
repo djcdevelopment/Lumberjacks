@@ -124,6 +124,30 @@ public sealed class ValheimHandshakeReleaseTests
         Assert.Equal("release_incompatible", gate.FailedCheck);
     }
 
+    [Fact]
+    public void ExpectedRelease_ComesFromTheBuild_NotFromAnOperator()
+    {
+        // The correction to risk 9's first implementation, pinned. A context nobody configured must
+        // already know which release it admits, because the value is compiled in - if this ever
+        // needs a POST /config to be populated, the expected release is an operator's opinion again
+        // and the gate attests only that someone typed a matching string.
+        var fromBuild = ValheimReleaseIdentity.ExpectedModRelease;
+        var context = new ValheimHandshakeServerContext();
+
+        Assert.Equal(fromBuild, context.ExpectedModReleaseId);
+    }
+
+    [Fact]
+    public void UncutBuild_ReadsAsNoExpectation_SoADevGatewayDoesNotRejectEveryone()
+    {
+        // These tests run against an uncut build (no -p:LumberjacksExpectedModRelease), so the
+        // baked value is "dev" and must surface as null. A dev Gateway that refused every join
+        // would teach people to switch the flag off and leave it off, which costs more than the
+        // gate is worth. Asserting the *build's* value, not a literal, so this keeps meaning
+        // whatever a release cut bakes in.
+        Assert.Null(ValheimReleaseIdentity.ExpectedModRelease);
+    }
+
     private static ValheimHandshakeService Strict()
     {
         var service = new ValheimHandshakeService();
