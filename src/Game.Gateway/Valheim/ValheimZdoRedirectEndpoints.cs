@@ -84,7 +84,17 @@ public static class ValheimZdoRedirectEndpoints
             return Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) });
         }).RequireRateLimiting("consumer");
 
-        group.MapPost("/consumer", (ValheimZdoConsumerHeartbeat heartbeat,
+        // The consumer names itself: `consumer_id` is a GUID the client picks
+        // (ZdoAuthoritativeConsumerRunner.cs:35), so anything keyed on it is keyed on a value the
+        // caller chose. Where the caller presented an enrollment, the server-derived RecipientId
+        // replaces it — the client cannot select which recipient it is recorded as.
+        //
+        // Overridden rather than rejected on mismatch. The frozen 0.5.31 mod has no idea its
+        // recipient id exists and always sends its own GUID, so a mismatch is the normal case, not
+        // an attack; rejecting it would refuse every real heartbeat. It never reads the value back
+        // (it ignores this response body entirely), so substituting is invisible to it. Once the
+        // mod cut stops the client naming itself at all, this can tighten to a reject.
+        group.MapPost("/consumer", (ValheimZdoConsumerHeartbeat heartbeat, HttpContext context,
             ValheimZdoConsumerTelemetryService consumers) =>
         {
             if (string.IsNullOrWhiteSpace(heartbeat.WindowId) ||
@@ -98,7 +108,12 @@ public static class ValheimZdoRedirectEndpoints
                 });
             }
 
-            consumers.Record(heartbeat);
+            var recipientId = ValheimPrincipal.From(context)?.Enrollment?.RecipientId;
+            var recorded = string.IsNullOrWhiteSpace(recipientId)
+                ? heartbeat // private plane / legacy shared key: no enrollment to derive from
+                : heartbeat with { ConsumerId = recipientId };
+
+            consumers.Record(recorded);
             return Results.Ok(new { ok = true, received_at = DateTimeOffset.UtcNow });
         }).RequireRateLimiting("telemetry");
 
