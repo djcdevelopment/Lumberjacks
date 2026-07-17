@@ -55,7 +55,7 @@ cuts — especially mod cuts.
 | Capability split (admin/producer/consumer/telemetry/public) | Two global keys | Policy-based authorization, capability-scoped credentials |
 | Join hook asks Gateway about actual joining SteamID | **Closed in stage 2**: roster keyed on `host_name`, the socket's Steam-authenticated SteamID64 (§5.3); `uid` is a session id and is not used | Flip `StrictRosterEnabled` on per window; fail-closed still needs the mod cut |
 | Release/protocol compatibility gate | Protocol checked (`net_version != 36`, check A); release **not** checked — the mod sends no release identity of its own (§5.9) | Mod must send its own release identity (stage 3) + a manifest-pinned hash check, with the hash source decided |
-| Fresh readiness lease | Not implemented | Lease issue/verify, expiry, single active lease — identity-bound, so dark until stage 3 |
+| Fresh readiness lease | Not implemented | **Out of M1 scope** (2026-07-17) — M4a owns per-peer readiness and defines the lease; see §7 |
 | One-seat capacity reservation | `MaxPlayers = 10` const, and `CurrentPlayers` is operator-configured, not observed | Gateway-enforced reservation of exactly one seat, with a passive TTL to survive the absent disconnect signal (§5.4) |
 | Strict admission fails closed | Mod fail-open on any fault | Cutover-mode-aware reject on endpoint error |
 | Certificate-validating TLS on public traffic | Mod throws on `https` | TLS client in mod + TLS termination at the VM |
@@ -84,7 +84,7 @@ drills/rebuilds don't burn issuance rate limits.
    rejection records. Landed `cd78296`, `b2a8d19`, and the roster commit — see §7.
    A first re-scope on 2026-07-16 deferred the roster to stage 3 believing no Steam
    identity reached the Gateway; that was wrong and is corrected in §5.3.
-   `lease_stale` remains unbuilt — nothing issues a readiness lease. The
+   `lease_stale` is out of M1 scope as of 2026-07-17 — M4a owns it (§7). The
    release-compatibility gate rides stage 3 whole: it is a string compare whose
    expected-value source is deferred (§5.9) and whose input the mod does not send.
    **Strict admission is real in stage 2 but opt-in and fail-open**: the frozen mod
@@ -126,7 +126,7 @@ until the mod stops self-assigning one.
 | Revoked / expired enrollment | admin revoke; expiry passed | reject | enrollment_revoked / expired | auto | 2-live (flag) |
 | Wrong Steam account | enrollment for different SteamID64 | reject | steamid_mismatch | auto + live | n/a — see below |
 | Wrong mod/release | stale hash in handshake | reject | release_incompatible | auto | 3 |
-| Stale readiness lease | lease older than TTL | reject | lease_stale | auto | blocked — nothing issues a lease |
+| Stale readiness lease | lease older than TTL | reject | lease_stale | auto | ~~M1~~ → M4a (2026-07-17, §7) |
 | Seat taken | second concurrent join | reject | capacity_reserved | auto | 2-live |
 | Replayed invite / duplicate enrollment | reuse consumed invite | reject | invite_consumed | auto | 1 — enrollment surface |
 | Consumer token on producer/admin/reset/compaction/handshake ops | scoped credential | deny (403) | capability_denied | auto | 1 |
@@ -149,8 +149,10 @@ surfaces:
   middleware, where a credential exists to mismatch.
 - `invite_consumed` is an **enrollment-surface** row (replay of a used invite); the handshake never
   sees an invite. Stage 1 enforces it at redemption.
-- `lease_stale` is **blocked, not deferred**: nothing in the system issues a readiness lease — no
-  endpoint, no record, no field. It cannot be built until someone decides what mints one (§7).
+- `lease_stale` is **out of M1 scope** as of 2026-07-17. Nothing in the system issues a readiness
+  lease — no endpoint, no record, no field — because M1 has no consumer for one. M4a does: it owns
+  exact per-peer readiness and reconnect/takeover, requires the lease in its own work, and tests
+  lease takeover at its exit. M1 was holding the contract on M4a's behalf (§7).
 - `release_incompatible` still rides stage 3 whole: the mod sends the *joining client's*
   `version`/`net_version`, never its own release identity (`HandshakeResponderPatches.cs:34,39`),
   and its expected-value source is deferred anyway (§5.9).
@@ -344,14 +346,25 @@ A strict window with no roster source wired is refused at `Configure` rather tha
 admitting everyone. `SteamEnrollmentService.CheckSteamId` separates `not_enrolled` from
 `enrollment_revoked` because they are different operator stories.
 
-**Not built — blocked on a decision, not on effort.** `lease_stale`: nothing issues a
-readiness lease. No endpoint, no record, no field. The plan names it as a deliverable but
-never says who mints one, what it attests, or how long it lives. Inventing that would
-hard-code an identity model the mod cut then inherits.
+**Cut from M1 — 2026-07-17.** `lease_stale`: nothing issues a readiness lease. No endpoint,
+no record, no field. M1 named it as a deliverable but never said who mints one, what it
+attests, or how long it lives — because M1 has no consumer for one. M4a does: it owns exact
+per-peer readiness and reconnect/takeover rules, requires an exact per-peer readiness lease
+in its own work, and tests lease takeover at its exit. M1 was holding a contract on M4a's
+behalf, so the lease leaves M1's exit gate, and M4a's inputs stop listing it among the
+contracts M1 delivers. Building it here would have hard-coded an identity model the mod cut
+then inherits, to satisfy a gate whose only reader specifies it differently and per peer.
+An earlier revision of this decision moved the lease to M5; the dependency graph refutes
+that — M4a depends on M1 alone, so an M5-owned lease would make M4a wait on a milestone it
+does not depend on.
 
-**Open for Derek.** (1) What is a readiness lease — who issues it, what does it attest,
-what TTL? (2) Flip `StrictRosterEnabled` on for `p7-primary-v1`? Your account is enrolled
-and the gate is tested, but this is the first switch that can lock you out, so it wants a
-live check with a way back. (3) The seat gate is live for *unconfigured* windows by
-default — confirm before the cut, since it changes behaviour for any window an operator
-never configured.
+**Answered by Derek — 2026-07-17.** (1) Readiness lease: cut from M1, above. (2)
+`StrictRosterEnabled` stays **off** through the cut: deploy it disabled, verify the roster
+answers correctly against real joins, then flip with a way back — rather than stacking the
+first switch that can lock Derek out on top of a migration that had never run against real
+data, where a lockout and a migration defect would arrive together and be hard to tell
+apart. The deploy half is now done: `m1-clean-20260717-r1` shipped the gate to P7 with the
+flag off, so what remains is the live roster verification and then the flip. (3)
+`SeatCapacity` default of 1 is **confirmed**: the window that materialises on first contact
+is the live path — it is how the 2026-07-16 join was gated — so a default of 0 would ship
+the capacity gate switched off.
