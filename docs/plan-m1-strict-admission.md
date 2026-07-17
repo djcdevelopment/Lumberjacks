@@ -322,11 +322,24 @@ surfaces:
     themselves are unchanged and correct: `ResponseDeadlineMs` (2000) and
     `MaxResponseBytes` (64 KiB), checked after each read, making the worst case
     finite (~`HttpTimeoutMs` connect + `ResponseDeadlineMs` read ≈ 4s).
-    **Still open: no test drives either bound.** They fire only against a
-    trickling or flooding peer; normal joins never reach either branch. The mod
-    has no C# test project at all, and `PostForBody` is a private static in a
-    class bound to UnityEngine/ZNet/ZLog, so nothing can drive it without
-    extracting the raw-socket client into a Unity-free helper. Stage 3 needs a TLS
+    **Closed 2026-07-17 — the bounds are now driven by tests** (comfy `b7395d3`).
+    They were untestable where they sat: `PostForBody` was a private static in a
+    class bound to UnityEngine/ZNet/ZLog, and the mod had no C# test project at
+    all, so loading the code meant loading Valheim. The transport moved verbatim
+    into `BoundedRawHttp`, Unity-free by construction, and `ComfyNetworkSense.Tests`
+    **links** that one file rather than referencing the project — compiling the real
+    source into a plain net8.0 assembly that needs no Valheim assemblies, no BepInEx
+    and no net48 targeting pack. Behaviour unchanged; the mod still builds net48, 0
+    warnings; the numbers stay at the call site, since the caller is what knows the
+    cost of blocking. Verified by mutation: disabling `ResponseDeadlineMs` fails
+    exactly `ResponseDeadline_FiresBeforeSocketTimeout`, disabling `MaxResponseBytes`
+    fails exactly `SizeCap_FiresOnFloodingPeer` — one bound, one test, no overlap.
+    The deadline test proves *which* bound fired: its fake peer trickles a byte every
+    25ms, so the 2000ms `ReceiveTimeout` is reset forever and only the 300ms deadline
+    can end the read; it asserts under 1500ms, and under the size-cap mutation it
+    passes at 351ms. Both fake peers stop on their own (4s trickle, 256 KiB flood) so
+    a deleted bound **fails** rather than hangs — a test that wedges CI on regression
+    is worse than no test. Stage 3 needs a TLS
     variant of that same client and the consumer holds a near-duplicate read loop,
     so the extraction pays for itself rather than being a detour.
     **This is a prerequisite, not a nice-to-have:** stage 3 makes this
@@ -377,22 +390,47 @@ surfaces:
     produce a hash-pinned artifact are the one thing left unpinned. This is the
     same class as the M0 gotcha that hash-bound evidence must be pinned `-text`;
     it simply was not applied to the code.
-    **Impact, stated honestly.** Nothing deployed is wrong: the bundle records the
-    hash of the DLL the pipeline actually built, and `validate-release-bundle.ps1`
-    checks recorded hashes against files rather than rebuilding. What does not work
-    is *rebuild-to-verify* — "prove this DLL came from this commit" fails on a
-    different machine for reasons that have nothing to do with the code. Whether
-    the frozen 0.5.31 `94a3843e…` is reproducible at all is **untested**; that needs
-    a checkout of the frozen tag and a rebuild, which nobody has done.
-    **Open decision (Derek's):** pin the mod source in `.gitattributes`, and pick
-    which ending is canonical. Not done here because renormalising changes source
-    bytes, which changes the DLL hash, which touches a frozen, identity-pinned
-    release — so it wants intent, not a drive-by. Stage 3 cuts a new mod release
-    and is the natural place to land it. **Note:** `ZdoAuthoritativeConsumerRunner.cs`
-    was LF at session start and is now CRLF — a side effect of restoring it via
-    `git checkout` during (a). Git calls the tree clean and it now matches a fresh
-    clone, so it is the more canonical of the two states, but it is a change: a
-    local rebuild will not match one from before 2026-07-17.
+    **Mechanism — corrected.** A first pass here claimed the blobs stored CRLF. That
+    was wrong, off a broken measurement (`grep -c $'\r'` collapsed to an empty
+    pattern and counted every line, so "40 CR lines in 40 lines" was a tautology).
+    The blobs are **LF and correct**. `core.autocrlf=true` rewrites them to CRLF *on
+    checkout*, and the compiler folds the source checksum into the assembly, so the
+    checkout's endings land in the release hash. The corruption enters at checkout,
+    not at commit — which is why `git status` never had anything to say.
+    **The frozen question is no longer untested — and the answer is bad.**
+    `94a3843e…` rebuilds **bit-for-bit** from its manifest commit `b32bb5e` (same SDK
+    8.0.422, byte-identical Valheim/BepInEx reference assemblies, the manifest's own
+    Release command) **only from an all-LF tree**. A clean checkout of that same
+    commit builds `70372350…`. So the artifact deployed on P7 could not be rebuilt
+    from the repository at all. The manifest's `"two clean-checkout builds produced
+    the same hash"` held only because both builds shared one working tree whose files
+    had never been through a smudge: they agreed with each other, not with git.
+    **Fixed forward (comfy `network/mod/.gitattributes`):** `*.cs text eol=lf`
+    overrides autocrlf, so a checkout now materialises the LF the blobs already hold.
+    LF and not CRLF because LF is what every shipped artifact was in fact built from;
+    pinning CRLF would have made the deployed DLL permanently unreproducible for a
+    tidier diff. `eol=lf` rather than fieldlab's `-text`, because `-text` freezes
+    whatever bytes are committed and needs discipline forever. No blob changed —
+    `--renormalize` was a no-op — because only the checkout was ever wrong. This
+    cannot retroactively fix `b32bb5e`, which predates the file: **rebuilding frozen
+    0.5.31 needs its recipe — check out `b32bb5e`, convert every `.cs` to LF, build
+    Release.** That recipe is now proven, and is the only way to verify what runs on
+    P7 against source.
+    **RESIDUAL, UNRESOLVED — do not call this fixed.** With the pin in place and the
+    mod sources **byte-identical** between a fresh clone and the working tree, the two
+    still build different DLLs (`6ba2965c…` vs `391c6dd8…`), under the manifest's own
+    build command. Exactly 72 bytes differ, at the PE deterministic timestamp-hash and
+    the MVID/PDB checksum — the deterministic *identity* fields, so some compilation
+    input still varies with build path despite `PathMap`. The build is deterministic
+    *in place* (three clean builds of one tree agree), and path-independence demonstrably
+    **held** at `b32bb5e` — that is how `94a3843e` reproduced from a scratch worktree —
+    so this is new at HEAD and unexplained. Consequence: the LF corruption is closed,
+    but **rebuild-to-verify is still not established**, and risk 9's hash therefore
+    still attests "what the pipeline built" rather than "what this commit builds".
+    Next probe: bisect the difference between `b32bb5e` and HEAD, and check whether
+    `PathMap`'s `Condition` is silently losing to an inherited value.
+    **Note:** `ZdoAuthoritativeConsumerRunner.cs` was LF at session start, went CRLF
+    when `git checkout` re-smudged it mid-investigation, and is LF again under the pin.
 
 ## 6. Wire constraints (frozen 0.5.31)
 
