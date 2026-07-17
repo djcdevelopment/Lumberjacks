@@ -391,7 +391,17 @@ surfaces:
     the join path — the latter is the only design with no network on the join path
     at all, and stage 3 already opens the mod.
 
-11. **Resolved in code, pending on P7 — the v1 migration could seed a roster that
+11. **CLOSED on P7 — 2026-07-17, verified on a real cold boot.** Both halves pass. The
+    store is `schema_version: 2` with four enrollments for `76561198088711642`: exactly
+    **one Active** (`9a3fc0e730ab`, the newest by `EnrolledUtc`, 2026-07-16T17:41:06) and
+    three Revoked, each `superseded_by_migration`. `CollapseDuplicateSteamIds` did what it
+    was written to do and the one-active-per-SteamID invariant holds against real data.
+    The operational consequence below — the collapse assumes the player's mod holds the
+    *newest* credential — **did not fire**: the live client config carries
+    `lumberjacksEnrollmentId = 9a3fc0e730ab…`, which is the surviving enrollment. Nobody is
+    locked out. The original entry follows.
+
+11a. **Resolved in code, pending on P7 — the v1 migration could seed a roster that
     breaks its own invariant.** `MigrateV1` keyed enrollments by enrollment id and
     marked every v1 invite carrying an `Enrollment` as `Active`, so a v1 store with
     several redeemed invites for one SteamID migrated them all active at once —
@@ -564,6 +574,32 @@ then inherits, to satisfy a gate whose only reader specifies it differently and 
 An earlier revision of this decision moved the lease to M5; the dependency graph refutes
 that — M4a depends on M1 alone, so an M5-owned lease would make M4a wait on a milestone it
 does not depend on.
+
+**Live verification on P7 — 2026-07-17, cold boot.** Three things that could only be checked
+with the VM up, all passing:
+
+- **The durable pin holds.** This is the one a green drill can silently break: the promotion's
+  pin was hand-fixed and never re-verified, and a stale `LUMBERJACKS_GATEWAY_IMAGE` reverts the
+  gateway on the next reboot while the *running* container looks right. It doesn't:
+  `/etc/comfy-p7/environment` pins `lumberjacks-gateway:m1-clean-20260717-r1`, the tag resolves
+  to `3576d8e03fb4`, and the container that came up from cold runs
+  `sha256:3576d8e03fb49b6a…` — the promoted digest. `/health` 200. The M0 rollback image
+  (`141bd9e5`) is still on disk. Chain verified end to end through an actual reboot.
+- **Risk 11 closed** (above): the migration collapsed correctly and the live client holds the
+  surviving credential.
+- **The roster answers correctly.** Verified against the *real* store on throwaway windows, so
+  the live window was never touched: enrolled `76561198088711642` → accept; stranger
+  `76561190000000001` → reject, code 8, `not_enrolled`; and — the part that makes it
+  conclusive — the same stranger on a **non-strict** window → accept, proving the rejection
+  comes from `StrictRosterEnabled` and not from some other gate.
+  A first attempt at this was junk and is worth recording: reusing one `uid` across both probes
+  meant the stranger hit gate G (duplicate) before the roster ever ran, and it *looked* like a
+  reject. The ladder was right; the probe was wrong. Distinct uids fixed it.
+  **Caveat on what this is not:** these are synthetic submissions, not real joins. They supply
+  `host_name` directly rather than having vanilla read it off the socket. That path is already
+  evidenced (§5.3, `host=76561198088711642` in the live capture), but the flip's own precondition
+  as Derek stated it — "verify the roster answers correctly against real joins" — is met in
+  substance, not literally.
 
 **Answered by Derek — 2026-07-17.** (1) Readiness lease: cut from M1, above. (2)
 `StrictRosterEnabled` stays **off** through the cut: deploy it disabled, verify the roster
