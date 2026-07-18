@@ -512,6 +512,24 @@ surfaces:
     than "what this commit builds".
     **Note:** `ZdoAuthoritativeConsumerRunner.cs` was LF at session start, went CRLF
     when `git checkout` re-smudged it mid-investigation, and is LF again under the pin.
+    **SOLVED 2026-07-18 — the varying input was git HEAD itself.** The prescribed next probe
+    (Csc input diff, then PDB diff) found it: the .NET 8 SDK's implicit source-control tasks
+    embed the HEAD sha in the portable PDB when the origin is a recognized host (this repo's
+    github URL); the PDB checksum rides in the DLL's debug directory — those are the 72
+    identity bytes. A local-path clone gets no embedding at all (origin unrecognized, PDB 144
+    bytes smaller): that is the whole clone-vs-worktree split, and worktrees matched because
+    they share the main repo's origin and HEAD. Caught live: a script-only comfy commit
+    (`877ff11`) moved the tree's mod hash `b6224cd9` → `b44349db` with zero source changes.
+    Proven both directions: `-p:EnableSourceControlManagerQueries=false` makes clone and tree
+    converge on one hash (`9d108121`), which equals what the clone built with queries ON —
+    the clone was already building the nothing-embedded flavor.
+    **Still open, but now a decision rather than a mystery:** the cut builds BEFORE the
+    release commit exists, so a shipped DLL embeds the PARENT sha and no checkout of the
+    release commit can rebuild it. Either pin the queries off in the mod csproj (hash attests
+    source alone, loses embedded provenance) or reorder the cut commit-first-build-second
+    (keeps provenance; rebuild then also needs the same origin URL). Until one is chosen,
+    rebuild-to-verify remains unestablished — but its blocker is named, reproduced, and
+    reversible. Recorded in comfy `554488d` (the cut script's parting text now states this).
 
 13. **Fixed — the release cut's artifact comparison was broken and had never executed.** Script
     `C:\work\comfy\infra\gcp\p7\scripts\New-ReleaseCut.ps1` (added in comfy `3e6f6304`) implements
@@ -541,9 +559,17 @@ surfaces:
     absence fails closed rather than falsely passing. (2) An audit suggested `$modDll` pointed at a
     stale path missing a `net48` folder; refuted — the mod csproj sets
     `AppendTargetFrameworkToOutputPath=false`, so `bin\Release\ComfyNetworkSense.dll` is correct.
-    **Residual:** this only proves the check *runs* and refuses; the comparison it performs is
-    still trusted, not yet demonstrated to *pass*, because that requires a real cut. Risk 12's
-    rebuild-to-verify gap is unaffected and still open.
+    **Residual resolved 2026-07-18 — the pass path is now known.** A rehearsal cut
+    (`m1-rehearsal-20260718-r1`; full non-WhatIf run: const edit, both builds — mod native
+    net48, gateway through the sdk:9.0 container — artifact readback, then reverted) returned
+    the first pass verdict the check has ever produced: both DLLs agreed. The check is proven
+    to refuse (`9fa4858`) and to pass. The rehearsal also caught a defect: the mod csproj's
+    `CopyAssembly` convenience target copies every build into the live Steam client's plugins
+    folder, so the release-id DLL landed on the OMEN client BEFORE the identity check ran — a
+    failing cut would already have shipped locally. Fixed in comfy `877ff11`: the cut's mod
+    build points `PluginOutputPath` at a nonexistent dir (verified both ways: suppressed build
+    leaves the plugins mtime untouched, plain build still copies). Risk 12's rebuild-to-verify
+    gap: root cause found the same day — see risk 12.
 
 ## 6. Wire constraints (frozen 0.5.31)
 
