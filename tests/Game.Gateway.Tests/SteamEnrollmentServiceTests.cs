@@ -105,6 +105,104 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
     }
 
     [Fact]
+    public void Reissue_MintsAFreshCodeAndKillsThePriorOne()
+    {
+        var service = CreateService(reissueCooldownMinutes: 0);
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var original, out _));
+
+        Assert.True(service.TryReissueBootstrap("76561198000000001", out var reissued, out _));
+        Assert.NotEqual(original.BootstrapToken, reissued.BootstrapToken);
+        // Same enrollment, same recipient: re-issue replaces the code, not the identity.
+        Assert.Equal(original.Enrollment.EnrollmentId, reissued.Enrollment.EnrollmentId);
+        Assert.Equal(original.Enrollment.RecipientId, reissued.Enrollment.RecipientId);
+        Assert.Equal(2, reissued.Enrollment.BootstrapIssueCount);
+
+        // The superseded code is gone from the store, so it answers as never-issued —
+        // and stays dead even under a binary that predates re-issue.
+        Assert.False(service.TryConsumeBootstrap(original.BootstrapToken, out _, out var dead));
+        Assert.Equal("bootstrap_invalid", dead);
+        Assert.DoesNotContain(reissued.BootstrapToken, File.ReadAllText(StorePath), StringComparison.Ordinal);
+
+        Assert.True(service.TryConsumeBootstrap(reissued.BootstrapToken, out var installed, out _));
+        Assert.True(service.IsCredentialValid(installed.Enrollment.EnrollmentId, installed.AccessToken));
+    }
+
+    [Fact]
+    public void Reissue_RecoversAnExpiredBootstrapAcrossARestart()
+    {
+        // The stranded case this exists for: the code expired before the install.
+        var expired = CreateService(bootstrapTtlHours: -1);
+        Assert.True(expired.TryRedeem(
+            expired.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var original, out _));
+        Assert.False(expired.TryConsumeBootstrap(original.BootstrapToken, out _, out var reason));
+        Assert.Equal("bootstrap_expired", reason);
+
+        // A second service on the same store proves the chain survives a restart.
+        var service = CreateService(reissueCooldownMinutes: 0);
+        Assert.True(service.TryReissueBootstrap("76561198000000001", out var reissued, out _));
+        Assert.True(service.TryConsumeBootstrap(reissued.BootstrapToken, out var installed, out _));
+        Assert.True(service.IsCredentialValid(installed.Enrollment.EnrollmentId, installed.AccessToken));
+    }
+
+    [Fact]
+    public void Reissue_RefusesOnceInstalled()
+    {
+        // Pending-only by design: once a credential exists, recovery is admin
+        // revoke + re-invite, not self-serve.
+        var service = CreateService(reissueCooldownMinutes: 0);
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var issued, out _));
+        Assert.True(service.TryConsumeBootstrap(issued.BootstrapToken, out _, out _));
+
+        Assert.False(service.TryReissueBootstrap("76561198000000001", out _, out var reason));
+        Assert.Equal("already_installed", reason);
+    }
+
+    [Fact]
+    public void Reissue_RefusesUnknownAndRevoked()
+    {
+        var service = CreateService(reissueCooldownMinutes: 0);
+        Assert.False(service.TryReissueBootstrap("76561190000000009", out _, out var unknown));
+        Assert.Equal("not_enrolled", unknown);
+
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out var issued, out _));
+        Assert.True(service.Revoke(issued.Enrollment.EnrollmentId, "revoked before install"));
+        Assert.False(service.TryReissueBootstrap("76561198000000001", out _, out var revoked));
+        Assert.Equal("enrollment_revoked", revoked);
+    }
+
+    [Fact]
+    public void Reissue_CooldownBlocksAnImmediateRepeat()
+    {
+        // Default cooldown: the bootstrap minted by the redeem seconds ago anchors it.
+        var service = CreateService();
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out _, out _));
+
+        Assert.False(service.TryReissueBootstrap("76561198000000001", out _, out var reason));
+        Assert.Equal("reissue_cooldown", reason);
+    }
+
+    [Fact]
+    public void Reissue_ChainCapExhausts()
+    {
+        var service = CreateService(reissueCooldownMinutes: 0, reissueMaxBootstraps: 3);
+        Assert.True(service.TryRedeem(
+            service.CreateInvite(TimeSpan.FromMinutes(5)).Token, "76561198000000001", out _, out _));
+
+        Assert.True(service.TryReissueBootstrap("76561198000000001", out _, out _));
+        Assert.True(service.TryReissueBootstrap("76561198000000001", out var last, out _));
+        Assert.Equal(3, last.Enrollment.BootstrapIssueCount);
+
+        Assert.False(service.TryReissueBootstrap("76561198000000001", out _, out var reason));
+        Assert.Equal("reissue_exhausted", reason);
+        // Exhaustion refuses new codes; it does not damage the one still pending.
+        Assert.True(service.TryConsumeBootstrap(last.BootstrapToken, out _, out _));
+    }
+
+    [Fact]
     public void Redeem_IsSingleUse()
     {
         var service = CreateService();
@@ -352,7 +450,10 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
             reloaded.CreateInvite(TimeSpan.FromMinutes(5)).Token, DuplicateSteamId, out _, out _));
     }
 
-    SteamEnrollmentService CreateService(double? bootstrapTtlHours = null)
+    SteamEnrollmentService CreateService(
+        double? bootstrapTtlHours = null,
+        double? reissueCooldownMinutes = null,
+        int? reissueMaxBootstraps = null)
     {
         Directory.CreateDirectory(_directory);
         var settings = new Dictionary<string, string?>
@@ -361,6 +462,10 @@ public sealed class SteamEnrollmentServiceTests : IDisposable
         };
         if (bootstrapTtlHours is not null)
             settings["LUMBERJACKS_BOOTSTRAP_TTL_HOURS"] = bootstrapTtlHours.Value.ToString(CultureInfo.InvariantCulture);
+        if (reissueCooldownMinutes is not null)
+            settings["LUMBERJACKS_REISSUE_COOLDOWN_MINUTES"] = reissueCooldownMinutes.Value.ToString(CultureInfo.InvariantCulture);
+        if (reissueMaxBootstraps is not null)
+            settings["LUMBERJACKS_REISSUE_MAX_BOOTSTRAPS"] = reissueMaxBootstraps.Value.ToString(CultureInfo.InvariantCulture);
         return new SteamEnrollmentService(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
     }
 

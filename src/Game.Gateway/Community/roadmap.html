@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-19T00:38:47.481Z</span>
+        <span>Updated 2026-07-19T00:42:05.484Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260719003847-current-focus-text-caught-up-roster-gate-verifie">
+        <div class="journal"><article class="journal-entry" id="note-20260719004205-m1-stage-4-gap-closed-self-serve-bootstrap-re-is">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-19T00:42:05.484Z">2026-07-19T00:42:05.484Z</time>
+        <span class="pill note-kind">implementation</span>
+        <span>Lumberjacks</span>
+        <span>M1</span>
+      </div>
+      <h3>M1 stage 4 gap closed: self-serve bootstrap re-issue via Steam re-sign-in</h3>
+      <p><strong>Impact:</strong> An expired setup code no longer strands its volunteer behind an admin revoke plus re-invite. GET /join/reissue redoes the Steam OpenID sign-in - the identity root that created the enrollment - and a SteamID whose Active enrollment is still credential-less gets a fresh single-use code for the same enrollment. Designed with Derek before building, four decisions: Steam re-sign-in authenticates (not the expired code itself, which would have turned the browser artifact stage 4 neutralized into a long-lived re-issue credential, and not an operator-signed link, which is not self-serve); pending-only scope, so once the installer has minted a credential re-issue answers already_installed and recovery stays admin revoke + re-invite; the public join IP limiter plus a per-enrollment cooldown (LUMBERJACKS_REISSUE_COOLDOWN_MINUTES, default 15) and a lifetime chain cap (LUMBERJACKS_REISSUE_MAX_BOOTSTRAPS, default 10); and the enrollment is reused, not rotated - same EnrollmentId and RecipientId, so nothing downstream churns. The prior unused code is deleted from the store rather than flagged: a deleted record answers bootstrap_invalid under every past and future binary, so a rollback cannot resurrect a superseded code, and at most one bootstrap is live per enrollment. The chain is counted in a new BootstrapIssueCount enrollment field, additive on schema v3 - pre-existing records read 0 and get one spare re-issue, fine because the cap is an abuse bound, not a security invariant. The OpenID verification is extracted into one helper shared by both callbacks rather than duplicated, and the handoff text now points the volunteer at the re-issue URL instead of ask-the-operator. Gateway-only and undeployed, like the rest of stage 4; StrictRoster and stage-3 deploy state untouched.</p>
+      <details><summary>Verification (1)</summary><ul><li>504 of 504 solution tests pass in the .NET 9 SDK container (Gateway 138 = 132 baseline + 6 new; Contracts 120; Simulation 246). All four re-issue guards are mutation-verified rather than merely green: disabling supersede-deletion fails exactly Reissue_MintsAFreshCodeAndKillsThePriorOne, the chain cap exactly Reissue_ChainCapExhausts, the cooldown exactly Reissue_CooldownBlocksAnImmediateRepeat, and the pending-only check exactly Reissue_RefusesOnceInstalled - one guard, one test, no overlap. Coverage also proves an expired bootstrap recovers across a service restart (two service instances on one store), that unknown and revoked SteamIDs refuse with distinct reasons, that exhaustion refuses new codes without damaging the pending one, and that the re-issued token never appears in the store file. The two RoadmapViewEndpointsTests failures on the Windows host are pre-existing path-separator issues, absent in the container, unrelated. Not exercised against a real Steam callback - the OpenID verify is the same code the enrollment callback has always used.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>src/Game.Gateway/Valheim/SteamEnrollmentService.cs</code> <code>src/Game.Gateway/Valheim/SteamEnrollmentEndpoints.cs</code> <code>tests/Game.Gateway.Tests/SteamEnrollmentServiceTests.cs</code> <code>docs/plan-m1-strict-admission.md</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260719003847-current-focus-text-caught-up-roster-gate-verifie">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">

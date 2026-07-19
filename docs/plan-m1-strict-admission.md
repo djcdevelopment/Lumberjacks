@@ -115,10 +115,35 @@ drills/rebuilds don't burn issuance rate limits.
    Store schema v2→v3, upgraded in place on first Save; v2 enrollments keep their token
    hash and keep verifying. Replay verified by mutation: disabling the single-use gate
    fails exactly `Bootstrap_IsSingleUse` and nothing else. M2 consumes this.
-   **Open:** an expired bootstrap strands the volunteer — the enrollment exists and
+   ~~**Open:** an expired bootstrap strands the volunteer — the enrollment exists and
    one-active-per-SteamID refuses a second, so re-issuing needs an admin revoke plus a
    fresh invite. TTL is 24h (`LUMBERJACKS_BOOTSTRAP_TTL_HOURS`) to make that unlikely
-   rather than impossible; a self-serve re-issue is the real fix and is not built.
+   rather than impossible; a self-serve re-issue is the real fix and is not built.~~
+   **Closed 2026-07-18 — self-serve re-issue, designed with Derek before building.**
+   `GET /join/reissue` redoes the Steam OpenID sign-in — the identity root that created
+   the enrollment — so no copyable artifact (least of all the expired code itself, the
+   rejected alternative: it would have turned the browser artifact stage 4 neutralized
+   into a long-lived re-issue credential) authorizes a re-issue. A SteamID whose Active
+   enrollment is still credential-less gets a fresh code for the *same* enrollment:
+   EnrollmentId and RecipientId are reused, not rotated, so nothing downstream churns.
+   The prior unused code is **deleted from the store, not flagged** — a deleted record
+   answers `bootstrap_invalid` under every past and future binary, so a rollback to a
+   pre-re-issue gateway cannot resurrect a superseded code the way an ignored flag
+   would; at most one bootstrap is live per enrollment. **Pending-only by design**: once
+   the installer has minted a credential (`TokenHash` set), re-issue answers
+   `already_installed` and recovery stays admin revoke + re-invite — lost-credential
+   rotation is a possible later follow-up on the same mechanism, not part of this.
+   Rate-limited three ways: the public `join` IP limiter, a per-enrollment cooldown
+   (`LUMBERJACKS_REISSUE_COOLDOWN_MINUTES`, default 15), and a lifetime chain cap
+   (`LUMBERJACKS_REISSUE_MAX_BOOTSTRAPS`, default 10) counted in a new
+   `BootstrapIssueCount` enrollment field — additive on schema v3, so pre-existing
+   records read 0 and get one spare re-issue, which is fine because the cap is an abuse
+   bound, not a security invariant. All four guards are mutation-verified: disabling
+   supersede-deletion, the cap, the cooldown, or the pending-only check fails exactly
+   its own test and nothing else. The handoff text now points the volunteer at the
+   re-issue URL instead of "ask the operator". Undeployed, like the rest of stage 4;
+   not exercised against a real Steam callback (the OpenID verify is the same code the
+   enrollment callback has always used, now shared rather than duplicated).
 
 **Stage 3 build status — 2026-07-17.** The mod-side half is **built and committed,
 undeployed**, all of it shipping OFF. Nothing below has touched P7.
