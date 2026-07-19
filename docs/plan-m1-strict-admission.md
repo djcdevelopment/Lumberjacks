@@ -153,7 +153,16 @@ undeployed**, all of it shipping OFF. Nothing below has touched P7.
 **Still needs a human, and none of it is mod work:** a real **DNS A record** (ACME will not
 issue for a bare IP — the long pole), an ACME contact address, and firewall openings for
 **80** and 443 (80 is not optional; HTTP-01 needs it, and terraform opens only the player
-port today). Then the live verifications this stage has always owed: Gateway stopped ⇒
+port today).
+**[2026-07-18 update: two of the three are DONE.** The DNS name exists and is recorded —
+`comfy-p7.duckdns.org` → the **reserved static** `8.231.129.249` (survives the VM's
+TERMINATED-between-sessions lifecycle; duckdns used as static DNS, no updater; on the
+Public Suffix List so the name carries its own Let's Encrypt rate limit), verified against
+public resolvers, comfy `29326eb` — which also records the browser-IP pre-fill trap that
+briefly pointed the name at an operator laptop. Firewall 80/443 opened in comfy `2765ff9`.
+**Remaining human input: only the ACME contact address**, deliberately kept out of this
+repo (expiry warnings land there and the repo publishes evidence); it goes in
+`/etc/comfy-p7/environment` on the VM at the next boot, alongside the stage-3 cut.] Then the live verifications this stage has always owed: Gateway stopped ⇒
 strict refuses; the §4 `2-dark` rows on the wire; https end to end; a capture check for a
 reusable credential on a plaintext link. Plus the priority-drain baseline the consumer's
 new deadline is owed (§5.8) — it is a ceiling and should not move healthy timing, but that
