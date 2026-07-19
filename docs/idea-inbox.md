@@ -11,6 +11,28 @@ Capture ideas here before deciding whether they belong in the roadmap or active 
 
 ## Inbox
 
+### Idea: producer outbox for durable redirect acceptance
+Status: parked
+Why it matters:
+The server adapter must retain an eligible per-peer revision until the Gateway confirms durable acceptance, then advance native bookkeeping exactly once.
+Risk if ignored:
+Producer loss between native suppression and Gateway acceptance remains outside the M4a stage-1 proof.
+Risk if done too early:
+It requires the stage-3 mod recipient emitter and a release cut across the sibling repository.
+Promotion test:
+Implement in M4a stage 3 after the Gateway partition and recipient identity are deployed and the mod can emit the server-derived recipient.
+
+### Idea: OPEN → CLOSING → SEALED redirect run lifecycle
+Status: parked
+Why it matters:
+A retained run lifecycle would make terminal closure and restart evidence explicit rather than inferred from reset and aggregate status.
+Risk if ignored:
+M3 remains responsible for retained-ledger lifecycle semantics.
+Risk if done too early:
+It would expand this Gateway-only partition change into M3 state-machine work.
+Promotion test:
+Revisit when M3's retained proof is scheduled; do not add lifecycle states to M4a stage 1.
+
 ### Idea: perception-budgeted world simulation
 Status: promoted
 Why it matters:

@@ -27,7 +27,8 @@ builder.Services.AddSingleton<ValheimHandshakeService>(sp =>
     new ValheimHandshakeService(
         sp.GetRequiredService<ValheimWindowActivityService>(),
         nowUtc: null,
-        roster: sp.GetRequiredService<SteamEnrollmentService>().CheckSteamId));
+        roster: sp.GetRequiredService<SteamEnrollmentService>().CheckSteamId,
+        recipientResolver: sp.GetRequiredService<SteamEnrollmentService>().GetRecipientId));
 builder.Services.AddSingleton<ValheimTelemetryHeartbeatService>();
 builder.Services.AddSingleton<SteamEnrollmentService>();
 

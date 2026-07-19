@@ -10,6 +10,7 @@ namespace Game.Gateway.Valheim;
 /// </summary>
 public sealed record ValheimZdoRedirectEnvelope
 {
+    public string? RecipientId { get; init; }
     public long? Seq { get; init; }
     public long? UidUser { get; init; }
     public long? UidId { get; init; }
@@ -42,6 +43,7 @@ public sealed record ValheimZdoRedirectAckResult(int Acknowledged, int Unknown);
 
 public sealed record ValheimZdoRedirectWindowStatus(
     string WindowId,
+    string RecipientId,
     long Receipts,
     long DistinctSeq,
     long Acknowledged,
@@ -55,7 +57,43 @@ public sealed record ValheimZdoRedirectWindowStatus(
     DateTime? FirstUtc,
     DateTime? LastUtc,
     IReadOnlyDictionary<string, long> PerPrefab,
-    IReadOnlyDictionary<string, long> PerSource);
+    IReadOnlyDictionary<string, long> PerSource)
+{
+    public long Eligible => Receipts;
+    public long Durable => Receipts;
+
+    public static ValheimZdoRedirectWindowStatus Aggregate(
+        string windowId, IReadOnlyList<ValheimZdoRedirectWindowStatus> statuses)
+    {
+        static long Sum(IEnumerable<ValheimZdoRedirectWindowStatus> values, Func<ValheimZdoRedirectWindowStatus, long> selector) =>
+            values.Sum(selector);
+        var first = statuses.MinBy(status => status.FirstUtc)!.FirstUtc;
+        var last = statuses.MaxBy(status => status.LastUtc)!.LastUtc;
+        var perPrefab = statuses.SelectMany(status => status.PerPrefab)
+            .GroupBy(pair => pair.Key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Sum(pair => pair.Value), StringComparer.Ordinal);
+        var perSource = statuses.SelectMany(status => status.PerSource)
+            .GroupBy(pair => pair.Key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Sum(pair => pair.Value), StringComparer.Ordinal);
+        return new(
+            windowId,
+            "aggregate",
+            Sum(statuses, status => status.Receipts),
+            statuses.Sum(status => status.DistinctSeq),
+            Sum(statuses, status => status.Acknowledged),
+            Sum(statuses, status => status.Pending),
+            Sum(statuses, status => status.Duplicates),
+            statuses.Select(status => status.MinSeq).Where(value => value is not null).DefaultIfEmpty().Min(),
+            statuses.Select(status => status.MaxSeq).Where(value => value is not null).DefaultIfEmpty().Max(),
+            Sum(statuses, status => status.MissingSeq),
+            statuses.Any(status => status.SeqTrackingSaturated),
+            Sum(statuses, status => status.EmptyBodyCount),
+            first,
+            last,
+            perPrefab,
+            perSource);
+    }
+}
 
 /// <summary>
 /// Durable queue for redirected Valheim ZDO payloads. The Harmony mod
@@ -93,41 +131,93 @@ public sealed class ValheimZdoRedirectService
         string source,
         IReadOnlyList<ValheimZdoRedirectEnvelope> envelopes)
     {
+        return RecordEnvelopes(windowId, source, envelopes, recipientSelector: null);
+    }
+
+    public ValheimZdoRedirectRecordResult RecordEnvelopes(
+        string windowId,
+        string source,
+        IReadOnlyList<ValheimZdoRedirectEnvelope> envelopes,
+        string? recipientId)
+    {
+        return RecordEnvelopes(windowId, source, envelopes, _ => recipientId);
+    }
+
+    private ValheimZdoRedirectRecordResult RecordEnvelopes(
+        string windowId,
+        string source,
+        IReadOnlyList<ValheimZdoRedirectEnvelope> envelopes,
+        Func<ValheimZdoRedirectEnvelope, string?>? recipientSelector)
+    {
         lock (_persistenceGate)
         {
             var observedUtc = DateTime.UtcNow;
-            AppendWal(new() { Op = "record", WindowId = windowId, Source = source,
-                Envelopes = envelopes.ToList(), ObservedUtc = observedUtc });
-            var window = _windows.GetOrAdd(windowId, static _ => new ValheimZdoRedirectWindow());
-            var total = window.RecordBatch(source, envelopes, observedUtc);
+            var groups = envelopes.GroupBy(envelope => NormalizeRecipient(
+                recipientSelector?.Invoke(envelope) ?? envelope.RecipientId));
+            long total = 0;
+            foreach (var group in groups)
+            {
+                var recipientId = group.Key;
+                var batch = group.ToList();
+                AppendWal(new() { SchemaVersion = CurrentWalSchemaVersion, Op = "record",
+                    WindowId = windowId, RecipientId = recipientId, Source = source,
+                    Envelopes = batch, ObservedUtc = observedUtc });
+                var window = GetOrAdd(windowId, recipientId);
+                total += window.RecordBatch(source, batch, observedUtc);
+            }
             return new ValheimZdoRedirectRecordResult(envelopes.Count, total);
         }
     }
 
     public ValheimZdoRedirectWindowStatus GetStatus(string windowId) =>
-        _windows.TryGetValue(windowId, out var window)
-            ? window.ToStatus(windowId)
-            : ValheimZdoRedirectWindow.Empty(windowId);
+        AggregateStatuses(windowId);
+
+    public ValheimZdoRedirectWindowStatus GetStatus(string windowId, string recipientId) =>
+        _windows.TryGetValue(Key(windowId, NormalizeRecipient(recipientId)), out var window)
+            ? window.ToStatus(windowId, NormalizeRecipient(recipientId))
+            : ValheimZdoRedirectWindow.Empty(windowId, NormalizeRecipient(recipientId));
 
     public IReadOnlyList<ValheimZdoRedirectWindowStatus> GetAllStatuses() =>
+        _windows.Keys
+            .Select(ParseKey)
+            .Select(pair => pair.WindowId)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .Select(AggregateStatuses)
+            .ToList();
+
+    public IReadOnlyList<ValheimZdoRedirectWindowStatus> GetAllRecipientStatuses() =>
         _windows
-            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => kv.Value.ToStatus(kv.Key))
+            .Select(kv =>
+            {
+                var key = ParseKey(kv.Key);
+                return kv.Value.ToStatus(key.WindowId, key.RecipientId);
+            })
+            .OrderBy(status => status.WindowId, StringComparer.Ordinal)
+            .ThenBy(status => status.RecipientId, StringComparer.Ordinal)
             .ToList();
 
     public IReadOnlyList<ValheimZdoRedirectEnvelope> Pending(string windowId, int limit)
+        => Pending(windowId, ValheimRecipient.Legacy, limit);
+
+    public IReadOnlyList<ValheimZdoRedirectEnvelope> Pending(string windowId, string recipientId, int limit)
     {
-        return _windows.TryGetValue(windowId, out var window)
+        return _windows.TryGetValue(Key(windowId, NormalizeRecipient(recipientId)), out var window)
             ? window.Pending(Math.Clamp(limit, 1, 1024))
             : Array.Empty<ValheimZdoRedirectEnvelope>();
     }
 
     public ValheimZdoRedirectAckResult Acknowledge(string windowId, IReadOnlyList<long> sequences)
+        => Acknowledge(windowId, ValheimRecipient.Legacy, sequences);
+
+    public ValheimZdoRedirectAckResult Acknowledge(string windowId, string recipientId, IReadOnlyList<long> sequences)
     {
         lock (_persistenceGate)
         {
-            AppendWal(new() { Op = "ack", WindowId = windowId, Sequences = sequences.ToArray() });
-            return _windows.TryGetValue(windowId, out var window)
+            var normalized = NormalizeRecipient(recipientId);
+            AppendWal(new() { SchemaVersion = CurrentWalSchemaVersion, Op = "ack", WindowId = windowId,
+                RecipientId = normalized, Sequences = sequences.ToArray() });
+            return _windows.TryGetValue(Key(windowId, normalized), out var window)
                 ? window.Acknowledge(sequences)
                 : new(0, sequences.Count);
         }
@@ -151,12 +241,17 @@ public sealed class ValheimZdoRedirectService
                            FileShare.None, 64 * 1024, FileOptions.WriteThrough))
                 {
                     foreach (var pair in _windows.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+                    {
+                        var key = ParseKey(pair.Key);
                         WriteWalEntry(stream, new RedirectWalEntry
                         {
+                            SchemaVersion = CurrentWalSchemaVersion,
                             Op = "snapshot",
-                            WindowId = pair.Key,
+                            WindowId = key.WindowId,
+                            RecipientId = key.RecipientId,
                             Snapshot = pair.Value.ToSnapshot(),
                         });
+                    }
                     stream.Flush(flushToDisk: true);
                 }
 
@@ -178,7 +273,10 @@ public sealed class ValheimZdoRedirectService
         lock (_persistenceGate)
         {
             AppendWal(new() { Op = "reset", WindowId = windowId });
-            return _windows.TryRemove(windowId, out _);
+            var removed = false;
+            foreach (var key in _windows.Keys.Where(key => ParseKey(key).WindowId == windowId).ToList())
+                removed |= _windows.TryRemove(key, out _);
+            return removed;
         }
     }
 
@@ -260,20 +358,24 @@ public sealed class ValheimZdoRedirectService
 
     private void ApplyWalEntry(RedirectWalEntry entry)
     {
+        var recipientId = entry.SchemaVersion.GetValueOrDefault(1) <= 1
+            ? ValheimRecipient.Legacy
+            : NormalizeRecipient(entry.RecipientId);
         switch (entry.Op)
         {
             case "record" when !string.IsNullOrWhiteSpace(entry.WindowId) && entry.Envelopes is not null:
-                _windows.GetOrAdd(entry.WindowId, static _ => new ValheimZdoRedirectWindow())
+                GetOrAdd(entry.WindowId, recipientId)
                     .RecordBatch(entry.Source ?? "unknown", entry.Envelopes, entry.ObservedUtc ?? DateTime.UtcNow);
                 break;
             case "ack" when !string.IsNullOrWhiteSpace(entry.WindowId) && entry.Sequences is not null:
-                if (_windows.TryGetValue(entry.WindowId, out var window)) window.Acknowledge(entry.Sequences);
+                if (_windows.TryGetValue(Key(entry.WindowId, recipientId), out var window)) window.Acknowledge(entry.Sequences);
                 break;
             case "snapshot" when !string.IsNullOrWhiteSpace(entry.WindowId) && entry.Snapshot is not null:
-                _windows[entry.WindowId] = ValheimZdoRedirectWindow.FromSnapshot(entry.Snapshot);
+                _windows[Key(entry.WindowId, recipientId)] = ValheimZdoRedirectWindow.FromSnapshot(entry.Snapshot);
                 break;
             case "reset" when !string.IsNullOrWhiteSpace(entry.WindowId):
-                _windows.TryRemove(entry.WindowId, out _);
+                foreach (var key in _windows.Keys.Where(key => ParseKey(key).WindowId == entry.WindowId).ToList())
+                    _windows.TryRemove(key, out _);
                 break;
             case "reset_all":
                 _windows.Clear();
@@ -285,8 +387,10 @@ public sealed class ValheimZdoRedirectService
 
     private sealed record RedirectWalEntry
     {
+        public int? SchemaVersion { get; init; }
         public string? Op { get; init; }
         public string? WindowId { get; init; }
+        public string? RecipientId { get; init; }
         public string? Source { get; init; }
         public List<ValheimZdoRedirectEnvelope>? Envelopes { get; init; }
         public long[]? Sequences { get; init; }
@@ -308,6 +412,39 @@ public sealed class ValheimZdoRedirectService
         List<ValheimZdoRedirectEnvelope> Pending,
         Dictionary<int, long> PerPrefab,
         Dictionary<string, long> PerSource);
+
+    private const int CurrentWalSchemaVersion = 2;
+
+    private static string NormalizeRecipient(string? recipientId) =>
+        string.IsNullOrWhiteSpace(recipientId) ? ValheimRecipient.Legacy : recipientId.Trim();
+
+    private static string Key(string windowId, string recipientId) =>
+        windowId + "\u001f" + NormalizeRecipient(recipientId);
+
+    private ValheimZdoRedirectWindow GetOrAdd(string windowId, string recipientId) =>
+        _windows.GetOrAdd(Key(windowId, recipientId), static _ => new ValheimZdoRedirectWindow());
+
+    private static (string WindowId, string RecipientId) ParseKey(string key)
+    {
+        var separator = key.IndexOf('\u001f');
+        return separator < 0
+            ? (key, ValheimRecipient.Legacy)
+            : (key[..separator], NormalizeRecipient(key[(separator + 1)..]));
+    }
+
+    private ValheimZdoRedirectWindowStatus AggregateStatuses(string windowId)
+    {
+        var statuses = _windows
+            .Where(pair => ParseKey(pair.Key).WindowId == windowId)
+            .Select(pair =>
+            {
+                var key = ParseKey(pair.Key);
+                return pair.Value.ToStatus(windowId, key.RecipientId);
+            })
+            .ToList();
+        if (statuses.Count == 0) return ValheimZdoRedirectWindow.Empty(windowId, ValheimRecipient.Legacy);
+        return ValheimZdoRedirectWindowStatus.Aggregate(windowId, statuses);
+    }
 
     private sealed class ValheimZdoRedirectWindow
     {
@@ -416,7 +553,7 @@ public sealed class ValheimZdoRedirectService
             }
         }
 
-        public ValheimZdoRedirectWindowStatus ToStatus(string windowId)
+        public ValheimZdoRedirectWindowStatus ToStatus(string windowId, string recipientId)
         {
             lock (_gate)
             {
@@ -425,6 +562,7 @@ public sealed class ValheimZdoRedirectService
 
                 return new ValheimZdoRedirectWindowStatus(
                     windowId,
+                    recipientId,
                     _receipts,
                     distinctCount,
                     _acknowledged,
@@ -485,9 +623,10 @@ public sealed class ValheimZdoRedirectService
             return window;
         }
 
-        public static ValheimZdoRedirectWindowStatus Empty(string windowId) =>
+        public static ValheimZdoRedirectWindowStatus Empty(string windowId, string recipientId) =>
             new(
                 windowId,
+                recipientId,
                 Receipts: 0,
                 DistinctSeq: 0,
                 Acknowledged: 0,

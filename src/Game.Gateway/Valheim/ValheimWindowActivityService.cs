@@ -30,20 +30,39 @@ public sealed class ValheimWindowActivityService
     /// <summary>Records a sign of life for <paramref name="windowId"/>. Monotonic: a late-arriving
     /// older timestamp never moves the mark backwards.</summary>
     public void Touch(string windowId, DateTime utcNow)
+        => Touch(windowId, ValheimRecipient.Legacy, utcNow);
+
+    public void Touch(string windowId, string recipientId, DateTime utcNow)
     {
         if (string.IsNullOrWhiteSpace(windowId))
             return;
-        _lastUtc.AddOrUpdate(windowId, utcNow, (_, prior) => utcNow > prior ? utcNow : prior);
+        _lastUtc.AddOrUpdate(Key(windowId, recipientId), utcNow, (_, prior) => utcNow > prior ? utcNow : prior);
     }
 
     public DateTime? LastActivityUtc(string windowId) =>
-        !string.IsNullOrWhiteSpace(windowId) && _lastUtc.TryGetValue(windowId, out var utc)
+        LastActivityUtc(windowId, ValheimRecipient.Legacy);
+
+    public DateTime? LastActivityUtc(string windowId, string recipientId) =>
+        !string.IsNullOrWhiteSpace(windowId) && _lastUtc.TryGetValue(Key(windowId, recipientId), out var utc)
             ? utc
             : null;
 
+    public bool IsLive(string windowId, string recipientId, DateTime utcNow, int leaseSeconds)
+    {
+        if (leaseSeconds < 1) return false;
+        var last = LastActivityUtc(windowId, recipientId);
+        return last is DateTime seen && utcNow - seen < TimeSpan.FromSeconds(leaseSeconds);
+    }
+
     /// <summary>Drops the mark so a window reset also drops its liveness, rather than leaving a
     /// stale sign of life that would hold a seat in a freshly reset window.</summary>
-    public bool Clear(string windowId) => _lastUtc.TryRemove(windowId, out _);
+    public bool Clear(string windowId)
+    {
+        var removed = false;
+        foreach (var key in _lastUtc.Keys.Where(key => key.StartsWith(windowId + "\u001f", StringComparison.Ordinal)).ToList())
+            removed |= _lastUtc.TryRemove(key, out _);
+        return removed;
+    }
 
     public int ClearAll()
     {
@@ -51,4 +70,7 @@ public sealed class ValheimWindowActivityService
         _lastUtc.Clear();
         return count;
     }
+
+    private static string Key(string windowId, string recipientId) =>
+        windowId + "\u001f" + (string.IsNullOrWhiteSpace(recipientId) ? ValheimRecipient.Legacy : recipientId.Trim());
 }

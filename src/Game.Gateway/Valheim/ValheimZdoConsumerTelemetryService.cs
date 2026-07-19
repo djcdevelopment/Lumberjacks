@@ -71,6 +71,30 @@ public sealed class ValheimZdoConsumerTelemetryService
             matching.Count == 0 ? null : matching.Max(sample => sample.SeenAt));
     }
 
+    public ValheimZdoConsumerWindowStatus GetRecipientStatus(string windowId, string recipientId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var matching = _samples.Values
+            .Where(sample => sample.Heartbeat.WindowId == windowId &&
+                sample.Heartbeat.ConsumerId == recipientId)
+            .ToList();
+        var active = matching.Where(sample => now - sample.SeenAt <= StaleAfter).ToList();
+        var counted = active.Count > 0
+            ? active
+            : matching.OrderByDescending(sample => sample.SeenAt).Take(1).ToList();
+        return new(
+            windowId,
+            active.Count,
+            counted.Sum(sample => sample.Heartbeat.Applied),
+            counted.Sum(sample => sample.Heartbeat.Superseded),
+            counted.Sum(sample => sample.Heartbeat.Acknowledged),
+            counted.Sum(sample => sample.Heartbeat.Rejected),
+            counted.Sum(sample => sample.Heartbeat.Duplicates),
+            counted.Sum(sample => sample.Heartbeat.Retried),
+            counted.Sum(sample => sample.Heartbeat.Pending),
+            matching.Count == 0 ? null : matching.Max(sample => sample.SeenAt));
+    }
+
     public object Snapshot(string windowId)
     {
         var status = GetWindowStatus(windowId);

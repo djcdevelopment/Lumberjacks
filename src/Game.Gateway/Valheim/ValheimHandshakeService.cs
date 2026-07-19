@@ -141,6 +141,9 @@ public sealed record ValheimHandshakeServerContext
     /// </summary>
     public int SeatLeaseSeconds { get; init; } = 60;
 
+    /// <summary>Per-recipient readiness lease used by M4a consumer activity.</summary>
+    public int RecipientLeaseSeconds { get; init; } = 60;
+
     // Server-PeerInfo reply fields (the emulated world).
     public long ServerUid { get; init; } = 1;
     public string VersionString { get; init; } = "0.221.12";
@@ -257,6 +260,7 @@ public sealed class ValheimHandshakeService
     private readonly ValheimWindowActivityService? _activity;
     private readonly Func<DateTime> _nowUtc;
     private readonly Func<string?, ValheimRosterVerdict>? _roster;
+    private readonly Func<string?, string?>? _recipientResolver;
 
     /// <param name="activity">Consumer liveness for the seat gate. Null ⇒ seats expire on their
     /// grant alone, which is the pre-stage-2 behaviour and is what unit tests get by default.</param>
@@ -268,11 +272,13 @@ public sealed class ValheimHandshakeService
     public ValheimHandshakeService(
         ValheimWindowActivityService? activity = null,
         Func<DateTime>? nowUtc = null,
-        Func<string?, ValheimRosterVerdict>? roster = null)
+        Func<string?, ValheimRosterVerdict>? roster = null,
+        Func<string?, string?>? recipientResolver = null)
     {
         _activity = activity;
         _nowUtc = nowUtc ?? (() => DateTime.UtcNow);
         _roster = roster;
+        _recipientResolver = recipientResolver;
     }
 
     public (bool Ok, string Error) Configure(string windowId, ValheimHandshakeServerContext context)
@@ -305,8 +311,9 @@ public sealed class ValheimHandshakeService
         if (error is not null)
             return (false, error, null);
         var window = _windows.GetOrAdd(windowId, static _ => new Window());
+        var recipient = _recipientResolver?.Invoke(submission.HostName) ?? ValheimRecipient.Legacy;
         return (true, string.Empty, window.SubmitPeerInfo(
-            submission, _nowUtc(), _activity?.LastActivityUtc(windowId), _roster));
+            submission, _nowUtc(), _activity?.LastActivityUtc(windowId, recipient), _roster));
     }
 
     public ValheimHandshakeWindowStatus GetStatus(string windowId) =>
@@ -355,6 +362,8 @@ public sealed class ValheimHandshakeService
             return "seat_capacity must be 0 (disabled) or 1; N-seat windows need per-holder liveness";
         if (context.SeatLeaseSeconds is < 1 or > 86_400)
             return "seat_lease_seconds must be 1..86400";
+        if (context.RecipientLeaseSeconds is < 1 or > 86_400)
+            return "recipient_lease_seconds must be 1..86400";
         return null;
     }
 
@@ -588,8 +597,9 @@ public sealed class ValheimHandshakeService
             if (_context.SeatCapacity <= 0)
                 return false;
 
-            var lease = TimeSpan.FromSeconds(Math.Max(1, _context.SeatLeaseSeconds));
-            var activityIsLive = lastActivityUtc is DateTime seen && nowUtc - seen < lease;
+            var seatLease = TimeSpan.FromSeconds(Math.Max(1, _context.SeatLeaseSeconds));
+            var recipientLease = TimeSpan.FromSeconds(Math.Max(1, _context.RecipientLeaseSeconds));
+            var activityIsLive = lastActivityUtc is DateTime seen && nowUtc - seen < recipientLease;
 
             foreach (var (holder, grantedUtc) in _seats)
             {
@@ -598,7 +608,7 @@ public sealed class ValheimHandshakeService
                 // otherwise quitting to the menu costs them their own server for a full lease.
                 if (string.Equals(holder, holderId, StringComparison.Ordinal))
                     return false;
-                if (activityIsLive || nowUtc - grantedUtc < lease)
+                if (activityIsLive || nowUtc - grantedUtc < seatLease)
                     return true; // SeatCapacity is validated to 0..1, so one live holder is enough
             }
             return false;

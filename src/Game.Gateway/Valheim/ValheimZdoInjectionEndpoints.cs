@@ -16,19 +16,25 @@ public static class ValheimZdoInjectionEndpoints
                 : Results.BadRequest(new { ok = false, error = result.Error });
         });
 
-        group.MapGet("/next/{windowId}", (string windowId, string? client_id,
+        group.MapGet("/next/{windowId}", (string windowId, string? client_id, HttpContext context,
             ValheimZdoInjectionService service) =>
         {
-            var result = service.Poll(windowId, client_id ?? string.Empty);
+            var scope = Scope(context, client_id);
+            if (scope.Error is not null)
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var result = service.Poll(windowId, scope.Resolved!);
             return result.Ok
                 ? Results.Ok(new { ok = true, window_id = windowId, commands = result.Commands })
                 : Results.BadRequest(new { ok = false, error = result.Error });
         }).RequireRateLimiting("consumer");
 
-        group.MapPost("/ack", (ValheimZdoInjectionAckRequest request,
+        group.MapPost("/ack", (ValheimZdoInjectionAckRequest request, HttpContext context,
             ValheimZdoInjectionService service) =>
         {
-            var result = service.Ack(request);
+            var scope = Scope(context, request.ClientId);
+            if (scope.Error is not null)
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var result = service.Ack(request with { ClientId = scope.Resolved });
             return result.Ok
                 ? Results.Ok(new { ok = true, window_id = request.WindowId,
                     command_id = request.CommandId, client_id = request.ClientId })
@@ -43,5 +49,12 @@ public static class ValheimZdoInjectionEndpoints
             Results.Ok(new { ok = true, window_id = windowId, reset = service.Reset(windowId) }));
         group.MapPost("/reset", (ValheimZdoInjectionService service) =>
             Results.Ok(new { ok = true, windows_cleared = service.ResetAll() }));
+    }
+
+    private static (string? Resolved, string? Error) Scope(HttpContext context, string? requested)
+    {
+        var principal = ValheimPrincipal.From(context);
+        return ValheimRecipientScopePolicy.Resolve(principal?.Kind,
+            principal?.Enrollment?.RecipientId, requested);
     }
 }

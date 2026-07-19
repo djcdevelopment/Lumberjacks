@@ -361,6 +361,18 @@ public sealed class SteamEnrollmentService
         }
     }
 
+    /// <summary>Returns the active opaque delivery recipient for a SteamID, if enrolled.</summary>
+    public string? GetRecipientId(string? steamId)
+    {
+        if (string.IsNullOrWhiteSpace(steamId)) return null;
+        lock (_gate)
+        {
+            return _enrollments.Values
+                .FirstOrDefault(item => string.Equals(item.SteamId, steamId, StringComparison.Ordinal)
+                    && item.Status == EnrollmentStatus.Active)?.RecipientId;
+        }
+    }
+
     public EnrollmentView? Get(string enrollmentId)
     {
         lock (_gate) return _enrollments.TryGetValue(enrollmentId, out var item) ? View(item) : null;

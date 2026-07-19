@@ -77,11 +77,14 @@ public static class ValheimZdoRedirectEndpoints
         // A consumer poll is the seat gate's sign of life for this window — see
         // ValheimWindowActivityService. Recorded on the request, not inside the ZDO service, so the
         // hot path is untouched.
-        group.MapGet("/pending/{windowId}", (string windowId, int? limit,
+        group.MapGet("/pending/{windowId}", (string windowId, int? limit, HttpContext context,
             ValheimZdoRedirectService redirects, ValheimWindowActivityService activity) =>
         {
-            activity.Touch(windowId, DateTime.UtcNow);
-            return Results.Ok(new { schema_version = 1, window_id = windowId, envelopes = redirects.Pending(windowId, limit ?? 64) });
+            var scope = Scope(context);
+            if (scope.Error is not null) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            activity.Touch(windowId, scope.Resolved!, DateTime.UtcNow);
+            return Results.Ok(new { schema_version = 1, window_id = windowId,
+                recipient_id = scope.Resolved, envelopes = redirects.Pending(windowId, scope.Resolved!, limit ?? 64) });
         }).RequireRateLimiting("consumer");
 
         // Who a consumer IS is the server's to say, not the caller's. Where the caller presented an
@@ -123,13 +126,15 @@ public static class ValheimZdoRedirectEndpoints
             ValheimZdoConsumerTelemetryService consumers) => Results.Ok(consumers.Snapshot(windowId)))
             .RequireCors(Game.ServiceDefaults.PublicTelemetryV0.CorsPolicyName);
 
-        group.MapPost("/ack/{windowId}", (string windowId, long[] sequences,
+        group.MapPost("/ack/{windowId}", (string windowId, long[] sequences, HttpContext context,
             ValheimZdoRedirectService redirects, ValheimWindowActivityService activity) =>
         {
             if (sequences is null || sequences.Length == 0)
                 return Results.BadRequest(new { error = "sequences is required" });
-            activity.Touch(windowId, DateTime.UtcNow);
-            var result = redirects.Acknowledge(windowId, sequences);
+            var scope = Scope(context);
+            if (scope.Error is not null) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            activity.Touch(windowId, scope.Resolved!, DateTime.UtcNow);
+            var result = redirects.Acknowledge(windowId, scope.Resolved!, sequences);
             return Results.Ok(new { window_id = windowId, acknowledged = result.Acknowledged, unknown = result.Unknown });
         }).RequireRateLimiting("consumer");
 
@@ -159,6 +164,7 @@ public static class ValheimZdoRedirectEndpoints
     private static object ToResponse(ValheimZdoRedirectWindowStatus status) => new
     {
         window_id = status.WindowId,
+        recipient_id = status.RecipientId,
         receipts = status.Receipts,
         distinct_seq = status.DistinctSeq,
         acknowledged = status.Acknowledged,
@@ -174,4 +180,11 @@ public static class ValheimZdoRedirectEndpoints
         per_prefab = status.PerPrefab,
         per_source = status.PerSource,
     };
+
+    private static (string? Resolved, string? Error) Scope(HttpContext context)
+    {
+        var principal = ValheimPrincipal.From(context);
+        return ValheimRecipientScopePolicy.Resolve(principal?.Kind,
+            principal?.Enrollment?.RecipientId, null);
+    }
 }

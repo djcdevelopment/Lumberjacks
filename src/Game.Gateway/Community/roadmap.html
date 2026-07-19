@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-19T01:23:38.843Z</span>
+        <span>Updated 2026-07-19T04:33:53.367Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -530,7 +530,7 @@
     <div class="gate open"><strong>Exit gate · not yet met</strong><ul class="exit-criteria"><li>Two and then ten synthetic consumers cannot poll, inspect, acknowledge, block, or close another recipient&#39;s work.</li><li>Duplicate producer POST, poll, terminal ACK, reconnect, lease takeover, Gateway restart, WAL replay, and boundary crash tests converge idempotently.</li><li>Every recipient closes its own conservation equation, and producer outbox recovery produces neither loss nor double application.</li></ul></div>
     <div class="milestone-evidence">
       <div><strong>Inputs</strong><ul><li>M1 opaque recipient, consumer credential, and least-privilege authorization contracts.</li><li>Valheim&#39;s existing per-peer sync-list boundary and FieldLab crash/replay fixtures.</li></ul></div>
-      <div><strong>Closing evidence</strong><span class="empty-evidence">None recorded; this exit gate remains open.</span></div>
+      <div><strong>Closing evidence</strong><ul><li><span>Gateway-only M4a stage-1 proof in progress: recipient policy, legacy-bucket compatibility, N=2/N=10 synthetic isolation, recipient-keyed activity leases, additive WAL replay fixtures, and per-recipient conservation tests are implemented and remain undeployed. Producer outbox recovery and the stage-3 mod recipient emitter are explicitly open.</span></li></ul></div>
     </div>
   </article>
 <article class="milestone gated" id="M4b">
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260719012338-lockfile-sheds-13-extraneous-entries-left-over-f">
+        <div class="journal"><article class="journal-entry" id="note-20260719043353-gateway-recipient-scoped-durable-delivery-stage-">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-19T04:33:53.367Z">2026-07-19T04:33:53.367Z</time>
+        <span class="pill note-kind">implementation</span>
+        <span>Lumberjacks</span>
+        <span>M4a</span>
+      </div>
+      <h3>Gateway recipient-scoped durable delivery stage 1</h3>
+      <p><strong>Impact:</strong> Adds server-derived recipient isolation, named legacy compatibility, recipient-keyed leases, additive WAL replay, and synthetic N=2/N=10 proof; remains undeployed with producer outbox open.</p>
+      <details><summary>Verification (3)</summary><ul><li>dotnet9 Gateway 153 total, 151 passing, 2 pre-existing Windows path failures</li><li>sdk:9.0 container 519/519 passing</li><li>Mutation proof: scope 4 failures, lease 2 failures, WAL version 1 failure</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>docs/plan-m4a-recipient-isolation.md</code></div>
+      <div class="containing-commit">Recorded by Codex · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260719012338-lockfile-sheds-13-extraneous-entries-left-over-f">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">

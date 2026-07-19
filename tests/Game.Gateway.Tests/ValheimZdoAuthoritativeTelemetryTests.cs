@@ -126,6 +126,97 @@ public sealed class ValheimZdoAuthoritativeTelemetryTests
     }
 
     [Fact]
+    public void RecipientLessV1WalFixtureReplaysIntoLegacyBucket()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lumberjacks-zdo-v1-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "redirect.wal");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var payload = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Op = "record",
+                WindowId = Window,
+                RecipientId = "recipient-from-future",
+                Source = "v1-fixture",
+                Envelopes = new[] { new { Seq = 41L, BodyB64 = "AA==" } },
+                ObservedUtc = DateTime.UtcNow,
+            });
+            using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
+            {
+                stream.Write(BitConverter.GetBytes(payload.Length));
+                stream.Write(payload);
+            }
+
+            var replayed = new ValheimZdoRedirectService(path);
+            Assert.True(replayed.PersistenceHealthy);
+            Assert.Equal(1, replayed.GetStatus(Window, ValheimRecipient.Legacy).Receipts);
+            Assert.Equal(41, replayed.Pending(Window, ValheimRecipient.Legacy, 10).Single().Seq);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CompleteLengthCorruptWalRecordFailsRatherThanTruncating()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lumberjacks-zdo-corrupt-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "redirect.wal");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var payload = System.Text.Encoding.UTF8.GetBytes("{ this is complete garbage }");
+            using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
+            {
+                stream.Write(BitConverter.GetBytes(payload.Length));
+                stream.Write(payload);
+            }
+
+            Assert.ThrowsAny<Exception>(() => new ValheimZdoRedirectService(path));
+            Assert.Equal(sizeof(int) + payload.Length, new FileInfo(path).Length);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RecipientScopedWalReplayConvergesAcrossTwoRuns()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lumberjacks-zdo-recipient-replay-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "redirect.wal");
+        try
+        {
+            var writer = new ValheimZdoRedirectService(path);
+            writer.RecordEnvelopes(Window, "server", [Envelope(1) with { RecipientId = "a" }, Envelope(2) with { RecipientId = "b" }]);
+            writer.Acknowledge(Window, "a", [1]);
+            var first = new ValheimZdoRedirectService(path);
+            var second = new ValheimZdoRedirectService(path);
+            foreach (var recipient in new[] { "a", "b" })
+            {
+                var before = first.GetStatus(Window, recipient);
+                var after = second.GetStatus(Window, recipient);
+                Assert.Equal(before.WindowId, after.WindowId);
+                Assert.Equal(before.RecipientId, after.RecipientId);
+                Assert.Equal(before.Receipts, after.Receipts);
+                Assert.Equal(before.DistinctSeq, after.DistinctSeq);
+                Assert.Equal(before.Acknowledged, after.Acknowledged);
+                Assert.Equal(before.Pending, after.Pending);
+                Assert.Equal(before.Duplicates, after.Duplicates);
+                Assert.Equal(first.Pending(Window, recipient, 10).Select(item => item.Seq),
+                    second.Pending(Window, recipient, 10).Select(item => item.Seq));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void WalCompactionPreservesWindowStateAndReplay()
     {
         var directory = Path.Combine(Path.GetTempPath(), "lumberjacks-zdo-compact-" + Guid.NewGuid().ToString("N"));
