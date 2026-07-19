@@ -14,29 +14,95 @@ public static class ValheimZdoRedirectEndpoints
 
         group.MapPost("/receipts", (
             ValheimZdoRedirectRequest request,
-            ValheimZdoRedirectService redirects) =>
+            HttpContext context,
+            ValheimZdoRedirectService redirects,
+            ILoggerFactory loggerFactory) =>
         {
             if (string.IsNullOrWhiteSpace(request.WindowId))
                 return Results.BadRequest(new { error = "window_id is required" });
 
-            if (request.Envelopes is null)
-                return Results.BadRequest(new { error = "envelopes is required" });
-
-            for (var i = 0; i < request.Envelopes.Count; i++)
+            var admission = ValheimZdoRedirectAdmissionPolicy.Evaluate(
+                request.SchemaVersion, request.ModRelease, ValheimReleaseIdentity.ExpectedModRelease);
+            var callerIdentity = ValheimPrincipal.From(context)?.Kind ?? "unknown";
+            var logger = loggerFactory.CreateLogger("ComfyLumberjacksIntegration");
+            if (!admission.Allowed)
             {
-                if (request.Envelopes[i].Seq is null)
-                    return Results.BadRequest(new { error = $"envelope at index {i} is missing seq" });
+                logger.LogWarning(
+                    "ZDO submission rejected caller_identity={CallerIdentity} mod_release={ModRelease} expected_release={ExpectedRelease} error={Error}",
+                    callerIdentity, request.ModRelease, admission.AdmittedRelease, admission.Error);
+                return Results.Json(new
+                {
+                    error = admission.Error,
+                    expected_mod_release = admission.AdmittedRelease,
+                    caller_identity = callerIdentity,
+                }, statusCode: admission.StatusCode);
             }
 
-            var source = string.IsNullOrWhiteSpace(request.Source) ? "unknown" : request.Source;
-            var result = redirects.RecordEnvelopes(request.WindowId, source, request.Envelopes);
+            var schema = request.SchemaVersion.GetValueOrDefault(1);
+            var envelopes = schema == ValheimZdoRedirectAdmissionPolicy.CurrentSchemaVersion
+                ? request.Payload
+                : request.Envelopes;
+            if (envelopes is null)
+                return Results.BadRequest(new { error = schema == 1 ? "envelopes is required" : "payload is required" });
+
+            if (schema == ValheimZdoRedirectAdmissionPolicy.CurrentSchemaVersion)
+            {
+                if (string.IsNullOrWhiteSpace(request.SourceInstance))
+                    return Results.BadRequest(new { error = "source_instance is required" });
+                if (!string.Equals(request.Operation, ValheimZdoRedirectAdmissionPolicy.Operation,
+                        StringComparison.Ordinal))
+                    return Results.BadRequest(new { error = "operation must be zdo_redirect" });
+            }
+
+            var idempotencyKeys = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < envelopes.Count; i++)
+            {
+                var envelope = envelopes[i];
+                if (envelope.Seq is null)
+                    return Results.BadRequest(new { error = $"envelope at index {i} is missing seq" });
+                if (schema != ValheimZdoRedirectAdmissionPolicy.CurrentSchemaVersion) continue;
+                if (string.IsNullOrWhiteSpace(envelope.CorrelationId))
+                    return Results.BadRequest(new { error = $"payload at index {i} is missing correlation_id" });
+                if (string.IsNullOrWhiteSpace(envelope.CreatedUtc) ||
+                    !DateTimeOffset.TryParse(envelope.CreatedUtc, out _))
+                    return Results.BadRequest(new { error = $"payload at index {i} has invalid created_utc" });
+                if (string.IsNullOrWhiteSpace(envelope.Recipient))
+                    return Results.BadRequest(new { error = $"payload at index {i} is missing recipient" });
+                if (string.IsNullOrWhiteSpace(envelope.ImportanceClass))
+                    return Results.BadRequest(new { error = $"payload at index {i} is missing importance_class" });
+                if (string.IsNullOrWhiteSpace(envelope.IdempotencyKey))
+                    return Results.BadRequest(new { error = $"payload at index {i} is missing idempotency_key" });
+                if (!idempotencyKeys.Add(envelope.IdempotencyKey))
+                    return Results.BadRequest(new { error = $"payload at index {i} repeats idempotency_key" });
+                if (string.IsNullOrWhiteSpace(envelope.BodyB64))
+                    return Results.BadRequest(new { error = $"payload at index {i} is missing body_b64" });
+            }
+
+            var source = schema == ValheimZdoRedirectAdmissionPolicy.CurrentSchemaVersion
+                ? request.SourceInstance!
+                : string.IsNullOrWhiteSpace(request.Source) ? "unknown" : request.Source;
+            var result = redirects.RecordEnvelopes(request.WindowId, source, envelopes);
+            var correlations = envelopes.Select(envelope => envelope.CorrelationId)
+                .Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
+            var recipients = envelopes.Select(envelope => envelope.Recipient ?? envelope.RecipientId ?? ValheimRecipient.Legacy)
+                .Distinct(StringComparer.Ordinal).ToArray();
+            logger.LogInformation(
+                "ZDO submission accepted caller_identity={CallerIdentity} mod_release={ModRelease} window_id={WindowId} recipients={Recipients} correlations={Correlations}",
+                callerIdentity, request.ModRelease, request.WindowId,
+                string.Join(",", recipients), string.Join(",", correlations));
 
             return Results.Ok(new
             {
                 ok = true,
+                schema_version = schema,
                 window_id = request.WindowId,
                 received = result.Received,
                 total = result.Total,
+                caller_identity = callerIdentity,
+                admitted_mod_release = admission.AdmittedRelease,
+                recipients,
+                correlations,
+                legacy_unadmitted = admission.LegacyUnadmitted,
             });
         });
 
@@ -106,14 +172,15 @@ public static class ValheimZdoRedirectEndpoints
         // once no supported mod sends the field, and doing it while a rollback to 0.5.31 must keep
         // working would trade a real outage for a property the override already provides.
         group.MapPost("/consumer", (ValheimZdoConsumerHeartbeat heartbeat, HttpContext context,
-            ValheimZdoConsumerTelemetryService consumers) =>
+            IConfiguration configuration, ValheimZdoConsumerTelemetryService consumers) =>
         {
             // The rule lives in ValheimConsumerHeartbeatPolicy, not here, and that is the point:
             // nothing in this lambda is reachable from a test (Game.Gateway.Tests is service-level
             // throughout, and a WebApplicationFactory here means standing up Postgres), so a
             // decision left inside it is a decision nobody can check. This method now only plumbs.
-            var recipientId = ValheimPrincipal.From(context)?.Enrollment?.RecipientId;
-            var resolved = ValheimConsumerHeartbeatPolicy.Resolve(heartbeat, recipientId);
+            var scope = Scope(context, configuration);
+            if (scope.Error is not null) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var resolved = ValheimConsumerHeartbeatPolicy.Resolve(heartbeat, scope.Resolved);
             if (resolved.Error is not null)
             {
                 return Results.BadRequest(new { error = resolved.Error });

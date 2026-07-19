@@ -10,6 +10,11 @@ namespace Game.Gateway.Valheim;
 /// </summary>
 public sealed record ValheimZdoRedirectEnvelope
 {
+    public string? CorrelationId { get; init; }
+    public string? CreatedUtc { get; init; }
+    public string? Recipient { get; init; }
+    public string? ImportanceClass { get; init; }
+    public string? IdempotencyKey { get; init; }
     public string? RecipientId { get; init; }
     public long? Seq { get; init; }
     public long? UidUser { get; init; }
@@ -33,6 +38,12 @@ public sealed record ValheimZdoRedirectEnvelope
 /// </summary>
 public sealed record ValheimZdoRedirectRequest
 {
+    public int? SchemaVersion { get; init; }
+    public string? SourceInstance { get; init; }
+    public string? ModRelease { get; init; }
+    public string? Operation { get; init; }
+    public List<ValheimZdoRedirectEnvelope>? Payload { get; init; }
+    // Frozen schema-1 rollback fields.
     public string? Source { get; init; }
     public string? WindowId { get; init; }
     public List<ValheimZdoRedirectEnvelope>? Envelopes { get; init; }
@@ -150,7 +161,7 @@ public sealed class ValheimZdoRedirectService
         {
             var observedUtc = DateTime.UtcNow;
             var groups = envelopes.GroupBy(envelope => NormalizeRecipient(
-                recipientSelector?.Invoke(envelope) ?? envelope.RecipientId));
+                recipientSelector?.Invoke(envelope) ?? envelope.Recipient ?? envelope.RecipientId));
             long total = 0;
             foreach (var group in groups)
             {

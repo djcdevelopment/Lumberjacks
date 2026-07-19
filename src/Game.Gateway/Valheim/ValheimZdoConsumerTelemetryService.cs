@@ -15,6 +15,12 @@ public sealed record ValheimZdoConsumerHeartbeat
     public long Duplicates { get; init; }
     public long Retried { get; init; }
     public long Pending { get; init; }
+    public long PriorityTagged { get; init; }
+    public long PriorityFastLaneApplied { get; init; }
+    public string? LastCorrelationId { get; init; }
+    public string? LastOperationResult { get; init; }
+    public string? FirstCorrelationId { get; init; }
+    public string? FirstOperationResult { get; init; }
 }
 
 public sealed record ValheimZdoConsumerWindowStatus(
@@ -27,7 +33,15 @@ public sealed record ValheimZdoConsumerWindowStatus(
     long Duplicates,
     long Retried,
     long Pending,
-    DateTimeOffset? LastSeen);
+    DateTimeOffset? LastSeen)
+{
+    public long PriorityTagged { get; init; }
+    public long PriorityFastLaneApplied { get; init; }
+    public string? LastCorrelationId { get; init; }
+    public string? LastOperationResult { get; init; }
+    public string? FirstCorrelationId { get; init; }
+    public string? FirstOperationResult { get; init; }
+}
 
 /// <summary>Latest aggregate, identity-free telemetry from enrolled ZDO consumers.</summary>
 public sealed class ValheimZdoConsumerTelemetryService
@@ -58,6 +72,7 @@ public sealed class ValheimZdoConsumerTelemetryService
             ? active
             : matching.OrderByDescending(sample => sample.SeenAt).Take(1).ToList();
 
+        var latest = matching.OrderByDescending(sample => sample.SeenAt).FirstOrDefault();
         return new(
             windowId,
             active.Count,
@@ -68,7 +83,15 @@ public sealed class ValheimZdoConsumerTelemetryService
             counted.Sum(sample => sample.Heartbeat.Duplicates),
             counted.Sum(sample => sample.Heartbeat.Retried),
             counted.Sum(sample => sample.Heartbeat.Pending),
-            matching.Count == 0 ? null : matching.Max(sample => sample.SeenAt));
+            matching.Count == 0 ? null : matching.Max(sample => sample.SeenAt))
+        {
+            PriorityTagged = counted.Sum(sample => sample.Heartbeat.PriorityTagged),
+            PriorityFastLaneApplied = counted.Sum(sample => sample.Heartbeat.PriorityFastLaneApplied),
+            LastCorrelationId = latest?.Heartbeat.LastCorrelationId,
+            LastOperationResult = latest?.Heartbeat.LastOperationResult,
+            FirstCorrelationId = latest?.Heartbeat.FirstCorrelationId,
+            FirstOperationResult = latest?.Heartbeat.FirstOperationResult,
+        };
     }
 
     public ValheimZdoConsumerWindowStatus GetRecipientStatus(string windowId, string recipientId)
@@ -82,6 +105,7 @@ public sealed class ValheimZdoConsumerTelemetryService
         var counted = active.Count > 0
             ? active
             : matching.OrderByDescending(sample => sample.SeenAt).Take(1).ToList();
+        var latest = matching.OrderByDescending(sample => sample.SeenAt).FirstOrDefault();
         return new(
             windowId,
             active.Count,
@@ -92,7 +116,15 @@ public sealed class ValheimZdoConsumerTelemetryService
             counted.Sum(sample => sample.Heartbeat.Duplicates),
             counted.Sum(sample => sample.Heartbeat.Retried),
             counted.Sum(sample => sample.Heartbeat.Pending),
-            matching.Count == 0 ? null : matching.Max(sample => sample.SeenAt));
+            matching.Count == 0 ? null : matching.Max(sample => sample.SeenAt))
+        {
+            PriorityTagged = counted.Sum(sample => sample.Heartbeat.PriorityTagged),
+            PriorityFastLaneApplied = counted.Sum(sample => sample.Heartbeat.PriorityFastLaneApplied),
+            LastCorrelationId = latest?.Heartbeat.LastCorrelationId,
+            LastOperationResult = latest?.Heartbeat.LastOperationResult,
+            FirstCorrelationId = latest?.Heartbeat.FirstCorrelationId,
+            FirstOperationResult = latest?.Heartbeat.FirstOperationResult,
+        };
     }
 
     public object Snapshot(string windowId)
@@ -111,6 +143,12 @@ public sealed class ValheimZdoConsumerTelemetryService
             duplicates = status.Duplicates,
             retried = status.Retried,
             pending = status.Pending,
+            priority_tagged = status.PriorityTagged,
+            priority_fast_lane_applied = status.PriorityFastLaneApplied,
+            last_correlation_id = status.LastCorrelationId,
+            last_operation_result = status.LastOperationResult,
+            first_correlation_id = status.FirstCorrelationId,
+            first_operation_result = status.FirstOperationResult,
             last_seen = status.LastSeen,
         };
     }
