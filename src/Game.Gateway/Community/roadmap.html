@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-19T06:26:38.007Z</span>
+        <span>Updated 2026-07-19T07:09:30.538Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260719062638-recipient-scope-resolution-requires-an-explicit-">
+        <div class="journal"><article class="journal-entry" id="note-20260719070930-release-identity-is-verified-from-the-shipped-im">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-19T07:09:30.538Z">2026-07-19T07:09:30.538Z</time>
+        <span class="pill note-kind">implementation</span>
+        <span>Lumberjacks</span>
+        <span>M1</span>
+      </div>
+      <h3>Release identity is verified from the shipped image, not a DLL that never ships</h3>
+      <p><strong>Impact:</strong> The baked release gate was inert on every deployed Gateway: the Dockerfile predated the mechanism and never passed the MSBuild property, so images carried the dev sentinel that ValheimReleaseIdentity maps to null. Arming StrictReleaseEnabled would have done nothing. The image now carries the value and a promotable build fails closed without it.</p>
+      <details><summary>Verification (1)</summary><ul><li>Three regression cases green: a promotable build&#39;s id reaches the image, an uncut image is rejected by name, and a promotable build refuses both the sentinel and a malformed id. Confirmed against the live P7 container that the shipped DLL carried no attribute at all.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>fieldlab/evidence/p7-session-20260719-release-gate-defect/deployment-identifiers.md</code></div>
+      <div class="containing-commit">Recorded by Codex · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260719062638-recipient-scope-resolution-requires-an-explicit-">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">
