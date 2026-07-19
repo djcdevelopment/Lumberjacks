@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-19T00:32:32.438Z",
+  "updated_at": "2026-07-19T00:38:47.481Z",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M1",
@@ -188,7 +188,7 @@
   "current_focus": [
     "COMPLETE · M0 RELEASE FREEZE — A1–A5 closed 2026-07-16: source frozen, candidate r2 reproducible from clean tagged checkouts, sanitized bundle and FieldLab catalog committed, promotion drill passed with artifact-only rollback, and the golden-proof evidence set published immutably with byte-verified hashes.",
     "COMPLETE · PROMOTION FINALIZED — P7 runs under a durable image pin: the temporary compose override is retired, the base compose resolves LUMBERJACKS_GATEWAY_IMAGE from the host environment across reboots, and VM-side gateway rebuilds fail closed. The path proved out on r2 and has since carried m1-clean-20260717-r1.",
-    "ACTIVE · M1 — Enrollment identity, the least-privilege capability split, the one-seat reservation, and a strict-admission roster gate keyed on the actual joining Steam account are deployed on P7 in m1-clean-20260717-r1, a Gateway-only cut that leaves the mod frozen at 0.5.31; the roster gate ships disabled and stays opt-in per window until an operator enables it, because a roster miss refuses a join, so strict roster admission is deployed but not enforcing until it is verified against real joins. Remaining: certificate-validating TLS, blocked on a stable public DNS name; and fail-closed admission when the authority is unavailable, which needs the next mod release.",
+    "ACTIVE · M1 — Enrollment identity, the least-privilege capability split, the one-seat reservation, and a strict-admission roster gate keyed on the actual joining Steam account are deployed on P7 in m1-clean-20260717-r1, a Gateway-only cut that leaves the mod frozen at 0.5.31; the roster gate was verified against a real join on 2026-07-17 (gate 3 closed live: a strict window accepted the enrolled Steam account, Lumberjacks-decided on the frozen 0.5.31 mod, no cut needed), and it stays opt-in per window — the flag is in-memory and reverts to off on gateway restart, because a roster miss refuses a join. Remaining: certificate-validating TLS — the stable public DNS name now exists (comfy-p7.duckdns.org, a reserved static address), leaving only the ACME contact set on the VM at next boot plus the stage-3 cut and deploy; and fail-closed admission when the authority is unavailable, which needs that next mod release.",
     "AFTER M1 · PARALLEL — Build M2's reversible guest package, M3's seal-before-reset per-run ledger and retained dashboards, and M4a's recipient isolation and producer loss safety.",
     "WIDEN ONLY AFTER · M4b + M5 — Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort."
   ],
