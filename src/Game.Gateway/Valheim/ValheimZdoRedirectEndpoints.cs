@@ -78,9 +78,10 @@ public static class ValheimZdoRedirectEndpoints
         // ValheimWindowActivityService. Recorded on the request, not inside the ZDO service, so the
         // hot path is untouched.
         group.MapGet("/pending/{windowId}", (string windowId, int? limit, HttpContext context,
+            IConfiguration configuration,
             ValheimZdoRedirectService redirects, ValheimWindowActivityService activity) =>
         {
-            var scope = Scope(context);
+            var scope = Scope(context, configuration);
             if (scope.Error is not null) return Results.StatusCode(StatusCodes.Status403Forbidden);
             activity.Touch(windowId, scope.Resolved!, DateTime.UtcNow);
             return Results.Ok(new { schema_version = 1, window_id = windowId,
@@ -127,11 +128,12 @@ public static class ValheimZdoRedirectEndpoints
             .RequireCors(Game.ServiceDefaults.PublicTelemetryV0.CorsPolicyName);
 
         group.MapPost("/ack/{windowId}", (string windowId, long[] sequences, HttpContext context,
+            IConfiguration configuration,
             ValheimZdoRedirectService redirects, ValheimWindowActivityService activity) =>
         {
             if (sequences is null || sequences.Length == 0)
                 return Results.BadRequest(new { error = "sequences is required" });
-            var scope = Scope(context);
+            var scope = Scope(context, configuration);
             if (scope.Error is not null) return Results.StatusCode(StatusCodes.Status403Forbidden);
             activity.Touch(windowId, scope.Resolved!, DateTime.UtcNow);
             var result = redirects.Acknowledge(windowId, scope.Resolved!, sequences);
@@ -181,10 +183,11 @@ public static class ValheimZdoRedirectEndpoints
         per_source = status.PerSource,
     };
 
-    private static (string? Resolved, string? Error) Scope(HttpContext context)
+    private static (string? Resolved, string? Error) Scope(HttpContext context, IConfiguration configuration)
     {
         var principal = ValheimPrincipal.From(context);
         return ValheimRecipientScopePolicy.Resolve(principal?.Kind,
-            principal?.Enrollment?.RecipientId, null);
+            principal?.Enrollment?.RecipientId, null,
+            configuration.GetValue("ValheimQueue:ProducerEmitsRecipients", false));
     }
 }

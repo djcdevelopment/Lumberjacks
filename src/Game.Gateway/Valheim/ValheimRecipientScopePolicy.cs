@@ -12,12 +12,15 @@ public static class ValheimRecipient
 public static class ValheimRecipientScopePolicy
 {
     public static (string? Resolved, string? Error) Resolve(
-        string? principalKind, string? recipientId, string? requestedRecipient)
+        string? principalKind, string? recipientId, string? requestedRecipient,
+        bool producerEmitsRecipients = true)
     {
         if (string.Equals(principalKind, "enrollment", StringComparison.Ordinal))
         {
             if (string.IsNullOrWhiteSpace(recipientId))
                 return (null, "enrollment recipient_id is required");
+            if (!producerEmitsRecipients)
+                return (ValheimRecipient.Legacy, null);
             return (recipientId.Trim(), null);
         }
 

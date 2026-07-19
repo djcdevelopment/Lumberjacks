@@ -29,6 +29,11 @@ version and optional recipient. The producer-side mod change that emits a
 per-peer recipient is stage 3 in the sibling `comfy` repository and is not part
 of this commit.
 
+Until that producer cut is enabled, enrollment consumers are deliberately
+resolved to the legacy bucket as well; enabling recipient scoping before the
+producer emits `recipient_id` would leave enrolled consumers polling an empty
+partition and silently stop delivery.
+
 ## Consequences
 
 Enrollment consumers are isolated and can be tested without HTTP or Postgres.

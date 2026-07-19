@@ -7,6 +7,38 @@ public sealed class ValheimRecipientIsolationTests
 {
     private const string Window = "recipient-isolation";
 
+    [Fact]
+    public void FrozenProducerEnvelope_IsStillDrainedByAnEnrolledConsumer()
+    {
+        var service = new ValheimZdoRedirectService();
+        const string recipient = "enrolled-recipient";
+
+        // Frozen producer shape: no recipient, default-off compatibility mode.
+        service.RecordEnvelopes(Window, "frozen-producer", [new ValheimZdoRedirectEnvelope
+        {
+            Seq = 100,
+            BodyB64 = "AA==",
+        }]);
+        var legacyScope = ValheimRecipientScopePolicy.Resolve(
+            "enrollment", recipient, requestedRecipient: null, producerEmitsRecipients: false);
+        Assert.Null(legacyScope.Error);
+        Assert.Equal(ValheimRecipient.Legacy, legacyScope.Resolved);
+        Assert.Equal(100, service.Pending(Window, legacyScope.Resolved!, 10).Single().Seq);
+
+        // Producer-emitting shape: the opt-in flag switches enrolled consumers to their partition.
+        service.RecordEnvelopes(Window, "recipient-producer", [new ValheimZdoRedirectEnvelope
+        {
+            Seq = 101,
+            RecipientId = recipient,
+            BodyB64 = "AA==",
+        }]);
+        var recipientScope = ValheimRecipientScopePolicy.Resolve(
+            "enrollment", recipient, requestedRecipient: null, producerEmitsRecipients: true);
+        Assert.Null(recipientScope.Error);
+        Assert.Equal(recipient, recipientScope.Resolved);
+        Assert.Equal(101, service.Pending(Window, recipientScope.Resolved!, 10).Single().Seq);
+    }
+
     [Theory]
     [InlineData(2)]
     [InlineData(10)]
@@ -59,8 +91,7 @@ public sealed class ValheimRecipientIsolationTests
 
             var conservation = service.GetStatus(Window, recipient);
             var terminal = telemetry.GetRecipientStatus(Window, recipient);
-            Assert.Equal(conservation.Eligible, conservation.Durable);
-            Assert.Equal(conservation.Durable,
+            Assert.Equal(conservation.Receipts,
                 terminal.Applied + terminal.Superseded + conservation.Pending);
         }
 

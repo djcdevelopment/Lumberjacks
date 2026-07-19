@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-19T04:33:53.367Z",
+  "updated_at": "2026-07-19T05:25:14.274Z",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M1",
@@ -369,7 +369,7 @@
         "Valheim's existing per-peer sync-list boundary and FieldLab crash/replay fixtures."
       ],
       "exit_evidence": [
-        "Gateway-only M4a stage-1 proof in progress: recipient policy, legacy-bucket compatibility, N=2/N=10 synthetic isolation, recipient-keyed activity leases, additive WAL replay fixtures, and per-recipient conservation tests are implemented and remain undeployed. Producer outbox recovery and the stage-3 mod recipient emitter are explicitly open."
+        "Gateway-only M4a stage-1 proof in progress: recipient policy, default-off frozen-producer compatibility, N=2/N=10 synthetic isolation, recipient-keyed activity leases, additive WAL replay fixtures, and per-recipient durable-receipt conservation tests are implemented and remain undeployed. Producer outbox recovery and the stage-3 mod recipient emitter are explicitly open."
       ]
     },
     {

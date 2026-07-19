@@ -17,9 +17,10 @@ public static class ValheimZdoInjectionEndpoints
         });
 
         group.MapGet("/next/{windowId}", (string windowId, string? client_id, HttpContext context,
+            IConfiguration configuration,
             ValheimZdoInjectionService service) =>
         {
-            var scope = Scope(context, client_id);
+            var scope = Scope(context, client_id, configuration);
             if (scope.Error is not null)
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             var result = service.Poll(windowId, scope.Resolved!);
@@ -29,9 +30,10 @@ public static class ValheimZdoInjectionEndpoints
         }).RequireRateLimiting("consumer");
 
         group.MapPost("/ack", (ValheimZdoInjectionAckRequest request, HttpContext context,
+            IConfiguration configuration,
             ValheimZdoInjectionService service) =>
         {
-            var scope = Scope(context, request.ClientId);
+            var scope = Scope(context, request.ClientId, configuration);
             if (scope.Error is not null)
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             var result = service.Ack(request with { ClientId = scope.Resolved });
@@ -51,10 +53,12 @@ public static class ValheimZdoInjectionEndpoints
             Results.Ok(new { ok = true, windows_cleared = service.ResetAll() }));
     }
 
-    private static (string? Resolved, string? Error) Scope(HttpContext context, string? requested)
+    private static (string? Resolved, string? Error) Scope(
+        HttpContext context, string? requested, IConfiguration configuration)
     {
         var principal = ValheimPrincipal.From(context);
         return ValheimRecipientScopePolicy.Resolve(principal?.Kind,
-            principal?.Enrollment?.RecipientId, requested);
+            principal?.Enrollment?.RecipientId, requested,
+            configuration.GetValue("ValheimQueue:ProducerEmitsRecipients", false));
     }
 }

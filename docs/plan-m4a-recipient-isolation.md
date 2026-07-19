@@ -15,6 +15,10 @@ mod still emits no recipient.
 - The producer-side recipient field is additive. This commit builds the
   partition, but the frozen 0.5.31 producer does not populate it; the per-peer
   mod adapter belongs to stage 3 in `C:\work\comfy` and is untouched here.
+- `ValheimQueue:ProducerEmitsRecipients` defaults off. Until the producer cut is
+  enabled, enrollment consumers intentionally resolve to `Legacy`; enabling
+  recipient scoping before producer emission would otherwise create an empty
+  enrollment partition.
 - M3's OPEN → CLOSING → SEALED lifecycle and the producer outbox remain outside
   this stage. M4a criterion 3 therefore remains open.
 - M4a stays `queued`; `active_milestone` remains `M1`. This work is recorded as
@@ -51,7 +55,7 @@ mod still emits no recipient.
 | Recipient isolation | `ValheimRecipientIsolation` theory at N=2 and N=10 | Five verbs pass with consumer principals only; no cross-recipient sequence saturation or terminal close |
 | Durable idempotence | Duplicate POST, poll, terminal ACK, reconnect, takeover, restart, replay | Same recipient state after the second run; no duplicate application |
 | WAL compatibility | Hand-built v1 fixture, versioned v2 replay, full-length invalid JSON | v1 maps to `Legacy` without `InvalidDataException`; invalid complete records fail explicitly; physical tails retain repair behavior |
-| Conservation | Per-recipient counters | `eligible == durable == applied + superseded + pending`, with zero leakage |
+| Conservation | Per-recipient durable receipts plus independently scoped terminal telemetry | `durable receipts == applied + superseded + pending`, with zero leakage; the eligible denominator remains producer/outbox evidence and is not claimed by this Gateway-only stage |
 | Mutation proof | Scope predicate, lease expiry, WAL version branch | Each mutation fails a non-zero, named test set; restored code returns to baseline green except the two known failures |
 
 ## 4. Risks and cut line
@@ -75,4 +79,7 @@ journal note and regenerates/checks the public roadmap HTML.
 - Scope mutation: 4 failures — `ValheimRecipientScopePolicyTests.EnrollmentUsesServerRecipientAndIgnoresRequestedLabel`, `ValheimRecipientScopePolicyTests.EnrollmentWithoutRecipientFailsClosed`, and both N=2/N=10 `ValheimRecipientIsolationTests.ValheimRecipientIsolation` cases.
 - Lease mutation: 2 failures — `ValheimRecipientLeaseTests.LeaseIsScopedAndExpiresWithoutSleeping` and `ValheimRecipientLeaseTests.RecipientReconnectRefreshesOnlyItsOwnLeaseAndTakeoverFollowsExpiry`.
 - WAL-version mutation: 1 failure — `ValheimZdoAuthoritativeTelemetryTests.RecipientLessV1WalFixtureReplaysIntoLegacyBucket`.
-- Canonical Docker result: `519/519` passing in the `mcr.microsoft.com/dotnet/sdk:9.0` container; Windows Gateway run is `153 total / 151 passing / 2 known path failures`.
+- Canonical Docker result: `520/520` passing in the `mcr.microsoft.com/dotnet/sdk:9.0` container; Windows Gateway run is `154 total / 152 passing / 2 known path failures`.
+- F1 regression: `FrozenProducerEnvelope_IsStillDrainedByAnEnrolledConsumer`
+  proves frozen no-recipient delivery in legacy mode and recipient-emitting
+  delivery in opt-in mode.

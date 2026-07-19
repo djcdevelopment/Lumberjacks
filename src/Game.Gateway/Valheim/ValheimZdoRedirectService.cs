@@ -59,9 +59,6 @@ public sealed record ValheimZdoRedirectWindowStatus(
     IReadOnlyDictionary<string, long> PerPrefab,
     IReadOnlyDictionary<string, long> PerSource)
 {
-    public long Eligible => Receipts;
-    public long Durable => Receipts;
-
     public static ValheimZdoRedirectWindowStatus Aggregate(
         string windowId, IReadOnlyList<ValheimZdoRedirectWindowStatus> statuses)
     {
