@@ -15,6 +15,7 @@
 - **F1 resolved:** `ValheimQueue:ProducerEmitsRecipients` defaults false, so a frozen producer's recipient-less envelopes and an enrolled consumer share `ValheimRecipient.Legacy`. Opting in switches enrollment consumers to their recipient partition; `FrozenProducerEnvelope_IsStillDrainedByAnEnrolledConsumer` covers both shapes.
 - **F2 resolved:** removed the `Eligible`/`Durable` aliases and tautological assertion. The proof now reconciles durable receipts against independently scoped `Applied + Superseded + Pending`; eligible remains producer/outbox evidence.
 - **F3 intentionally unchanged:** commit `0943efa` is not rewritten; new commit messages use real newlines.
+- **Residual nit closed:** `ValheimRecipientScopePolicy.Resolve` no longer defaults `producerEmitsRecipients`. The default was `true` — the branch that caused F1 — while both production call sites already passed the configured value, so the safe choice lived at the call sites rather than in the signature. The parameter is now required; test call sites state their intent explicitly. No behavior change.
 
 # Review of 0943efa — findings from Claude (2026-07-18)
 

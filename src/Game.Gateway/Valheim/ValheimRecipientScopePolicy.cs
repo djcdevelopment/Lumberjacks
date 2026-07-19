@@ -13,7 +13,7 @@ public static class ValheimRecipientScopePolicy
 {
     public static (string? Resolved, string? Error) Resolve(
         string? principalKind, string? recipientId, string? requestedRecipient,
-        bool producerEmitsRecipients = true)
+        bool producerEmitsRecipients)
     {
         if (string.Equals(principalKind, "enrollment", StringComparison.Ordinal))
         {

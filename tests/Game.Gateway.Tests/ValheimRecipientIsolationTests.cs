@@ -105,7 +105,8 @@ public sealed class ValheimRecipientIsolationTests
     public void LegacyUnscopedConsumer_StillDrainsItsOwnWindow()
     {
         var service = new ValheimZdoRedirectService();
-        var scope = ValheimRecipientScopePolicy.Resolve("shared-client-key", null, "forged");
+        var scope = ValheimRecipientScopePolicy.Resolve(
+            "shared-client-key", null, "forged", producerEmitsRecipients: true);
         Assert.Null(scope.Error);
 
         service.RecordEnvelopes(Window, "legacy", [new ValheimZdoRedirectEnvelope { Seq = 1, BodyB64 = "AA==" }]);
@@ -116,7 +117,8 @@ public sealed class ValheimRecipientIsolationTests
     private static string Resolve(ValheimPrincipal principal)
     {
         var result = ValheimRecipientScopePolicy.Resolve(
-            principal.Kind, principal.Enrollment?.RecipientId, requestedRecipient: "forged");
+            principal.Kind, principal.Enrollment?.RecipientId, requestedRecipient: "forged",
+            producerEmitsRecipients: true);
         Assert.Null(result.Error);
         return result.Resolved!;
     }
