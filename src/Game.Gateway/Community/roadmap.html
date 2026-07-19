@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-19T00:42:05.484Z</span>
+        <span>Updated 2026-07-19T01:23:38.843Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260719004205-m1-stage-4-gap-closed-self-serve-bootstrap-re-is">
+        <div class="journal"><article class="journal-entry" id="note-20260719012338-lockfile-sheds-13-extraneous-entries-left-over-f">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-19T01:23:38.843Z">2026-07-19T01:23:38.843Z</time>
+        <span class="pill note-kind">documentation</span>
+        <span>Lumberjacks</span>
+        <span>M1</span>
+      </div>
+      <h3>Lockfile sheds 13 extraneous entries left over from the deleted npm workspaces</h3>
+      <p><strong>Impact:</strong> package-lock.json carried 13 entries marked extraneous for packages/* and services/* workspaces that were deleted when package.json narrowed its workspaces to clients/*, plus the orphaned optional-peer @types/node and undici-types records nothing depended on. npm install regenerated the lockfile as 151 pure deletions: no real dependency changed version, and the manifest again matches the two clients/* workspaces that actually exist.</p>
+      <details><summary>Verification (1)</summary><ul><li>npm install reported up to date and rewrote only the stale records; npm ls exits 0 with no extraneous or missing packages; git diff on package-lock.json shows 151 deletions, 0 additions, and no version movement on any surviving entry.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>package-lock.json</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260719004205-m1-stage-4-gap-closed-self-serve-bootstrap-re-is">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">
