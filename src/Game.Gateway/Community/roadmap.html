@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-21T03:49:34.527Z</span>
+        <span>Updated 2026-07-21T05:07:41.693Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260721034934-m2-status-corrected-from-queued-to-active">
+        <div class="journal"><article class="journal-entry" id="note-20260721050741-m4a-recipient-isolation-gateway-deployed-to-p7-a">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-21T05:07:41.693Z">2026-07-21T05:07:41.693Z</time>
+        <span class="pill note-kind">deployment</span>
+        <span>Lumberjacks</span>
+        <span>M4a · M1</span>
+      </div>
+      <h3>M4a recipient-isolation Gateway deployed to P7 and F1 closed live</h3>
+      <p><strong>Impact:</strong> The recipient work stopped being theoretical. Gateway image m4-clean-20260720-r1 was cut, transferred, and promoted on the P7 VM, and the F1 property was proven against the live public endpoint for the first time: an enrolled consumer on the public internet drained the frozen 0.5.31 producer recipient-less envelopes from the legacy partition and acknowledged them. Before the recipient fix this returned empty and the lane was dead. The frozen mod artifact was never touched.</p>
+      <details><summary>Verification (5)</summary><ul><li>Cut identity verified from the shipped image rather than bin/Release: Test-GatewayImageRelease.ps1 read /app/Game.Gateway.dll out of the built image and confirmed admitted mod release m1-clean-20260717-r1</li><li>validate-release-bundle.ps1 returned status valid; OCI archive sha256 2ec2503b matched byte-for-byte after transfer to the VM</li><li>Phase 4 both halves: running container image sha256:0d99e547 equals the manifest gateway.image_id, and the durable pin in /etc/comfy-p7/environment names m4-clean-20260720-r1</li><li>Phase 5d live: pending/m4a-live-test-v1 returned recipient_id legacy with seq 900001 and 900002; ack returned acknowledged 2 unknown 0; re-poll empty</li><li>Deployed server mod hash unchanged at 94a3843e before and after the promotion</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>comfy fieldlab/runs/releases/m4-clean-20260720-r1</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260721034934-m2-status-corrected-from-queued-to-active">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">
