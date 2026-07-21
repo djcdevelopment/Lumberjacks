@@ -55,6 +55,7 @@
   "limitations": [
     "Two-consumer isolation is UNTESTED. Pinned deliberately until volunteers exist. All observed envelopes were structural_anchor with a single consumer.",
     "Rollback is a re-pin of LUMBERJACKS_GATEWAY_IMAGE plus reinstalling the superseded mod hash, never a rebuild. Note that rolling the Gateway back WITHOUT rolling the mod back leaves recipients stamped and the flag honoured by an older image - verify both halves move together.",
-    "run-promotion-drill.ps1 was NOT used; its rollback defaults still name M0-era identities and would overwrite the deployed mod."
+    "run-promotion-drill.ps1 was NOT used; its rollback defaults still name M0-era identities and would overwrite the deployed mod.",
+    "THE RELEASE GATE COVERS ONLY THE GATEWAY. In the P7 compose, gateway is pinned to this release image, but eventlog, progression and operatorapi are BUILT FROM SOURCE at whatever sits in /opt/lumberjacks on the VM (docker-compose.yml build: context LUMBERJACKS_ROOT). Three of the five Lumberjacks services in this stack carry no release identity, no admission gate, and no hash in this manifest, so this release id does not describe them. Found by cross-repo audit 2026-07-21; not previously documented in either repo."
   ]
 }

@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-21T06:01:52.506Z</span>
+        <span>Updated 2026-07-21T06:04:23.018Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260721060152-release-m5-recipients-20260720-r1-recorded-inclu">
+        <div class="journal"><article class="journal-entry" id="note-20260721060423-the-release-gate-covers-one-of-five-services">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-21T06:04:23.018Z">2026-07-21T06:04:23.018Z</time>
+        <span class="pill note-kind">verification</span>
+        <span>Lumberjacks</span>
+        <span>M4a · M3</span>
+      </div>
+      <h3>The release gate covers one of five services</h3>
+      <p><strong>Impact:</strong> A cross-repo audit found that the P7 stack pins only the gateway to a release image. eventlog, progression and operatorapi are built from source at whatever happens to sit in the VM Lumberjacks root, so they carry no release identity, no admission gate, and no hash in any manifest. The m5 manifest asserted a coherent release; it described one service out of five. That claim is now qualified in place rather than left standing. Neither repo had documented this, and no gate would surface it: a contract drift between the pinned gateway and an unpinned sibling produces no error and no reject, only wrong behaviour.</p>
+      <details><summary>Verification (2)</summary><ul><li>comfy infra/gcp/p7/docker-compose.yml pins gateway to the release image while eventlog, progression and operatorapi use build: context LUMBERJACKS_ROOT</li><li>Lumberjacks has no release tooling of its own: every cut, verify, promote and rollback script for the Gateway artifact lives in the comfy repo</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>docs/roadmap/m5-recipients-build-candidate.json</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260721060152-release-m5-recipients-20260720-r1-recorded-inclu">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">
