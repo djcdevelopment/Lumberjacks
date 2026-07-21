@@ -103,18 +103,34 @@ compose stack hasn't come up — check with the SSH command in Phase 4.
 (`\d+` won't take the `a`). Use `m4`:
 
 ```powershell
-& C:\work\comfy\infra\gcp\p7\scripts\New-ReleaseCut.ps1 -ReleaseId m4-clean-20260718-r1
+& C:\work\comfy\infra\gcp\p7\scripts\New-GatewayReleaseCut.ps1 `
+    -ImageReleaseId     m4-clean-20260720-r1 `
+    -AdmittedModRelease m1-clean-20260717-r1
 ```
 
-This bakes the id into both the mod and the Gateway assembly and fails the cut if
-they disagree. The mod stays frozen at 0.5.31 — this is a Gateway-only cut, so
-`deploy-network-sense.ps1` is **not** part of this promotion.
+> **CORRECTED 2026-07-20 — do not use `New-ReleaseCut.ps1` here.** This runbook
+> originally called the both-sides cut. That script rewrites `ComfyNetworkSense.cs`'s
+> `ReleaseId` const and **rebuilds the frozen mod**: same source, new hash, new id — and
+> every guest package already handed out is then pinned to an artifact that no longer
+> exists, holding a mod this Gateway would refuse. This is a Gateway-only promotion, so
+> it needs the Gateway-only cut. Root cause and reasoning: comfy `1bc7478`.
 
-Build from `C:\work\Lumberjacks`:
+**Two ids now, and they are supposed to differ.** `image_release_id` is what this Gateway
+image *is*; `admitted_mod_release` is what it *admits*, and stays pinned to the frozen
+0.5.31 artifact across many Gateway cuts. A reviewer seeing `m4-…` admitting `m1-…` is
+looking at a correct cut, not a mistake. The invariant is not "the ids match" — it is
+"the id baked into the shipped image equals the release we intend to admit."
 
-```powershell
-docker build --target gateway -t lumberjacks-gateway:m4-clean-20260718-r1 .
-```
+**Release id must still match `^m\d+-[a-z0-9]+-\d{8}-r\d+$`** — `m4a` is rejected
+(`\d+` won't take the `a`). The mod stays frozen at 0.5.31, so `deploy-network-sense.ps1`
+is **not** part of this promotion.
+
+No manual `docker build` step. `New-GatewayReleaseCut.ps1` builds the image and then
+proves the baked id **from the image itself** via `Test-GatewayImageRelease.ps1`. That
+indirection is the whole point: the old cut verified against
+`src/Game.Gateway/bin/Release/**/Game.Gateway.dll`, a local publish that never ships. The
+shipped assembly carried no release attribute, `"dev"` mapped to null, and null *disabled*
+the gate — so the cut passed while the deployed Gateway admitted anything.
 
 > The release manifests record this as `-t lumberjacks-m0-clean:a7c47b5`, and the m1
 > manifest carried that m0 string unchanged. Tag with the release id as above; see

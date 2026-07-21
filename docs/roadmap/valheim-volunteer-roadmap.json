@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
   "headline": "M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-20T03:47:25.227Z",
+  "updated_at": "2026-07-21T03:49:34.527Z",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M1",
@@ -284,7 +284,7 @@
       "id": "M2",
       "title": "Ship a boring, reversible guest package",
       "track": "volunteer",
-      "status": "queued",
+      "status": "active",
       "depends_on": [
         "M1"
       ],

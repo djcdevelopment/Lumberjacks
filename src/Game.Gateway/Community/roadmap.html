@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-20T03:47:25.227Z</span>
+        <span>Updated 2026-07-21T03:49:34.527Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -423,7 +423,7 @@
         <span class="dag-id">M1</span>
         <strong>Make identity and admission authoritative</strong>
         <span>after M0</span>
-      </a></div><div class="dag-arrow" aria-hidden="true">↓</div><div class="dag-layer"><a class="dag-node volunteer queued" href="#M2" role="listitem">
+      </a></div><div class="dag-arrow" aria-hidden="true">↓</div><div class="dag-layer"><a class="dag-node volunteer active" href="#M2" role="listitem">
         <span class="dag-id">M2</span>
         <strong>Ship a boring, reversible guest package</strong>
         <span>after M1</span>
@@ -488,10 +488,10 @@
       <div><strong>Closing evidence</strong><span class="empty-evidence">None recorded; this exit gate remains open.</span></div>
     </div>
   </article>
-<article class="milestone queued" id="M2">
+<article class="milestone active" id="M2">
     <div class="milestone-head">
       <div><span class="milestone-id">M2</span><h3>Ship a boring, reversible guest package</h3></div>
-      <span class="pill queued">QUEUED</span>
+      <span class="pill active">IN PROGRESS</span>
     </div>
     <div class="meta-line"><span>volunteer</span><span class="deps">depends on <span class="dep">M1</span></span></div>
     <p>Replace hand copying and hand-edited config with an immutable generic package plus a personal one-use bootstrap.</p>
@@ -843,7 +843,39 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260720034725-mapped-the-accepted-comfy-to-lumberjacks-archite">
+        <div class="journal"><article class="journal-entry" id="note-20260721034934-m2-status-corrected-from-queued-to-active">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-21T03:49:34.527Z">2026-07-21T03:49:34.527Z</time>
+        <span class="pill note-kind">documentation</span>
+        <span>Lumberjacks</span>
+        <span>M2</span>
+      </div>
+      <h3>M2 status corrected from queued to active</h3>
+      <p><strong>Impact:</strong> The roadmap still described the guest package as not started while the artifact was built, committed, and review-closed. Comfy fe812c4 shipped the immutable self-verifying guest package and c101d4c closed the review follow-up; the generated pack exists at fieldlab/handoffs/guest-client-pack/comfy-guest-m1-clean-20260717-r1/ with a guide, manifest, and index. Three of the four tracked build steps are done. The status is now active rather than complete because the gate that matters is unchanged and still open: a non-developer completing enrollment in ten minutes without editing config or sending a secret. That gate needs a real human, and no synthetic fixture can close it.</p>
+      <details><summary>Verification (1)</summary><ul><li>Guest pack artifacts present on disk (GUEST-GUIDE.md, manifest.json, guest-index.json, guest-package-inputs.json); roadmap check passes with the corrected status.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>docs/roadmap/valheim-volunteer-roadmap.json</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260721034857-joined-the-local-runtime-proof-and-the-remote-de">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-21T03:48:57.042Z">2026-07-21T03:48:57.042Z</time>
+        <span class="pill note-kind">documentation</span>
+        <span>Lumberjacks</span>
+        <span>M1 · M4a · M4b</span>
+      </div>
+      <h3>Joined the local runtime proof and the remote deployment into one sequenced path</h3>
+      <p><strong>Impact:</strong> The program held two halves that had never met: a local Docker slice that closed the full correlated ZDO runtime but resolved every actor to private-plane, and an unexecuted runbook that can test enrollment identity but exercises no game runtime. The asymmetry is structural - ValheimClientAccessMiddleware.Resolve() checks source IP first, so loopback and RFC1918 short-circuit before enrollment headers are read - and no re-run of either harness closes it. The new plan also inverts the obvious unification: POST /receipts requires the Producer capability that public callers never get, so the producer must stay on the Gateway loopback and it is the CONSUMER that moves remote. M4a stage 1 is recorded as landed and correctly disabled: ProducerEmitsRecipients defaults false, which keeps delivery working under the frozen 0.5.31 mod, so two simultaneous players remain gated on the stage-3 producer emitter in Comfy rather than on M4a.</p>
+      <details><summary>Verification (3)</summary><ul><li>Read the deployed admission path: ValheimZdoRedirectAdmissionPolicy.Evaluate returns allowed for schema 1 unconditionally, and ValheimZdoRedirectEndpoints validates only seq on the schema-1 branch, so the runbook Phase 5a seed still works verbatim after the schema-2 work.</li><li>Confirmed ProducerEmitsRecipients defaults false at both production call sites (ValheimZdoRedirectEndpoints.cs:258, ValheimZdoInjectionEndpoints.cs:62).</li><li>gcloud reports comfy-lumberjacks-p7 TERMINATED; the 07-19 integration evidence contains zero references to the P7 address, DuckDNS name, or project id, corroborating the local-only scope claim.</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>docs/plan-m4-unification.md</code> <code>docs/runbook-m4a-stage1-live-test.md</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260720034725-mapped-the-accepted-comfy-to-lumberjacks-archite">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">
