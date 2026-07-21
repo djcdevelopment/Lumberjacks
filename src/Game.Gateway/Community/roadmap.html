@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-21T05:08:06.768Z</span>
+        <span>Updated 2026-07-21T05:08:46.123Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -431,7 +431,7 @@
         <span class="dag-id">M3</span>
         <strong>Make traffic proof definitive and durable</strong>
         <span>after M1</span>
-      </a><a class="dag-node multiplayer queued" href="#M4a" role="listitem">
+      </a><a class="dag-node multiplayer active" href="#M4a" role="listitem">
         <span class="dag-id">M4a</span>
         <strong>Prove automated recipient isolation and loss safety</strong>
         <span>after M1</span>
@@ -518,10 +518,10 @@
       <div><strong>Closing evidence</strong><span class="empty-evidence">None recorded; this exit gate remains open.</span></div>
     </div>
   </article>
-<article class="milestone queued" id="M4a">
+<article class="milestone active" id="M4a">
     <div class="milestone-head">
       <div><span class="milestone-id">M4a</span><h3>Prove automated recipient isolation and loss safety</h3></div>
-      <span class="pill queued">QUEUED</span>
+      <span class="pill active">IN PROGRESS</span>
     </div>
     <div class="meta-line"><span>multiplayer</span><span class="deps">depends on <span class="dep">M1</span></span></div>
     <p>Remove the shared-window queue and producer-loss hazards while preserving the peer identity available at Valheim&#39;s per-peer sync-list boundary.</p>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260721050806-promotion-drill-rollback-defaults-are-stale-and-">
+        <div class="journal"><article class="journal-entry" id="note-20260721050846-m4a-status-corrected-from-queued-to-active">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-21T05:08:46.123Z">2026-07-21T05:08:46.123Z</time>
+        <span class="pill note-kind">planning</span>
+        <span>Lumberjacks</span>
+        <span>M4a</span>
+      </div>
+      <h3>M4a status corrected from queued to active</h3>
+      <p><strong>Impact:</strong> The roadmap described recipient isolation as not started while its Gateway was cut, promoted, and serving live traffic on P7 with the F1 property proven against the public endpoint. Queued was misleading to anyone reading the board. M4a is not complete and cannot be: its exit criteria are the N=2 and N=10 isolation matrix and per-recipient conservation equations, and none of those can be exercised while ProducerEmitsRecipients stays false, because every envelope files under legacy and no per-recipient partition exists to isolate. Active with a stated Stage 3 dependency is the honest position.</p>
+      <details><summary>Verification (2)</summary><ul><li>Gateway image m4-clean-20260720-r1 running on P7, durable pin set, F1 proven live at Phase 5d</li><li>Isolation exit criteria remain unexercised: the flag is off by design and the frozen producer emits no recipient_id, so the enrollment partition is empty by construction</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>docs/roadmap/valheim-volunteer-roadmap.json</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260721050806-promotion-drill-rollback-defaults-are-stale-and-">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">
