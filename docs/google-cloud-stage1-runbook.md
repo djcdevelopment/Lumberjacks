@@ -16,7 +16,9 @@ the repository does not contain a Gate 1 evidence bundle proving an external nat
 client session, UDP delivery, restart persistence, trace-correlated logs, populated
 metrics, and delivered alerts from the same pinned revision.
 
-Current cloud status, 2026-07-11 local / 2026-07-12 UTC: the proven deployment is
+Cloud status as of 2026-07-11 local / 2026-07-12 UTC (HISTORICAL - superseded by the
+2026-07-20 reconciliation below; the machine type and Gateway port in this paragraph
+are no longer current): the proven deployment is
 the combined Comfy/Lumberjacks P7 Valheim netcode replacement environment, not this
 original Godot Stage 1 proof. That deployment lives under `C:\work\comfy\infra\gcp\p7`
 and runs VM `comfy-lumberjacks-p7` (`n2-highmem-8`, us-west1-b) in project
@@ -34,6 +36,23 @@ smaller instance; sizing the VM up to `n2-highmem-8` (8 vCPU / 64 GB) cleared it
 This is operator-confirmed, not a re-collected Section 8 evidence bundle. The
 original Godot Stage 1 VM (`lumberjacks-stage1`, `e2-medium`) was stopped on
 2026-07-12 as superseded; `comfy-lumberjacks-p7` remains running.
+
+Reconciliation, 2026-07-20 (closes the "Unreconciled" note in
+`C:\work\comfy\fieldlab\evidence\p7-session-20260719-release-gate-defect\deployment-identifiers.md`):
+the two paragraphs above are accurate as history but stale as present tense. Read from
+the GCP API on 2026-07-20, `comfy-lumberjacks-p7` is:
+
+- **`n2-highmem-2` (2 vCPU / 16 GB)**, not `n2-highmem-8`. The 8 -> 2 downsize was a
+  deliberate cost decision (roughly a third of the spend, about three times the
+  runway), not a regression, and it is not to be re-flagged as an OOM risk. The
+  2026-07-12 sizing-up note above records why the instance was grown at the time; it
+  does not describe the instance today.
+- **`TERMINATED` between windows**, not "remains running". Start it explicitly for a
+  window (`gcloud compute instances start comfy-lumberjacks-p7`).
+- Reachable on the public Gateway at **`:42317`**, not `:4000` - there is no firewall
+  rule for `:4000`, so the `http://8.231.129.249:4000` above is unreachable from
+  outside the VM even when it is running.
+- Disks unchanged and API-confirmed: 40 GB boot + 150 GB state, both `pd-balanced`.
 
 Use this runbook as the completion plan. Sections 1-4 prepare and deploy one immutable
 revision, Sections 5-7 execute the live proof, Section 8 records the evidence, and
