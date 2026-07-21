@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "title": "Comfy \u00d7 Valheim \u2014 Lumberjacks Volunteer Roadmap",
-  "headline": "M0 CLOSED \u2014 FROZEN RELEASE LIVE AND PUBLIC \u00b7 VOLUNTEER PLATFORM NOT READY",
-  "updated_at": "2026-07-21T05:08:46.123Z",
+  "title": "Comfy × Valheim — Lumberjacks Volunteer Roadmap",
+  "headline": "M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY",
+  "updated_at": "2026-07-21T05:44:32.340Z",
   "overall_status": "active",
   "platform_readiness": "not_ready",
   "active_milestone": "M1",
@@ -23,31 +23,31 @@
     "denominator": "100% means 83,220 of 83,220 eligible ZDO revisions observed in the declared strict one-client window closed through Lumberjacks, with zero eligible native ZDO sends. It does not mean 100% of Valheim networking.",
     "dataflow": [
       {
-        "stage": "1 \u00b7 SELECT",
+        "stage": "1 · SELECT",
         "owner": "Native Valheim",
         "action": "Build the peer-specific list of world-object revisions.",
         "boundary": "Candidate relevance and inference remain native today."
       },
       {
-        "stage": "2 \u00b7 REDIRECT",
+        "stage": "2 · REDIRECT",
         "owner": "Lumberjacks server adapter",
         "action": "Intercept eligible revisions, attach stable ordering metadata, and redirect the declared ZDO delivery path.",
         "boundary": "Producer loss safety and per-peer readiness are M4a work."
       },
       {
-        "stage": "3 \u00b7 STORE AND LEASE",
+        "stage": "3 · STORE AND LEASE",
         "owner": "Lumberjacks Gateway",
         "action": "Durably record envelopes and make pending work available to the authenticated consumer.",
         "boundary": "The current queue is safe only at the one-consumer ceiling; recipient isolation is M4a."
       },
       {
-        "stage": "4 \u00b7 APPLY",
+        "stage": "4 · APPLY",
         "owner": "Lumberjacks client adapter",
         "action": "Poll in the background, marshal onto Unity's main thread, invoke RPC_ZDOData, and validate the outcome.",
         "boundary": "Unity remains the game engine and compatibility target."
       },
       {
-        "stage": "5 \u00b7 ACKNOWLEDGE",
+        "stage": "5 · ACKNOWLEDGE",
         "owner": "Lumberjacks client and Gateway",
         "action": "Acknowledge only an applied or safely superseded terminal outcome and retain the accounting result.",
         "boundary": "Per-run retained volunteer proof is M3 work."
@@ -186,11 +186,11 @@
     }
   ],
   "current_focus": [
-    "COMPLETE \u00b7 M0 RELEASE FREEZE \u2014 A1\u2013A5 closed 2026-07-16: source frozen, candidate r2 reproducible from clean tagged checkouts, sanitized bundle and FieldLab catalog committed, promotion drill passed with artifact-only rollback, and the golden-proof evidence set published immutably with byte-verified hashes.",
-    "COMPLETE \u00b7 PROMOTION FINALIZED \u2014 P7 runs under a durable image pin: the temporary compose override is retired, the base compose resolves LUMBERJACKS_GATEWAY_IMAGE from the host environment across reboots, and VM-side gateway rebuilds fail closed. The path proved out on r2 and has since carried m1-clean-20260717-r1.",
-    "ACTIVE \u00b7 M1 \u2014 Enrollment identity, the least-privilege capability split, the one-seat reservation, and a strict-admission roster gate keyed on the actual joining Steam account are deployed on P7 in m1-clean-20260717-r1, a Gateway-only cut that leaves the mod frozen at 0.5.31; the roster gate was verified against a real join on 2026-07-17 (gate 3 closed live: a strict window accepted the enrolled Steam account, Lumberjacks-decided on the frozen 0.5.31 mod, no cut needed), and it stays opt-in per window \u2014 the flag is in-memory and reverts to off on gateway restart, because a roster miss refuses a join. Remaining: certificate-validating TLS \u2014 the stable public DNS name now exists (comfy-p7.duckdns.org, a reserved static address), leaving only the ACME contact set on the VM at next boot plus the stage-3 cut and deploy; and fail-closed admission when the authority is unavailable, which needs that next mod release.",
-    "AFTER M1 \u00b7 PARALLEL \u2014 Build M2's reversible guest package, M3's seal-before-reset per-run ledger and retained dashboards, and M4a's recipient isolation and producer loss safety.",
-    "WIDEN ONLY AFTER \u00b7 M4b + M5 \u2014 Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort."
+    "COMPLETE · M0 RELEASE FREEZE — A1–A5 closed 2026-07-16: source frozen, candidate r2 reproducible from clean tagged checkouts, sanitized bundle and FieldLab catalog committed, promotion drill passed with artifact-only rollback, and the golden-proof evidence set published immutably with byte-verified hashes.",
+    "COMPLETE · PROMOTION FINALIZED — P7 runs under a durable image pin: the temporary compose override is retired, the base compose resolves LUMBERJACKS_GATEWAY_IMAGE from the host environment across reboots, and VM-side gateway rebuilds fail closed. The path proved out on r2 and has since carried m1-clean-20260717-r1.",
+    "ACTIVE · M1 — Enrollment identity, the least-privilege capability split, the one-seat reservation, and a strict-admission roster gate keyed on the actual joining Steam account are deployed on P7 in m1-clean-20260717-r1, a Gateway-only cut that leaves the mod frozen at 0.5.31; the roster gate was verified against a real join on 2026-07-17 (gate 3 closed live: a strict window accepted the enrolled Steam account, Lumberjacks-decided on the frozen 0.5.31 mod, no cut needed), and it stays opt-in per window — the flag is in-memory and reverts to off on gateway restart, because a roster miss refuses a join. Remaining: certificate-validating TLS — the stable public DNS name now exists (comfy-p7.duckdns.org, a reserved static address), leaving only the ACME contact set on the VM at next boot plus the stage-3 cut and deploy; and fail-closed admission when the authority is unavailable, which needs that next mod release.",
+    "AFTER M1 · PARALLEL — Build M2's reversible guest package, M3's seal-before-reset per-run ledger and retained dashboards, and M4a's recipient isolation and producer loss safety.",
+    "WIDEN ONLY AFTER · M4b + M5 — Require the real two-client correctness packet and one exact-release invited-volunteer SYSTEM PROVEN receipt before admitting a cohort."
   ],
   "tracks": [
     {
@@ -441,9 +441,9 @@
         "M4b",
         "M5"
       ],
-      "owns": "Evidence-backed promotion from the proven two-client model and volunteer journey to 2\u20134 and then 5\u20138 real-player cohorts.",
+      "owns": "Evidence-backed promotion from the proven two-client model and volunteer journey to 2–4 and then 5–8 real-player cohorts.",
       "does_not_own": "Lumberjacks relevance/inference authority or claims extrapolated solely from synthetic clients.",
-      "summary": "Move from the owned two-account gate to 2\u20134 and then 5\u20138 invited players only when correctness and capacity evidence permit.",
+      "summary": "Move from the owned two-account gate to 2–4 and then 5–8 invited players only when correctness and capacity evidence permit.",
       "work": [
         "Measure join-to-first/priority/full-load, queue age/slope, frame hitches, Gateway latency, WAL, CPU, memory, disk, and egress.",
         "Exercise same-zone contention, separated regions, reconnects, restarts, and normal play.",
@@ -451,8 +451,8 @@
         "Automatically stop widening on any correctness failure."
       ],
       "exit_criteria": [
-        "The 2\u20134-player wave closes independently for every recipient with bounded queues, healthy persistence, and no correctness failure.",
-        "The 5\u20138-player soak meets the predeclared QoL and capacity envelope recorded in its run packet.",
+        "The 2–4-player wave closes independently for every recipient with bounded queues, healthy persistence, and no correctness failure.",
+        "The 5–8-player soak meets the predeclared QoL and capacity envelope recorded in its run packet.",
         "Published capacity limits are supported by real-player queue, compute, memory, disk, egress, and experience evidence rather than synthetic extrapolation."
       ],
       "inputs": [
@@ -497,7 +497,7 @@
       "name": "One external volunteer",
       "status": "not_ready",
       "requirements": [
-        "M0\u2013M3 pass.",
+        "M0–M3 pass.",
         "Strict capacity remains one.",
         "Owner passes the same clean-package flow immediately beforehand.",
         "Host preflight and rollback drill are green.",
@@ -519,7 +519,7 @@
     }
   ],
   "volunteer_success": {
-    "headline": "INVITED \u2192 INFORMED \u2192 READY \u2192 TESTING \u2192 PARTICIPATION COMPLETE",
+    "headline": "INVITED → INFORMED → READY → TESTING → PARTICIPATION COMPLETE",
     "definition": "A volunteer succeeds by completing or attempting the assigned work and returning a usable evidence packet. Finding a networking defect is valuable successful participation; it does not require the system test itself to pass.",
     "catalog_revision": "draft-v1",
     "availability": "Planned for the first canary; invitations are not open until M0-M3 close.",
@@ -531,7 +531,7 @@
       {
         "phase": "Setup and preflight",
         "commitment": "required",
-        "duration": "target \u226410 min",
+        "duration": "target ≤10 min",
         "detail": "Redeem the invite, install the exact package, pass preflight, choose a backed-up character, and reach READY TO JOIN."
       },
       {
@@ -555,22 +555,22 @@
     ],
     "journey": [
       {
-        "stage": "1 \u00b7 INVITE",
+        "stage": "1 · INVITE",
         "title": "Know the work before accepting",
         "done_when": "The page states the experiment, assigned test cards, expected time, risks, captured data, support, and recovery path."
       },
       {
-        "stage": "2 \u00b7 READY",
+        "stage": "2 · READY",
         "title": "Install and preflight without hand edits",
         "done_when": "Steam enrollment, exact release, BepInEx, TLS, Gateway, server, capacity, readiness, and rollback checks are green."
       },
       {
-        "stage": "3 \u00b7 TESTING",
+        "stage": "3 · TESTING",
         "title": "See Lumberjacks and the next action",
         "done_when": "The personal dashboard shows LUMBERJACKS ACTIVE, current card instructions, and fresh received/applied/acknowledged traffic."
       },
       {
-        "stage": "4 \u00b7 RECEIPT",
+        "stage": "4 · RECEIPT",
         "title": "Know that participation counted",
         "done_when": "A retained pseudonymous receipt separates participation completion from the networking verdict and includes the submitted observations."
       }
@@ -582,8 +582,8 @@
         "duration": "~10 min",
         "exercise": "Redeem, install, preflight, choose a backed-up character, and join.",
         "observe": "Confusing, manual, failed, or unexpectedly slow steps.",
-        "proof": "Enrollment \u2192 readiness \u2192 admission \u2192 first apply.",
-        "availability": "planned first pilot \u00b7 required"
+        "proof": "Enrollment → readiness → admission → first apply.",
+        "availability": "planned first pilot · required"
       },
       {
         "id": "T02",
@@ -592,7 +592,7 @@
         "exercise": "Remain in the portal/building area until visually usable.",
         "observe": "Missing art/buildings, severe pop-in, freezes, or corruption.",
         "proof": "Priority-playable/full-drain time and frame hitches.",
-        "availability": "planned first pilot \u00b7 required"
+        "availability": "planned first pilot · required"
       },
       {
         "id": "T03",
@@ -601,7 +601,7 @@
         "exercise": "Fly rapidly into a direction not previously visited.",
         "observe": "Tree/terrain pop-in, stalls, and movement responsiveness.",
         "proof": "Priority rate, queue slope/age, and first-useful delivery.",
-        "availability": "planned first pilot \u00b7 required"
+        "availability": "planned first pilot · required"
       },
       {
         "id": "T04",
@@ -619,7 +619,7 @@
         "exercise": "Stop in wilderness and wait without teleporting.",
         "observe": "Late pop-in, pauses, disconnects, or unexpected activity.",
         "proof": "Backlog drain, oldest age, idle state, and conservation.",
-        "availability": "planned first pilot \u00b7 required"
+        "availability": "planned first pilot · required"
       },
       {
         "id": "T06",
@@ -699,8 +699,8 @@
     "id": "castle-port-session-20260716T054805Z",
     "kind": "OWNER OBSERVATION",
     "label": "Castle-port stationary-drain session",
-    "captured_at": "2026-07-16 05:48\u201306:00 UTC",
-    "scope": "One enrolled owner client \u00b7 dense castle wait \u00b7 automated port \u00b7 stationary backlog drain",
+    "captured_at": "2026-07-16 05:48–06:00 UTC",
+    "scope": "One enrolled owner client · dense castle wait · automated port · stationary backlog drain",
     "delivery_result": "COMPLETE",
     "system_verdict": "INCONCLUSIVE",
     "conservation": {
@@ -728,7 +728,7 @@
   "golden_proof": {
     "label": "Validated, hash-recorded P7 authoritative priority ZDO baseline",
     "captured_at": "2026-07-16 UTC",
-    "scope": "One enrolled client \u00b7 persistent all-prefab ZDO redirect",
+    "scope": "One enrolled client · persistent all-prefab ZDO redirect",
     "denominator": {
       "eligible": 83220,
       "redirected": 83220,
@@ -778,17 +778,17 @@
         "0 / 0 / 0"
       ],
       [
-        "Peer-ready \u2192 first apply",
+        "Peer-ready → first apply",
         "6.721 s"
       ],
       [
-        "Peer-ready \u2192 complete",
+        "Peer-ready → complete",
         "102.114 s"
       ]
     ],
     "publication": {
       "status": "published",
-      "detail": "The sanitized publication set is public and immutable at https://github.com/djcdevelopment/comfy/blob/433f1cc33605561ae1287db9cd8f37125d795c5d/fieldlab/evidence/p7-gold-run-20260716-011112-authoritative-priority-cutover/PUBLICATION.md \u2014 pushed 2026-07-16 after the A4 promotion drill passed (receipt: docs/roadmap/m0-a4-promotion-drill-receipt.json, evidence public at Comfy e6a1402). Published bytes re-verified against the recorded SHA-256 hashes after push."
+      "detail": "The sanitized publication set is public and immutable at https://github.com/djcdevelopment/comfy/blob/433f1cc33605561ae1287db9cd8f37125d795c5d/fieldlab/evidence/p7-gold-run-20260716-011112-authoritative-priority-cutover/PUBLICATION.md — pushed 2026-07-16 after the A4 promotion drill passed (receipt: docs/roadmap/m0-a4-promotion-drill-receipt.json, evidence public at Comfy e6a1402). Published bytes re-verified against the recorded SHA-256 hashes after push."
     }
   },
   "authority_planes": [
