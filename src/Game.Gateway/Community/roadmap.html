@@ -349,7 +349,7 @@
       <div class="headline">M0 CLOSED — FROZEN RELEASE LIVE AND PUBLIC · VOLUNTEER PLATFORM NOT READY</div>
       <p class="lede">The validated, hash-recorded P7 run observed 83,220 eligible server-to-client ZDO revisions in one strict single-client window. All 83,220 were durably received by Lumberjacks and closed as applied or safely superseded with durable acknowledgement; zero eligible revisions used native ZDO delivery. This 100% denominator covers that declared ZDO delivery window only, not every Valheim packet, RPC, simulation, ownership decision, Steam login, or base peer-transport function.</p>
       <div class="hero-meta">
-        <span>Updated 2026-07-21T05:44:32.340Z</span>
+        <span>Updated 2026-07-21T06:01:52.506Z</span>
         <span>ComfyNetworkSense 0.5.31</span>
         <span>comfy-lumberjacks-p7</span>
         <span>authoritative consumer ceiling 1</span>
@@ -843,7 +843,23 @@
     <section>
       <div class="wrap">
         <div class="section-head"><div class="section-number">07 · COMMIT NOTES</div><div><h2>Implementation journal</h2><p class="section-copy">Every non-merge commit appends one note. Newest entries appear first; history remains append-only.</p></div></div>
-        <div class="journal"><article class="journal-entry" id="note-20260721054432-recipient-scoped-delivery-is-live-a-real-player-">
+        <div class="journal"><article class="journal-entry" id="note-20260721060152-release-m5-recipients-20260720-r1-recorded-inclu">
+    <div class="journal-rail" aria-hidden="true"></div>
+    <div class="journal-body">
+      <div class="journal-meta">
+        <time datetime="2026-07-21T06:01:52.506Z">2026-07-21T06:01:52.506Z</time>
+        <span class="pill note-kind">deployment</span>
+        <span>Lumberjacks</span>
+        <span>M4a · M3</span>
+      </div>
+      <h3>Release m5-recipients-20260720-r1 recorded, including how it was deployed by hand</h3>
+      <p><strong>Impact:</strong> The cut that carried recipient-scoped delivery into production existed only as artifacts on one workstation and a hand-touched VM. The manifest now lives in git next to the M0 candidate, recording both source commits, the mod hash, the gateway image id, and the two runtime settings the image does not carry: ProducerEmitsRecipients, and the strict roster flag that is in-memory and dies on any container recreate. It also records the honest deployment method, which was manual image save/scp/load plus a copied compose file, and states plainly that rebuilding the VM from either repo would not reproduce the state this release was world-tested in. That gap is now written down rather than known only to whoever ran the window.</p>
+      <details><summary>Verification (3)</summary><ul><li>validate-release-bundle.ps1 returned status valid for the bundle at comfy fieldlab/runs/releases/m5-recipients-20260720-r1</li><li>Both repos clean and at the manifest commits when the bundle was built; the bundle step refuses otherwise</li><li>Manifest records the superseded mod hash so the unfreeze of the previously frozen 0.5.31 artifact is traceable rather than silent</li></ul></details>
+      <div class="journal-evidence"><strong>Evidence:</strong> <code>docs/roadmap/m5-recipients-build-candidate.json</code></div>
+      <div class="containing-commit">Recorded by Claude · associated with the Git commit containing this note</div>
+    </div>
+  </article>
+<article class="journal-entry" id="note-20260721054432-recipient-scoped-delivery-is-live-a-real-player-">
     <div class="journal-rail" aria-hidden="true"></div>
     <div class="journal-body">
       <div class="journal-meta">
