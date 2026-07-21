@@ -151,7 +151,11 @@ public sealed class ValheimZdoRedirectService
         return RecordEnvelopes(windowId, source, envelopes, _ => recipientId);
     }
 
-    private ValheimZdoRedirectRecordResult RecordEnvelopes(
+    /// <summary>
+    /// Public so ingest can resolve the partition per envelope. The producer stamps a Steam
+    /// identity it can actually observe; only the Gateway knows the opaque recipient it maps to.
+    /// </summary>
+    public ValheimZdoRedirectRecordResult RecordEnvelopes(
         string windowId,
         string source,
         IReadOnlyList<ValheimZdoRedirectEnvelope> envelopes,

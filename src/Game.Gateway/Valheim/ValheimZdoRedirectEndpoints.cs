@@ -16,6 +16,8 @@ public static class ValheimZdoRedirectEndpoints
             ValheimZdoRedirectRequest request,
             HttpContext context,
             ValheimZdoRedirectService redirects,
+            SteamEnrollmentService enrollments,
+            IConfiguration configuration,
             ILoggerFactory loggerFactory) =>
         {
             if (string.IsNullOrWhiteSpace(request.WindowId))
@@ -81,7 +83,29 @@ public static class ValheimZdoRedirectEndpoints
             var source = schema == ValheimZdoRedirectAdmissionPolicy.CurrentSchemaVersion
                 ? request.SourceInstance!
                 : string.IsNullOrWhiteSpace(request.Source) ? "unknown" : request.Source;
-            var result = redirects.RecordEnvelopes(request.WindowId, source, envelopes);
+            // The producer can only know a Steam identity: the server derives the destination
+            // peer's SteamID64 from the socket at Valheim's per-peer sync-list boundary. It cannot
+            // know this Gateway's opaque recipient ids, so the translation belongs here — the same
+            // stance ValheimRecipientScopePolicy takes for consumers, which resolves identity from
+            // the principal rather than trusting a caller label.
+            //
+            // Both sides must move together or delivery dies silently. While
+            // ValheimQueue:ProducerEmitsRecipients is false the consumer is pinned to `legacy`
+            // (ValheimRecipientScopePolicy:22-23), so ingest is pinned to `legacy` too. Splitting
+            // them is the F1 failure: an enrolled consumer polling its own empty partition forever
+            // with no error, no reject, and no way to notice.
+            //
+            // Unmapped stays `legacy` deliberately. A SteamID with no ACTIVE enrollment — never
+            // enrolled, or revoked — is exactly the frozen-producer case, and `legacy` is where a
+            // consumer can still reach it. Returning the raw SteamID here would invent a partition
+            // nothing polls.
+            var producerEmitsRecipients =
+                configuration.GetValue("ValheimQueue:ProducerEmitsRecipients", false);
+            var result = producerEmitsRecipients
+                ? redirects.RecordEnvelopes(request.WindowId, source, envelopes,
+                    envelope => enrollments.GetRecipientId(envelope.Recipient) ?? ValheimRecipient.Legacy)
+                : redirects.RecordEnvelopes(request.WindowId, source, envelopes,
+                    _ => ValheimRecipient.Legacy);
             var correlations = envelopes.Select(envelope => envelope.CorrelationId)
                 .Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
             var recipients = envelopes.Select(envelope => envelope.Recipient ?? envelope.RecipientId ?? ValheimRecipient.Legacy)
